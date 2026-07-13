@@ -2,65 +2,15 @@ import React, { useEffect, useState } from 'react'
 import { stageOf } from './seed.js'
 import { fmtTime, fmtAgo } from './store.jsx'
 
-// Standing-gorilla silhouette recreated from the official Gorilla Movers logo:
-// knuckle-walking, facing right, head low, white back/chest highlight.
-export function GorillaMark({ height = 60, body = '#171a20', highlight = '#ffffff' }) {
-  return (
-    <svg height={height} viewBox="0 0 220 200" aria-label="Gorilla Movers gorilla" style={{ display: 'block' }}>
-      <GorillaMarkPaths body={body} highlight={highlight} />
-    </svg>
-  )
+// Official Gorilla Movers logo files, pulled from gorillamovers.com:
+// gm-logo.png = white lettering (for dark backgrounds), gm-logo-dark.png = dark version,
+// favicon.png = the standing gorilla alone.
+export function GorillaWordmark({ width = 300, onDark = true }) {
+  return <img src={onDark ? 'gm-logo.png' : 'gm-logo-dark.png'} width={width} alt="Gorilla Movers" style={{ display: 'block', height: 'auto' }} />
 }
 
-// Full wordmark: G[gorilla]RILLA / MOVERS — matches the official logo lockup.
-export function GorillaWordmark({ width = 300, ink = '#171a20', highlight = '#ffffff' }) {
-  return (
-    <svg width={width} viewBox="0 0 560 200" aria-label="Gorilla Movers" style={{ display: 'block' }}>
-      <text x="0" y="138" fontFamily="'Space Grotesk','Inter',sans-serif" fontWeight="700" fontSize="118" fill={ink} letterSpacing="-2">G</text>
-      <g transform="translate(50, 8) scale(0.72)">
-        <GorillaMarkPaths body={ink} highlight={highlight} />
-      </g>
-      <text x="178" y="138" fontFamily="'Space Grotesk','Inter',sans-serif" fontWeight="700" fontSize="118" fill={ink} letterSpacing="-2">RILLA</text>
-      <text x="260" y="188" textAnchor="middle" fontFamily="'Space Grotesk','Inter',sans-serif" fontWeight="700" fontSize="42" fill={ink} letterSpacing="24">MOVERS</text>
-    </svg>
-  )
-}
-
-export function GorillaMarkPaths({ body, highlight }) {
-  return (
-    <>
-      <path fill={body} d="M95 20
-        C 106 20 118 24 127 26
-        C 131 20 138 14 144 16
-        C 154 20 163 30 168 40
-        C 170 44 174 46 176 52
-        C 178 58 178 64 176 68
-        C 178 74 176 80 170 84
-        C 174 96 178 110 180 126
-        C 182 142 182 156 182 170
-        L 150 170
-        C 150 156 149 142 147 130
-        C 145 142 144 156 144 170
-        L 118 170
-        C 118 154 120 136 124 122
-        C 113 124 103 124 96 122
-        C 96 136 95 154 93 170
-        L 64 170
-        C 63 156 62 142 63 130
-        C 54 122 48 108 48 94
-        C 48 64 66 32 95 20 Z" />
-      <path fill={highlight} d="M90 32
-        C 76 42 64 60 60 80
-        C 57 96 60 110 68 116
-        C 74 120 82 118 88 112
-        C 84 98 85 78 91 60
-        C 95 48 99 40 100 34
-        C 97 30 93 30 90 32 Z" />
-      <path fill={highlight} d="M152 42 L 170 42 C 170 47 166 50 161 50 C 156 50 152 46 152 42 Z" />
-      <circle cx="167" cy="60" r="2.2" fill={highlight} opacity="0.9" />
-      <path fill={highlight} opacity="0.85" d="M158 70 C 163 70 167 73 167 77 C 164 80 158 79 155 75 C 155 72 156 70 158 70 Z" />
-    </>
-  )
+export function GorillaMark({ height = 26 }) {
+  return <img src="favicon.png" height={height} alt="Gorilla Movers" style={{ display: 'block' }} />
 }
 
 const AV_COLORS = ['#f59e0b', '#14b8a6', '#8b5cf6', '#f97316', '#3b82f6', '#ec4899', '#22c55e', '#06b6d4', '#ef4444', '#6366f1']

@@ -21,7 +21,7 @@ export default function Login() {
   return (
     <div className="login">
       <div className="login-hero">
-        <GorillaWordmark width={300} ink="#ffffff" highlight="#15181d" />
+        <GorillaWordmark width={280} />
         <div className="tagline">"When it comes to moving, we don't monkey around!"</div>
         <h1>Every unit.<br />Every box.<br /><em>On the record.</em></h1>
         <p>MoveTrack is our project command center for the Trinity Manor relocation — photos, videos, and notes at every handoff, timestamped under the name of the person who did the work.</p>

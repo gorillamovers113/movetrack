@@ -72,7 +72,7 @@ function Shell() {
     <div className="shell">
       <aside className="sidebar">
         <div className="logo" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
-          <GorillaWordmark width={176} ink="#ffffff" highlight="#15181d" />
+          <GorillaWordmark width={168} />
           <div className="logo-sub" style={{ textAlign: 'center' }}>MoveTrack — project command center</div>
         </div>
         <div className="project-chip">
@@ -92,7 +92,7 @@ function Shell() {
 
       <div className="grow" style={{ minWidth: 0 }}>
         <div className="topbar-mobile">
-          <GorillaMark height={26} body="#ffffff" highlight="#15181d" />
+          <GorillaMark height={26} />
           <b style={{ fontFamily: 'var(--display)' }}>Gorilla Movers</b>
           <span className="grow" />
           <Avatar name={currentUser.name} size="sm" />
