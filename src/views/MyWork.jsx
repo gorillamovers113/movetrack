@@ -2,8 +2,9 @@ import React from 'react'
 import { stageOf } from '../seed.js'
 import { useStore, canAct, containerAction, CONT_LOC } from '../store.jsx'
 import { StagePill } from '../ui.jsx'
+import NewUnitButton from '../components/NewUnitModal.jsx'
 
-export default function MyWork({ openUnit, openContainer }) {
+export default function MyWork({ openUnit, openContainer, toast }) {
   const { state, currentUser } = useStore()
   const role = currentUser.role
 
@@ -63,6 +64,7 @@ export default function MyWork({ openUnit, openContainer }) {
     <>
       <div className="page-head">
         <div><h1>My queue</h1><p>Units waiting on you, {currentUser.name.split(' ')[0]}</p></div>
+        <NewUnitButton toast={toast} />
       </div>
       {mine.length === 0 && <div className="card empty"><div className="big">☕</div>Nothing waiting on you right now. Nice work.</div>}
       <Section title="In progress — finish these" units={inProgress} />

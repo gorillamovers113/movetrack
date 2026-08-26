@@ -67,12 +67,12 @@ function Shell() {
 
   const page = () => {
     switch (view.name) {
-      case 'dashboard': return <Dashboard openUnit={openUnit} />
+      case 'dashboard': return <Dashboard openUnit={openUnit} toast={toast} />
       case 'unit': return <UnitDetail unitId={view.unitId} goBack={() => setView(view.back || { name: first })} openContainer={openContainer} toast={toast} />
       case 'containers': return <Containers openUnit={openUnit} focusId={view.focusId} clearFocus={() => setView((v) => ({ ...v, focusId: null }))} toast={toast} />
       case 'team': return <Team toast={toast} />
       case 'activity': return <Activity openUnit={openUnit} openContainer={openContainer} />
-      case 'mywork': return <MyWork openUnit={openUnit} openContainer={openContainer} />
+      case 'mywork': return <MyWork openUnit={openUnit} openContainer={openContainer} toast={toast} />
       default: return null
     }
   }

@@ -100,6 +100,16 @@ export function StoreProvider({ children }) {
         if (mismatch) await ev('flag', `FLAG raised on container ${cont0.number}: box count mismatch (${p.verifiedBoxes}/${expected})`, { containerId: cont0.id })
         return
       }
+      case 'createUnit': {
+        const ref = await addDoc(collection(db, 'units'), {
+          number: p.number, tenant: p.tenant, floor: p.floor,
+          stage: 'not_started',
+          crew: { packers: [], movers: [] },
+          containerIds: [], media: [], inventory: [], materials: {},
+          createdAt: Date.now(),
+        })
+        return ev('system', `Created unit ${p.number} for ${p.tenant} (floor ${p.floor})`, { unitId: ref.id })
+      }
       case 'editUnit': {
         const changed = Object.keys(p.patch).filter((k) => p.patch[k] !== unit[k])
         await updateDoc(doc(db, 'units', p.unitId), p.patch)

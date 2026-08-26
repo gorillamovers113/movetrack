@@ -2,8 +2,9 @@ import React, { useMemo, useState } from 'react'
 import { STAGES, stageOf } from '../seed.js'
 import { useStore } from '../store.jsx'
 import BuildingView from './BuildingView.jsx'
+import NewUnitButton from '../components/NewUnitModal.jsx'
 
-export default function Dashboard({ openUnit }) {
+export default function Dashboard({ openUnit, toast }) {
   const { state } = useStore()
   const [stageFilter, setStageFilter] = useState(null)
   const [floorSel, setFloorSel] = useState(null)
@@ -45,7 +46,10 @@ export default function Dashboard({ openUnit }) {
           <h1>{state.project?.name || 'Trinity Manor'}</h1>
           <p>{state.project?.address || '3940 Park Blvd'}{state.units.length > 0 ? ` — ${state.units.length}-unit relocation` : ''} — live status</p>
         </div>
-        <input className="search" placeholder="Search unit, tenant, container…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <div className="row">
+          <input className="search" placeholder="Search unit, tenant, container…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <NewUnitButton toast={toast} />
+        </div>
       </div>
 
       <div className="kpis">
