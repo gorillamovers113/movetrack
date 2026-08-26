@@ -18,10 +18,11 @@ service cloud.firestore {
     function isAdmin() {
       return hasRole('admin');
     }
-    // packer/mover/driver may write units/containers/events; the client enforces
-    // which specific stage transition each role is allowed to perform.
+    // packer/mover/driver/warehouse may write units/containers/events; the
+    // client enforces which specific stage transition each role is allowed
+    // to perform.
     function isCrew() {
-      return isActive() && me().role in ['packer', 'mover', 'driver'];
+      return isActive() && me().role in ['packer', 'mover', 'driver', 'warehouse'];
     }
 
     // ---- users ----

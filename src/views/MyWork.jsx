@@ -1,6 +1,6 @@
 import React from 'react'
 import { stageOf } from '../seed.js'
-import { useStore, canAct, containerAction, CONT_LOC } from '../store.jsx'
+import { useStore, canAct, containerAction, CONT_STATUS } from '../store.jsx'
 import { StagePill } from '../ui.jsx'
 import NewUnitButton from '../components/NewUnitModal.jsx'
 
@@ -24,7 +24,7 @@ export default function MyWork({ openUnit, openContainer, toast }) {
               <div key={c.id} className="card cont-card" onClick={() => openContainer(c.id)}>
                 <div className="row">
                   <span className="cont-num grow">{c.number}</span>
-                  <span className="badge" style={{ background: CONT_LOC[c.location].color + '22', color: CONT_LOC[c.location].color }}>{CONT_LOC[c.location].label}</span>
+                  <span className="badge" style={{ background: CONT_STATUS[c.location].color + '22', color: CONT_STATUS[c.location].color }}>{CONT_STATUS[c.location].label}</span>
                 </div>
                 <div className="cont-units">{units.map((u) => `Unit ${u.number}`).join(' · ')}</div>
                 <button className="btn btn-primary btn-sm" style={{ marginTop: 10, width: '100%' }}>{act.label} →</button>

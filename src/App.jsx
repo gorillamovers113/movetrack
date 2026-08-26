@@ -15,6 +15,7 @@ const NAV = {
   packer: [['mywork', '✓', 'My queue'], ['dashboard', '▦', 'Dashboard'], ['activity', '🕘', 'Activity']],
   mover: [['mywork', '✓', 'My queue'], ['dashboard', '▦', 'Dashboard'], ['containers', '📦', 'Containers'], ['activity', '🕘', 'Activity']],
   driver: [['mywork', '✓', 'My queue'], ['containers', '📦', 'Containers'], ['dashboard', '▦', 'Dashboard'], ['activity', '🕘', 'Activity']],
+  warehouse: [['containers', '📦', 'Containers'], ['dashboard', '▦', 'Dashboard'], ['activity', '🕘', 'Activity']],
   viewer: [['dashboard', '▦', 'Dashboard'], ['containers', '📦', 'Containers'], ['activity', '🕘', 'Activity']],
 }
 

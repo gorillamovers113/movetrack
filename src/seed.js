@@ -47,7 +47,8 @@ export const ROLES = {
   admin: { label: 'Admin', color: '#f59e0b' },
   packer: { label: 'Packer / prep', color: '#14b8a6' },
   mover: { label: 'Mover', color: '#8b5cf6' },
-  driver: { label: 'Pickup & delivery', color: '#f97316' },
+  warehouse: { label: 'Warehouse', color: '#3b82f6' },
+  driver: { label: 'Pickup & delivery (legacy)', color: '#f97316' },
   viewer: { label: 'Viewer (read-only)', color: '#3b82f6' },
 }
 

@@ -63,40 +63,52 @@ export function StoreProvider({ children }) {
         await updateDoc(doc(db, 'units', p.unitId), { stage: 'packed', boxCount: p.boxCount, 'times.packEnd': Date.now() })
         return ev('stage', `Finished packing unit ${unit.number} — ${p.boxCount} boxes sealed & labeled`, { unitId: unit.id, from: 'packing', to: 'packed', media: p.media })
       }
+      case 'logEmpties': {
+        // BigBox drops off empty containers before any loading happens.
+        const numbers = p.numbers.map((n) => n.toUpperCase())
+        await Promise.all(numbers.map((number) => addDoc(collection(db, 'containers'), { number, status: 'empty', unitIds: [], deliveredAt: Date.now() })))
+        return ev('system', `${numbers.length} empty BigBox container${numbers.length === 1 ? '' : 's'} delivered: ${numbers.join(', ')}`)
+      }
       case 'loadUnit': {
-        let cont = state.containers.find((c) => c.number.toUpperCase() === p.containerNumber.toUpperCase())
-        if (!cont) {
-          const ref = await addDoc(collection(db, 'containers'), { number: p.containerNumber.toUpperCase(), location: 'site', bay: null, unitIds: [p.unitId], flag: null })
-          cont = { id: ref.id, number: p.containerNumber.toUpperCase() }
-        } else {
-          await updateDoc(doc(db, 'containers', cont.id), { location: 'site', unitIds: arrayUnion(p.unitId) })
-        }
+        const cont = state.containers.find((c) => c.id === p.containerId)
         const mismatch = boxMismatch(unit.boxCount, p.boxCount)
-        const patch = { stage: 'loaded', containerIds: arrayUnion(cont.id), 'crew.movers': arrayUnion(currentUser.uid) }
+        const patch = { stage: 'loaded', containerIds: arrayUnion(p.containerId), 'crew.movers': arrayUnion(currentUser.uid) }
         if (mismatch) patch.flag = { message: `Box count mismatch at load: ${p.boxCount} loaded vs ${unit.boxCount} packed. Recount pending.`, ts: Date.now(), by: currentUser.name, open: true }
         await updateDoc(doc(db, 'units', p.unitId), patch)
-        await ev('stage', `Loaded unit ${unit.number} into container ${cont.number} — ${p.boxCount} of ${unit.boxCount ?? p.boxCount} boxes verified`, { unitId: unit.id, containerId: cont.id, from: unit.stage, to: 'loaded', media: p.media })
+        await updateDoc(doc(db, 'containers', p.containerId), { status: 'filling', unitIds: arrayUnion(p.unitId) })
+        await ev('stage', `Loaded unit ${unit.number} into container ${cont.number} — ${p.boxCount} of ${unit.boxCount ?? p.boxCount} boxes verified`, { unitId: unit.id, containerId: p.containerId, from: unit.stage, to: 'loaded', media: p.media })
         if (mismatch) await ev('flag', `FLAG raised on unit ${unit.number}: box count mismatch (${p.boxCount}/${unit.boxCount})`, { unitId: unit.id })
         return
       }
-      case 'containerMove': {
-        // Driver moves a whole container; every unit inside moves with it.
-        // One-way lifecycle only: pickup (site → transit) and checkin (transit → warehouse).
-        const map = {
-          pickup: { loc: 'transit', to: 'picked_up', msg: (c) => `Container ${c.number} picked up from site` },
-          checkin: { loc: 'warehouse', to: 'at_warehouse', msg: (c) => `Container ${c.number} checked into warehouse — ${p.bay || 'bay assigned'}` },
-        }[p.move]
-        const inside = state.units.filter((u) => cont0.unitIds.includes(u.id))
-        const unitNums = inside.map((u) => u.number).join(', ')
-        const expected = inside.reduce((n, u) => n + (u.boxCount || 0), 0)
-        const mismatch = p.verifiedBoxes != null && expected > 0 && boxMismatch(expected, p.verifiedBoxes)
-        const contPatch = { location: map.loc }
-        if (p.move === 'checkin') contPatch.bay = p.bay || cont0.bay || null
-        if (mismatch) contPatch.flag = { message: `Box count mismatch at ${p.move === 'pickup' ? 'pickup' : 'warehouse check-in'}: ${p.verifiedBoxes} counted vs ${expected} on record. Recount pending.`, ts: Date.now(), by: currentUser.name, open: true }
-        await updateDoc(doc(db, 'containers', p.containerId), contPatch)
-        await Promise.all(inside.map((u) => updateDoc(doc(db, 'units', u.id), { stage: map.to })))
-        const verified = p.verifiedBoxes != null ? ` — ${p.verifiedBoxes} boxes verified on board` : ''
-        await ev('stage', `${map.msg(cont0)} (units ${unitNums})${verified}`, { containerId: cont0.id, media: p.media })
+      case 'markContainerFull': {
+        await updateDoc(doc(db, 'containers', p.containerId), { status: 'full' })
+        return ev('stage', `Container ${cont0.number} marked full — ready for BigBox pickup`, { containerId: cont0.id })
+      }
+      case 'bigboxSwap': {
+        // Mover logs the hand-off to the BigBox driver: selected full containers
+        // go out (with the driver's name recorded), new empties come in — the
+        // driver never touches the app; the mover is the custody witness.
+        const fulls = p.fullIds.map((id) => state.containers.find((c) => c.id === id)).filter(Boolean)
+        await Promise.all(fulls.map(async (c) => {
+          await updateDoc(doc(db, 'containers', c.id), { status: 'picked_up', driverName: p.driverName, pickedUpAt: Date.now(), handoffBy: currentUser.uid })
+          await Promise.all(c.unitIds.map((uid) => updateDoc(doc(db, 'units', uid), { stage: 'picked_up' })))
+        }))
+        const newNumbers = p.newEmptyNumbers.map((n) => n.toUpperCase())
+        await Promise.all(newNumbers.map((number) => addDoc(collection(db, 'containers'), { number, status: 'empty', unitIds: [], deliveredAt: Date.now() })))
+        const fullNums = fulls.map((c) => c.number).join(', ')
+        return ev('system', `BigBox swap with ${p.driverName}: ${fulls.length} full container${fulls.length === 1 ? '' : 's'} out (${fullNums}), ${newNumbers.length} empty${newNumbers.length === 1 ? '' : 's'} in (${newNumbers.join(', ')})`)
+      }
+      case 'warehouseReceive': {
+        // Warehouse closes the custody loop: verify box count against what the
+        // container's units were packed with, assign a bay.
+        const insideUnits = cont0.unitIds.map((id) => state.units.find((u) => u.id === id)).filter(Boolean)
+        const expected = insideUnits.reduce((n, u) => n + (u.boxCount || 0), 0)
+        const mismatch = boxMismatch(expected, p.verifiedBoxes)
+        const patch = { status: 'at_warehouse', bay: p.bay, verifiedBoxes: p.verifiedBoxes, receivedBy: currentUser.uid, warehouseAt: Date.now() }
+        if (mismatch) patch.flag = { message: `Box count mismatch at warehouse receive: ${p.verifiedBoxes} verified vs ${expected} on record. Recount pending.`, ts: Date.now(), by: currentUser.name, open: true }
+        await updateDoc(doc(db, 'containers', p.containerId), patch)
+        await Promise.all(insideUnits.map((u) => updateDoc(doc(db, 'units', u.id), { stage: 'at_warehouse' })))
+        await ev('stage', `Container ${cont0.number} received at warehouse — ${p.bay}, ${p.verifiedBoxes} boxes verified`, { containerId: cont0.id })
         if (mismatch) await ev('flag', `FLAG raised on container ${cont0.number}: box count mismatch (${p.verifiedBoxes}/${expected})`, { containerId: cont0.id })
         return
       }
@@ -207,21 +219,27 @@ export function canAct(user, unit) {
 }
 
 export function containerAction(user, cont) {
-  // One-way lifecycle only: driver pickup (site → transit) then checkin (transit → warehouse).
-  if (!user || !['admin', 'driver'].includes(user.role)) return null
-  if (!cont.unitIds.length) return null
-  switch (cont.location) {
-    case 'site': return { move: 'pickup', label: 'Pick up from site' }
-    case 'transit': return { move: 'checkin', label: 'Check into warehouse' }
-    default: return null
+  // Container status lifecycle: empty → filling → full → picked_up → at_warehouse.
+  // The swap (full → picked_up) and warehouse receive (picked_up → at_warehouse)
+  // are batch/dedicated screens, not a single-container quick action, so they
+  // return null here rather than a one-tap action — this only covers the
+  // simple in-place transition (filling → full).
+  if (!user) return null
+  const admin = user.role === 'admin'
+  switch (cont.status) {
+    case 'filling':
+      return admin || user.role === 'mover' ? { key: 'markContainerFull', label: 'Mark full — ready for pickup' } : null
+    default:
+      return null
   }
 }
 
-export const CONT_LOC = {
-  unassigned: { label: 'Not in use', color: '#8a93a2' },
-  site: { label: 'On site', color: '#8b5cf6' },
-  transit: { label: 'In transit', color: '#f97316' },
-  warehouse: { label: 'In warehouse', color: '#3b82f6' },
+export const CONT_STATUS = {
+  empty: { label: 'Empty on site', color: '#8a93a2' },
+  filling: { label: 'Filling', color: '#8b5cf6' },
+  full: { label: 'Full · ready', color: '#f59e0b' },
+  picked_up: { label: 'In transit', color: '#f97316' },
+  at_warehouse: { label: 'At warehouse', color: '#3b82f6' },
 }
 
 export async function filesToMedia(fileList, labelPrefix = '') {

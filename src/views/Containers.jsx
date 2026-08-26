@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react'
-import { useStore, containerAction, CONT_LOC, filesToMedia } from '../store.jsx'
+import { useStore, containerAction, CONT_STATUS, filesToMedia } from '../store.jsx'
 import { Modal, Lightbox, Uploader, EventRow, StagePill } from '../ui.jsx'
 
 export default function Containers({ openUnit, focusId, clearFocus, toast }) {
@@ -37,7 +37,7 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
         <button className={`chip ${!locFilter ? 'on' : ''}`} onClick={() => setLocFilter(null)}>All locations</button>
         {locOrder.filter((l) => groups[l]?.length).map((l) => (
           <button key={l} className={`chip ${locFilter === l ? 'on' : ''}`} onClick={() => setLocFilter(locFilter === l ? null : l)}>
-            <i style={{ background: CONT_LOC[l].color }} />{CONT_LOC[l].label} · {groups[l].length}
+            <i style={{ background: CONT_STATUS[l].color }} />{CONT_STATUS[l].label} · {groups[l].length}
           </button>
         ))}
       </div>
@@ -49,8 +49,8 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
             <div key={c.id} className="card cont-card" onClick={() => setOpenId(c.id)}>
               <div className="row">
                 <span className="cont-num grow">{c.number}{c.flag?.open && <span style={{ color: 'var(--red)', marginLeft: 7 }}>⚑</span>}</span>
-                <span className="badge" style={{ background: CONT_LOC[c.location].color + '22', color: CONT_LOC[c.location].color }}>
-                  ● {CONT_LOC[c.location].label}{c.bay ? ` · ${c.bay}` : ''}
+                <span className="badge" style={{ background: CONT_STATUS[c.location].color + '22', color: CONT_STATUS[c.location].color }}>
+                  ● {CONT_STATUS[c.location].label}{c.bay ? ` · ${c.bay}` : ''}
                 </span>
               </div>
               <div className="cont-units">
@@ -64,7 +64,7 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
       </div>
 
       {open && (
-        <Modal title={`Container ${open.number}`} sub={`${CONT_LOC[open.location].label}${open.bay ? ' · ' + open.bay : ''}`} onClose={close}>
+        <Modal title={`Container ${open.number}`} sub={`${CONT_STATUS[open.location].label}${open.bay ? ' · ' + open.bay : ''}`} onClose={close}>
           <div className="section-title" style={{ marginTop: 0 }}>Units inside</div>
           {open.unitIds.map((id) => {
             const u = state.units.find((x) => x.id === id)
