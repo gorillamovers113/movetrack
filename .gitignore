@@ -27,3 +27,6 @@ dist-ssr
 
 # Firebase CLI deploy cache
 .firebase
+
+# SDD scratch workspace
+.superpowers/
