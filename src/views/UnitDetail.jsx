@@ -65,7 +65,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
             <h1>Unit {unit.number}</h1>
             <StagePill stage={unit.stage} />
           </div>
-          <p>{unit.tenant} · Floor {unit.floor}{unit.boxCount ? ` · ${unit.boxCount} boxes` : ''}</p>
+          <p>{unit.tenant || '—'} · Floor {unit.floor}{unit.boxCount ? ` · ${unit.boxCount} boxes` : ''}</p>
         </div>
         <div className="row">
           {action && <button className="btn btn-primary btn-lg" onClick={openAction}>{action.label}</button>}
@@ -104,7 +104,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
               )}
             </div>
             <dl className="info-rows">
-              <dt>Tenant</dt><dd>{unit.tenant}</dd>
+              <dt>Tenant</dt><dd>{unit.tenant || '—'}</dd>
               <dt>Phone</dt><dd>{unit.phone}</dd>
               <dt>Floor</dt><dd>{unit.floor}</dd>
               <dt>Boxes packed</dt><dd>{unit.boxCount ?? '—'}</dd>

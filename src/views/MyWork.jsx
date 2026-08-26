@@ -50,7 +50,7 @@ export default function MyWork({ openUnit, openContainer }) {
               <span className="cont-num grow">Unit {u.number}</span>
               <StagePill stage={u.stage} short />
             </div>
-            <div className="cont-units">{u.tenant} · Floor {u.floor}{u.boxCount ? ` · ${u.boxCount} boxes` : ''}</div>
+            <div className="cont-units">{u.tenant || '—'} · Floor {u.floor}{u.boxCount ? ` · ${u.boxCount} boxes` : ''}</div>
             {u.note && <div className="muted" style={{ marginTop: 4 }}>⚠️ {u.note}</div>}
             <button className="btn btn-primary btn-sm" style={{ marginTop: 10, width: '100%' }}>{canAct(currentUser, u).label} →</button>
           </div>

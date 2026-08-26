@@ -32,9 +32,26 @@ function PendingScreen() {
   )
 }
 
+function RemovedScreen() {
+  const { logout } = useStore()
+  return (
+    <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 20 }}>
+      <div className="card" style={{ maxWidth: 430, padding: 32, textAlign: 'center' }}>
+        <div style={{ fontSize: 40, marginBottom: 10 }}>🚫</div>
+        <h2 style={{ fontFamily: 'var(--display)', marginBottom: 8 }}>Your access has been removed</h2>
+        <p style={{ color: 'var(--ink-2)', marginBottom: 18 }}>An admin removed your access to this project. If you think this is a mistake, reach out to your admin directly.</p>
+        <button className="btn btn-ghost" onClick={logout}>← Back to sign in</button>
+      </div>
+    </div>
+  )
+}
+
 function Shell() {
   const { state, currentUser, logout } = useStore()
-  const first = NAV[currentUser.role][0][0]
+  // Defensive: Gate should only ever hand us an active, roled user, but guard
+  // against a missing/unknown NAV[role] anyway rather than throwing.
+  const nav = NAV[currentUser.role] || []
+  const first = nav[0]?.[0] || 'dashboard'
   const [view, setView] = useState({ name: first })
   const [toastMsg, setToastMsg] = useState(null)
 
@@ -46,7 +63,6 @@ function Shell() {
 
   const openUnit = (unitId) => setView((v) => ({ name: 'unit', unitId, back: v.name === 'unit' ? v.back : v }))
   const openContainer = (containerId) => setView({ name: 'containers', focusId: containerId })
-  const nav = NAV[currentUser.role]
   const pendingCount = state.users.filter((u) => u.status === 'pending').length
 
   const page = () => {
@@ -84,7 +100,7 @@ function Shell() {
           <Avatar name={currentUser.name} size="sm" />
           <div className="who">
             <b>{currentUser.name}</b>
-            <span>{ROLES[currentUser.role].label}</span>
+            <span>{ROLES[currentUser.role]?.label || 'Unknown role'}</span>
           </div>
           <button className="out" onClick={logout}>Sign out</button>
         </div>
@@ -114,6 +130,11 @@ function Gate() {
   const { currentUser } = useStore()
   if (!currentUser) return <Login />
   if (currentUser.status === 'pending') return <PendingScreen />
+  // I1 fix: anything that isn't an active, roled user (removed, denied, or
+  // any other non-active status / null role) gets a clean access-revoked
+  // screen instead of falling through to Shell, which would crash on
+  // NAV[null]. This also covers a brief active-but-role:null window.
+  if (currentUser.status !== 'active' || !currentUser.role) return <RemovedScreen />
   return <Shell />
 }
 

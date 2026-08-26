@@ -71,7 +71,7 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
             return (
               <div className="row" key={id} style={{ padding: '7px 0', borderBottom: '1px solid var(--line)' }}>
                 <span className="linkish" onClick={() => { close(); openUnit(id) }}>Unit {u.number}</span>
-                <span className="muted grow">{u.tenant} · {u.boxCount ?? '?'} boxes</span>
+                <span className="muted grow">{u.tenant || '—'} · {u.boxCount ?? '?'} boxes</span>
                 <StagePill stage={u.stage} short />
               </div>
             )

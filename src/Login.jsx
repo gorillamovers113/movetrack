@@ -92,6 +92,10 @@ export default function Login() {
           <span>✓ USDOT &amp; CAL-T</span>
           <span>✓ Full chain of custody</span>
         </div>
+        {/* I6: these are static marketing facts about the Trinity Manor building
+            (its real unit/container counts), not a live KPI — Login renders
+            pre-auth, before Firestore reads are allowed, so it can't reflect
+            live board state the way Dashboard now does. */}
         <div className="hero-stats">
           <div><div className="n">100</div><div className="l">Units tracked</div></div>
           <div><div className="n">40</div><div className="l">Storage containers</div></div>

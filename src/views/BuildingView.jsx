@@ -70,7 +70,7 @@ export default function BuildingView({ selected, onSelect }) {
                     rx="1.5"
                     fill={stageOf(u.stage).color}
                   >
-                    <title>{`Unit ${u.number} — ${u.tenant} — ${stageOf(u.stage).label}`}</title>
+                    <title>{`Unit ${u.number} — ${u.tenant || 'no tenant on file'} — ${stageOf(u.stage).label}`}</title>
                   </rect>
                 )
               }

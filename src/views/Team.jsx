@@ -21,11 +21,6 @@ export default function Team({ toast }) {
           <h1>Team</h1>
           <p>Everyone with access — every action is logged under their name. Records are permanent; only the admin can amend anything.</p>
         </div>
-        {isAdmin && (
-          <button className="btn btn-ghost btn-sm" onClick={() => {
-            if (confirm('Reset all demo data back to the starting dataset?')) { dispatch({ type: 'reset' }); toast('Demo data reset ✓') }
-          }}>↺ Reset demo data</button>
-        )}
       </div>
 
       {pending.length > 0 && (
