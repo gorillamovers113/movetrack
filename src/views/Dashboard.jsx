@@ -16,7 +16,7 @@ export default function Dashboard({ openUnit, toast }) {
     return c
   }, [state.units])
 
-  const boxesTracked = state.units.reduce((n, u) => n + (u.boxCount || 0), 0)
+  const piecesTracked = state.units.reduce((n, u) => n + (u.pieces || 0), 0)
   const openFlags = state.units.filter((u) => u.flag?.open).length + state.containers.filter((c) => c.flag?.open).length
 
   const match = (u) => {
@@ -62,7 +62,7 @@ export default function Dashboard({ openUnit, toast }) {
           <div className="l">Units started</div>
         </div>
         <div className="card kpi"><div className="n"><span className="dot" style={{ background: stageOf('at_warehouse').color }} />{counts.at_warehouse}</div><div className="l">In warehouse</div></div>
-        <div className="card kpi"><div className="n">{boxesTracked.toLocaleString()}</div><div className="l">Boxes tracked</div></div>
+        <div className="card kpi"><div className="n">{piecesTracked.toLocaleString()}</div><div className="l">Pieces tracked</div></div>
         <div className={`card kpi ${openFlags ? 'alert' : ''}`}><div className="n">{openFlags}</div><div className="l">Open flags</div></div>
       </div>
 

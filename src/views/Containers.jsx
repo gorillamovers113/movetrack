@@ -55,7 +55,7 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
               </div>
               <div className="cont-units">
                 {units.map((u) => `Unit ${u.number}`).join(' · ')}
-                <span className="muted"> — {units.reduce((n, u) => n + (u.boxCount || 0), 0)} boxes</span>
+                <span className="muted"> — {units.reduce((n, u) => n + (u.pieces || 0), 0)} pieces</span>
               </div>
             </div>
           )
@@ -71,7 +71,7 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
             return (
               <div className="row" key={id} style={{ padding: '7px 0', borderBottom: '1px solid var(--line)' }}>
                 <span className="linkish" onClick={() => { close(); openUnit(id) }}>Unit {u.number}</span>
-                <span className="muted grow">{u.tenant || '—'} · {u.boxCount ?? '?'} boxes</span>
+                <span className="muted grow">{u.tenant || '—'} · {u.pieces ?? '?'} pieces</span>
                 <StagePill stage={u.stage} short />
               </div>
             )
@@ -96,7 +96,7 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
           {(() => {
             const act = containerAction(currentUser, open)
             if (!act) return null
-            const expected = open.unitIds.reduce((n, id) => n + (state.units.find((u) => u.id === id)?.boxCount || 0), 0)
+            const expected = open.unitIds.reduce((n, id) => n + (state.units.find((u) => u.id === id)?.pieces || 0), 0)
             const needsCount = ['pickup', 'checkin'].includes(act.move) && expected > 0
             return (
               <div style={{ marginTop: 16 }}>
@@ -105,7 +105,7 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
                     <input className="input" placeholder="e.g. Bay 4" value={bay} onChange={(e) => setBay(e.target.value)} /></div>
                 )}
                 {needsCount && (
-                  <div className="field"><label>Boxes counted on board <span className="muted">({expected} on record)</span></label>
+                  <div className="field"><label>Pieces counted on board <span className="muted">({expected} on record)</span></label>
                     <input className="input" type="number" min="0" placeholder={expected} value={verify} onChange={(e) => setVerify(e.target.value)} /></div>
                 )}
                 <div className="field">
@@ -115,9 +115,9 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
                 </div>
                 <button className="btn btn-primary btn-lg" style={{ width: '100%' }} onClick={() => {
                   if (!pending.some((m) => m.kind === 'photo')) return alert('A handoff photo is required — it closes the chain of custody.')
-                  if (needsCount && (verify === '' || parseInt(verify) < 0)) return alert('Count the boxes on board and enter the number.')
+                  if (needsCount && (verify === '' || parseInt(verify) < 0)) return alert('Count the pieces on board and enter the number.')
                   const v = needsCount ? parseInt(verify) : null
-                  dispatch({ type: 'containerMove', p: { containerId: open.id, move: act.move, bay: bay.trim() || undefined, media: pending, verifiedBoxes: v } })
+                  dispatch({ type: 'containerMove', p: { containerId: open.id, move: act.move, bay: bay.trim() || undefined, media: pending, verifiedPieces: v } })
                   toast(v != null && v !== expected ? `⚑ Mismatch flagged (${v} vs ${expected})` : `${open.number}: ${act.label} — logged ✓`)
                   close()
                 }}>{act.label}</button>

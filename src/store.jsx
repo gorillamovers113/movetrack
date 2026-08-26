@@ -60,8 +60,13 @@ export function StoreProvider({ children }) {
         return ev('stage', `Started packing unit ${unit.number}`, { unitId: unit.id, from: unit.stage, to: 'packing' })
       }
       case 'finishPacking': {
-        await updateDoc(doc(db, 'units', p.unitId), { stage: 'packed', boxCount: p.boxCount, 'times.packEnd': Date.now() })
-        return ev('stage', `Finished packing unit ${unit.number} — ${p.boxCount} boxes sealed & labeled`, { unitId: unit.id, from: 'packing', to: 'packed', media: p.media })
+        // Packer captures a photo of the handwritten paper inventory sheet
+        // plus a total piece count — units move via BigBox containers whose
+        // loads mix beds, dressers, boxes, etc., so a single "box count"
+        // never fit; p.media carries the inventory photo (arrayUnion'd onto
+        // the unit's media so it shows in the unit's photo record).
+        await updateDoc(doc(db, 'units', p.unitId), { stage: 'packed', pieces: p.pieces, 'times.packEnd': Date.now(), media: arrayUnion(...p.media) })
+        return ev('stage', `Finished packing unit ${unit.number} — ${p.pieces} pieces inventoried (inventory photo attached)`, { unitId: unit.id, from: 'packing', to: 'packed', media: p.media })
       }
       case 'logEmpties': {
         // BigBox drops off empty containers before any loading happens.
@@ -71,13 +76,13 @@ export function StoreProvider({ children }) {
       }
       case 'loadUnit': {
         const cont = state.containers.find((c) => c.id === p.containerId)
-        const mismatch = boxMismatch(unit.boxCount, p.boxCount)
+        const mismatch = boxMismatch(unit.pieces, p.pieces)
         const patch = { stage: 'loaded', containerIds: arrayUnion(p.containerId), 'crew.movers': arrayUnion(currentUser.uid) }
-        if (mismatch) patch.flag = { message: `Box count mismatch at load: ${p.boxCount} loaded vs ${unit.boxCount} packed. Recount pending.`, ts: Date.now(), by: currentUser.name, open: true }
+        if (mismatch) patch.flag = { message: `Piece count mismatch at load: ${p.pieces} loaded vs ${unit.pieces} packed. Recount pending.`, ts: Date.now(), by: currentUser.name, open: true }
         await updateDoc(doc(db, 'units', p.unitId), patch)
         await updateDoc(doc(db, 'containers', p.containerId), { status: 'filling', unitIds: arrayUnion(p.unitId) })
-        await ev('stage', `Loaded unit ${unit.number} into container ${cont.number} — ${p.boxCount} of ${unit.boxCount ?? p.boxCount} boxes verified`, { unitId: unit.id, containerId: p.containerId, from: unit.stage, to: 'loaded', media: p.media })
-        if (mismatch) await ev('flag', `FLAG raised on unit ${unit.number}: box count mismatch (${p.boxCount}/${unit.boxCount})`, { unitId: unit.id })
+        await ev('stage', `Loaded unit ${unit.number} into container ${cont.number} — ${p.pieces} of ${unit.pieces ?? p.pieces} pieces verified`, { unitId: unit.id, containerId: p.containerId, from: unit.stage, to: 'loaded', media: p.media })
+        if (mismatch) await ev('flag', `FLAG raised on unit ${unit.number}: piece count mismatch (${p.pieces}/${unit.pieces})`, { unitId: unit.id })
         return
       }
       case 'markContainerFull': {
@@ -99,17 +104,17 @@ export function StoreProvider({ children }) {
         return ev('system', `BigBox swap with ${p.driverName}: ${fulls.length} full container${fulls.length === 1 ? '' : 's'} out (${fullNums}), ${newNumbers.length} empty${newNumbers.length === 1 ? '' : 's'} in (${newNumbers.join(', ')})`)
       }
       case 'warehouseReceive': {
-        // Warehouse closes the custody loop: verify box count against what the
+        // Warehouse closes the custody loop: verify piece count against what the
         // container's units were packed with, assign a bay.
         const insideUnits = cont0.unitIds.map((id) => state.units.find((u) => u.id === id)).filter(Boolean)
-        const expected = insideUnits.reduce((n, u) => n + (u.boxCount || 0), 0)
-        const mismatch = boxMismatch(expected, p.verifiedBoxes)
-        const patch = { status: 'at_warehouse', bay: p.bay, verifiedBoxes: p.verifiedBoxes, receivedBy: currentUser.uid, warehouseAt: Date.now() }
-        if (mismatch) patch.flag = { message: `Box count mismatch at warehouse receive: ${p.verifiedBoxes} verified vs ${expected} on record. Recount pending.`, ts: Date.now(), by: currentUser.name, open: true }
+        const expected = insideUnits.reduce((n, u) => n + (u.pieces || 0), 0)
+        const mismatch = boxMismatch(expected, p.verifiedPieces)
+        const patch = { status: 'at_warehouse', bay: p.bay, verifiedPieces: p.verifiedPieces, receivedBy: currentUser.uid, warehouseAt: Date.now() }
+        if (mismatch) patch.flag = { message: `Piece count mismatch at warehouse receive: ${p.verifiedPieces} verified vs ${expected} on record. Recount pending.`, ts: Date.now(), by: currentUser.name, open: true }
         await updateDoc(doc(db, 'containers', p.containerId), patch)
         await Promise.all(insideUnits.map((u) => updateDoc(doc(db, 'units', u.id), { stage: 'at_warehouse' })))
-        await ev('stage', `Container ${cont0.number} received at warehouse — ${p.bay}, ${p.verifiedBoxes} boxes verified`, { containerId: cont0.id })
-        if (mismatch) await ev('flag', `FLAG raised on container ${cont0.number}: box count mismatch (${p.verifiedBoxes}/${expected})`, { containerId: cont0.id })
+        await ev('stage', `Container ${cont0.number} received at warehouse — ${p.bay}, ${p.verifiedPieces} pieces verified`, { containerId: cont0.id })
+        if (mismatch) await ev('flag', `FLAG raised on container ${cont0.number}: piece count mismatch (${p.verifiedPieces}/${expected})`, { containerId: cont0.id })
         return
       }
       case 'createUnit': {

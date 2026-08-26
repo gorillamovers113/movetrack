@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { STAGES, stageOf } from '../seed.js'
 import { useStore, canAct, filesToMedia, fmtTime } from '../store.jsx'
 import { Modal, Lightbox, Uploader, EventRow, Avatar, StagePill } from '../ui.jsx'
+import { uploadImage } from '../lib/upload.js'
 
 const WAIT_HINTS = {
   loaded: 'Waiting on driver: container pickup from site.',
@@ -17,6 +18,39 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
   const [form, setForm] = useState({})
   const [pending, setPending] = useState([])
 
+  // Packer "Finish packing" inventory-sheet photo: captured via the device
+  // camera, resized + uploaded to Storage as soon as it's picked so the
+  // upload runs while the packer is still filling in the piece count.
+  const [invPreview, setInvPreview] = useState(null)
+  const [invUploading, setInvUploading] = useState(false)
+  const [invUrl, setInvUrl] = useState(null)
+  const [invError, setInvError] = useState(null)
+
+  useEffect(() => () => { if (invPreview) URL.revokeObjectURL(invPreview) }, [invPreview])
+
+  const resetInventoryCapture = () => {
+    setInvPreview(null)
+    setInvUploading(false)
+    setInvUrl(null)
+    setInvError(null)
+  }
+
+  const captureInventoryPhoto = async (file) => {
+    setInvError(null)
+    setInvPreview(URL.createObjectURL(file))
+    setInvUrl(null)
+    setInvUploading(true)
+    try {
+      const path = `units/${unitId}/inventory/${Date.now()}-${currentUser.uid}.jpg`
+      const url = await uploadImage(file, path)
+      setInvUrl(url)
+    } catch (err) {
+      setInvError(err.message || 'Upload failed — try again.')
+    } finally {
+      setInvUploading(false)
+    }
+  }
+
   const events = useMemo(() => state.events.filter((e) => e.unitId === unitId).sort((a, b) => b.ts - a.ts), [state.events, unitId])
   if (!unit) return null
 
@@ -27,30 +61,34 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
   const crewName = (uid) => state.users.find((u) => u.id === uid)?.name
   const crewNames = (uids) => (uids || []).map(crewName).filter(Boolean).join(', ')
 
-  const openAction = () => { setForm({}); setPending([]); setModal('action') }
+  const openAction = () => { setForm({}); setPending([]); resetInventoryCapture(); setModal('action') }
+  const closeActionModal = () => { setModal(null); resetInventoryCapture() }
 
   const submitAction = () => {
     const media = pending
-    const needsPhoto = ['finishPacking', 'loadUnit'].includes(action.key)
+    const needsPhoto = ['loadUnit'].includes(action.key)
     if (needsPhoto && !media.some((m) => m.kind === 'photo')) {
       return alert('At least one photo is required to complete this step — the photo record is the whole point.')
     }
     if (action.key === 'startPacking') dispatch({ type: 'startPacking', p: { unitId } })
     if (action.key === 'finishPacking') {
-      const n = parseInt(form.boxCount)
-      if (!n || n < 1) return alert('Enter the number of boxes packed.')
-      dispatch({ type: 'finishPacking', p: { unitId, boxCount: n, media } })
+      const n = parseInt(form.pieces)
+      if (!n || n < 1) return alert('Enter the total pieces packed.')
+      if (invUploading) return alert('Still uploading the inventory sheet photo — wait a moment and try again.')
+      if (!invUrl) return alert('Take a photo of the paper inventory sheet to finish packing.')
+      const invMedia = [{ id: `inv-${Date.now()}`, kind: 'photo', url: invUrl, label: 'inventory', phase: 'inventory', uid: currentUser.uid, ts: Date.now() }]
+      dispatch({ type: 'finishPacking', p: { unitId, pieces: n, media: invMedia } })
     }
     if (action.key === 'loadUnit') {
       const cn = (form.containerNumber || '').trim()
-      const n = parseInt(form.boxCount)
+      const n = parseInt(form.pieces)
       if (!cn) return alert('Enter the container number.')
-      if (!n || n < 1) return alert('Enter the box count you verified while loading.')
-      dispatch({ type: 'loadUnit', p: { unitId, containerNumber: cn, boxCount: n, media } })
-      if (unit.boxCount != null && n !== unit.boxCount) toast(`⚑ Box count mismatch flagged (${n} vs ${unit.boxCount})`)
+      if (!n || n < 1) return alert('Enter the piece count you verified while loading.')
+      dispatch({ type: 'loadUnit', p: { unitId, containerNumber: cn, pieces: n, media } })
+      if (unit.pieces != null && n !== unit.pieces) toast(`⚑ Piece count mismatch flagged (${n} vs ${unit.pieces})`)
     }
-    setModal(null)
-    if (action.key !== 'loadUnit' || unit.boxCount == null || parseInt(form.boxCount) === unit.boxCount) toast('Logged — timestamped under your name ✓')
+    closeActionModal()
+    if (action.key !== 'loadUnit' || unit.pieces == null || parseInt(form.pieces) === unit.pieces) toast('Logged — timestamped under your name ✓')
   }
 
   return (
@@ -65,7 +103,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
             <h1>Unit {unit.number}</h1>
             <StagePill stage={unit.stage} />
           </div>
-          <p>{unit.tenant || '—'} · Floor {unit.floor}{unit.boxCount ? ` · ${unit.boxCount} boxes` : ''}</p>
+          <p>{unit.tenant || '—'} · Floor {unit.floor}{unit.pieces ? ` · ${unit.pieces} pieces` : ''}</p>
         </div>
         <div className="row">
           {action && <button className="btn btn-primary btn-lg" onClick={openAction}>{action.label}</button>}
@@ -107,7 +145,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
               <dt>Tenant</dt><dd>{unit.tenant || '—'}</dd>
               <dt>Phone</dt><dd>{unit.phone}</dd>
               <dt>Floor</dt><dd>{unit.floor}</dd>
-              <dt>Boxes packed</dt><dd>{unit.boxCount ?? '—'}</dd>
+              <dt>Pieces packed</dt><dd>{unit.pieces ?? '—'}</dd>
               <dt>Container</dt>
               <dd>
                 {conts.length === 0 && '—'}
@@ -146,27 +184,46 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
       </div>
 
       {modal === 'action' && action && (
-        <Modal title={action.label} sub={`Unit ${unit.number} · ${unit.tenant} — logged as ${currentUser.name}, ${fmtTime(Date.now())}`} onClose={() => setModal(null)}>
+        <Modal title={action.label} sub={`Unit ${unit.number} · ${unit.tenant} — logged as ${currentUser.name}, ${fmtTime(Date.now())}`} onClose={closeActionModal}>
           {action.key === 'finishPacking' && (
-            <div className="field"><label>Boxes packed, sealed & labeled</label>
-              <input className="input" type="number" min="1" autoFocus placeholder="e.g. 18" value={form.boxCount || ''} onChange={(e) => setForm({ ...form, boxCount: e.target.value })} /></div>
+            <>
+              <div className="field"><label>Total pieces packed</label>
+                <input className="input" type="number" min="1" inputMode="numeric" autoFocus placeholder="e.g. 42" value={form.pieces || ''} onChange={(e) => setForm({ ...form, pieces: e.target.value })} /></div>
+              <div className="field">
+                <label>Photo of the paper inventory sheet — required</label>
+                <label className="dropzone camera-capture" style={{ display: 'block' }}>
+                  <input
+                    type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
+                    onChange={(e) => { const f = e.target.files[0]; if (f) captureInventoryPhoto(f); e.target.value = '' }}
+                  />
+                  {invPreview ? (
+                    <div className="inv-preview">
+                      <img src={invPreview} alt="Inventory sheet" className="inv-thumb" />
+                      <div className="muted" style={{ marginTop: 8 }}>
+                        {invUploading ? 'Uploading…' : invUrl ? '✓ Uploaded — tap to retake' : invError || 'Tap to retake'}
+                      </div>
+                    </div>
+                  ) : <>📷 Tap to photograph the inventory sheet</>}
+                </label>
+              </div>
+            </>
           )}
           {action.key === 'loadUnit' && (
             <>
               <div className="field"><label>Container number</label>
                 <input className="input" autoFocus placeholder="e.g. C-21" value={form.containerNumber || ''} onChange={(e) => setForm({ ...form, containerNumber: e.target.value })} /></div>
-              <div className="field"><label>Boxes counted while loading {unit.boxCount != null && <span className="muted">(packer recorded {unit.boxCount})</span>}</label>
-                <input className="input" type="number" min="1" placeholder={unit.boxCount ?? 'count'} value={form.boxCount || ''} onChange={(e) => setForm({ ...form, boxCount: e.target.value })} /></div>
+              <div className="field"><label>Pieces counted while loading {unit.pieces != null && <span className="muted">(packer recorded {unit.pieces})</span>}</label>
+                <input className="input" type="number" min="1" placeholder={unit.pieces ?? 'count'} value={form.pieces || ''} onChange={(e) => setForm({ ...form, pieces: e.target.value })} /></div>
             </>
           )}
-          {action.key !== 'startPacking' && (
+          {action.key !== 'startPacking' && action.key !== 'finishPacking' && (
             <div className="field">
               <label>Photos required — video encouraged</label>
               <Uploader onFiles={async (files) => setPending([...pending, ...(await filesToMedia(files))])} />
               {pending.length > 0 && <div className="muted" style={{ marginTop: 6 }}>{pending.length} file{pending.length > 1 ? 's' : ''} attached</div>}
             </div>
           )}
-          <button className="btn btn-primary btn-lg" style={{ width: '100%' }} onClick={submitAction}>Confirm — {action.label}</button>
+          <button className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={action.key === 'finishPacking' && invUploading} onClick={submitAction}>Confirm — {action.label}</button>
         </Modal>
       )}
 
@@ -200,7 +257,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
       {modal === 'resolve' && (
         <Modal title="Resolve flag" sub={unit.flag?.message} onClose={() => setModal(null)}>
           <div className="field"><label>How was it resolved?</label>
-            <textarea className="input" rows="3" autoFocus value={form.text || ''} onChange={(e) => setForm({ ...form, text: e.target.value })} placeholder="e.g. Recounted at warehouse — all 18 boxes present." /></div>
+            <textarea className="input" rows="3" autoFocus value={form.text || ''} onChange={(e) => setForm({ ...form, text: e.target.value })} placeholder="e.g. Recounted at warehouse — all 18 pieces present." /></div>
           <button className="btn btn-primary" style={{ width: '100%' }} disabled={!form.text?.trim()} onClick={() => {
             dispatch({ type: 'resolveFlag', p: { unitId, note: form.text.trim() } })
             setModal(null); toast('Flag resolved ✓')

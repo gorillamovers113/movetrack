@@ -206,6 +206,10 @@ img { display: block; max-width: 100%; }
 }
 .dropzone:hover { border-color: var(--brand); color: var(--brand-ink); background: #fffbeb; }
 
+.camera-capture { padding: 30px 18px; font-size: 15.5px; font-weight: 600; min-height: 64px; }
+.inv-preview { text-align: center; }
+.inv-thumb { max-width: 100%; max-height: 240px; border-radius: 10px; display: block; margin: 0 auto; object-fit: contain; border: 1px solid var(--line); background: #fff; }
+
 /* ---------- Login ---------- */
 .login { min-height: 100vh; display: grid; grid-template-columns: 1.1fr 1fr; }
 .login-hero { background: var(--dark); color: #fff; padding: 54px 58px; display: flex; flex-direction: column; }
