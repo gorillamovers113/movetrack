@@ -76,8 +76,8 @@ function Shell() {
           <div className="logo-sub" style={{ textAlign: 'center' }}>MoveTrack — project command center</div>
         </div>
         <div className="project-chip">
-          <b>{state.project.name}</b>
-          <span>{state.project.address}</span>
+          <b>{state.project?.name || 'Trinity Manor'}</b>
+          <span>{state.project?.address || '3940 Park Blvd'}</span>
         </div>
         <nav className="nav"><NavButtons /></nav>
         <div className="side-user">

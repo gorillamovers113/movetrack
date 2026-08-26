@@ -17,7 +17,6 @@ export default function Dashboard({ openUnit }) {
 
   const boxesTracked = state.units.reduce((n, u) => n + (u.boxCount || 0), 0)
   const openFlags = state.units.filter((u) => u.flag?.open).length + state.containers.filter((c) => c.flag?.open).length
-  const done = counts.complete
 
   const match = (u) => {
     if (stageFilter && u.stage !== stageFilter) return false
@@ -39,17 +38,16 @@ export default function Dashboard({ openUnit }) {
     <>
       <div className="page-head">
         <div>
-          <h1>{state.project.name}</h1>
-          <p>{state.project.address} — 100-unit relocation, live status</p>
+          <h1>{state.project?.name || 'Trinity Manor'}</h1>
+          <p>{state.project?.address || '3940 Park Blvd'} — 100-unit relocation, live status</p>
         </div>
         <input className="search" placeholder="Search unit, tenant, container…" value={q} onChange={(e) => setQ(e.target.value)} />
       </div>
 
       <div className="kpis">
         <div className="card kpi"><div className="n">{100 - counts.not_started}<span style={{ fontSize: 16, color: 'var(--ink-3)' }}> /100</span></div><div className="l">Units started</div></div>
-        <div className="card kpi"><div className="n"><span className="dot" style={{ background: stageOf('warehouse').color }} />{counts.warehouse}</div><div className="l">In warehouse</div></div>
+        <div className="card kpi"><div className="n"><span className="dot" style={{ background: stageOf('at_warehouse').color }} />{counts.at_warehouse}</div><div className="l">In warehouse</div></div>
         <div className="card kpi"><div className="n">{boxesTracked.toLocaleString()}</div><div className="l">Boxes tracked</div></div>
-        <div className="card kpi"><div className="n"><span className="dot" style={{ background: stageOf('complete').color }} />{done}</div><div className="l">Complete</div></div>
         <div className={`card kpi ${openFlags ? 'alert' : ''}`}><div className="n">{openFlags}</div><div className="l">Open flags</div></div>
       </div>
 

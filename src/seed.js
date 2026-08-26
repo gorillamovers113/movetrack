@@ -48,17 +48,15 @@ export function photoThumb(label, sub = '') {
   return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg)
 }
 
+// Phase-1 one-way lifecycle (matches src/lib/mutations.js STAGES): the project
+// ends at the BigBox warehouse — no return trip / unload / sign-off yet.
 export const STAGES = [
   { key: 'not_started', label: 'Not started', short: 'Not started', color: '#8a93a2', step: 0 },
   { key: 'packing', label: 'Packing & prep', short: 'Packing', color: '#14b8a6', step: 1 },
   { key: 'packed', label: 'Packed — ready to load', short: 'Packed', color: '#0d9488', step: 2 },
-  { key: 'staged', label: 'In container on site', short: 'In container', color: '#8b5cf6', step: 3 },
-  { key: 'in_transit', label: 'En route to warehouse', short: 'In transit', color: '#f97316', step: 4 },
-  { key: 'warehouse', label: 'In warehouse', short: 'Warehouse', color: '#3b82f6', step: 5 },
-  { key: 'return_transit', label: 'Returning to site', short: 'Returning', color: '#ec4899', step: 6 },
-  { key: 'unloading', label: 'Back on site — unloading', short: 'Unloading', color: '#6366f1', step: 7 },
-  { key: 'unpacking', label: 'Unpacking', short: 'Unpacking', color: '#06b6d4', step: 8 },
-  { key: 'complete', label: 'Complete — signed off', short: 'Complete', color: '#22c55e', step: 9 },
+  { key: 'loaded', label: 'Loaded in container on site', short: 'Loaded', color: '#8b5cf6', step: 3 },
+  { key: 'picked_up', label: 'Picked up — en route to warehouse', short: 'Picked up', color: '#f97316', step: 4 },
+  { key: 'at_warehouse', label: 'In warehouse', short: 'Warehouse', color: '#3b82f6', step: 5 },
 ]
 export const stageOf = (key) => STAGES.find((s) => s.key === key)
 

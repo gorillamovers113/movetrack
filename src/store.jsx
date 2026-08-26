@@ -1,182 +1,12 @@
-import React, { createContext, useContext, useEffect, useMemo, useReducer, useState } from 'react'
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, signOut, updateProfile } from 'firebase/auth'
-import { doc, setDoc, onSnapshot, collection, query, orderBy, serverTimestamp } from 'firebase/firestore'
+import { doc, setDoc, updateDoc, addDoc, arrayUnion, onSnapshot, collection, query, orderBy, serverTimestamp } from 'firebase/firestore'
 import { auth, db } from './firebase.js'
-import { buildSeed, stageOf } from './seed.js'
-
-// Empty shape for the (currently inert) reducer's local state — Task 5 replaces
-// dispatch with real Firestore writes, so this no longer needs to be seeded.
-const EMPTY_REDUCER_STATE = { units: [], containers: [], events: [], users: [], project: null }
-
-let evCounter = Date.now() % 100000
-
-function makeEvent(state, userId, type, action, extra = {}) {
-  const u = state.users.find((x) => x.id === userId)
-  return { id: `ev-live-${++evCounter}`, ts: Date.now(), userId, userName: u ? u.name : 'Unknown', role: u ? u.role || 'pending' : '?', type, action, ...extra }
-}
-
-function reducer(state, msg) {
-  const { type, p } = msg
-  const log = (userId, evType, action, extra) => [...state.events, makeEvent(state, userId, evType, action, extra)]
-  const upUnit = (unitId, patch) => state.units.map((u) => (u.id === unitId ? { ...u, ...patch } : u))
-  const upContainer = (contId, patch) => state.containers.map((c) => (c.id === contId ? { ...c, ...patch } : c))
-
-  switch (type) {
-    case 'reset':
-      return buildSeed()
-
-    case 'register': {
-      const id = `u-reg-${Date.now()}`
-      const user = { id, name: p.name, email: p.email, role: null, status: 'pending', requestedAt: Date.now(), via: p.via || 'email' }
-      return { ...state, users: [...state.users, user], events: [...state.events, makeEvent({ users: [...state.users, user] }, id, 'system', `New account request: ${p.name} (${p.email}) — awaiting admin approval`)] }
-    }
-    case 'approveUser': {
-      const users = state.users.map((u) => (u.id === p.userId ? { ...u, status: 'active', role: p.role } : u))
-      const target = state.users.find((u) => u.id === p.userId)
-      return { ...state, users, events: log(p.byId, 'system', `Approved ${target.name} as ${p.role}`) }
-    }
-    case 'denyUser': {
-      const target = state.users.find((u) => u.id === p.userId)
-      return { ...state, users: state.users.filter((u) => u.id !== p.userId), events: log(p.byId, 'system', `Denied account request from ${target.name}`) }
-    }
-    case 'changeRole': {
-      const target = state.users.find((u) => u.id === p.userId)
-      const users = state.users.map((u) => (u.id === p.userId ? { ...u, role: p.role } : u))
-      return { ...state, users, events: log(p.byId, 'system', `Changed ${target.name}'s role to ${p.role}`) }
-    }
-
-    case 'startPacking': {
-      const unit = state.units.find((u) => u.id === p.unitId)
-      return {
-        ...state,
-        units: upUnit(p.unitId, { stage: 'packing', crew: { ...unit.crew, packer: p.byId } }),
-        events: log(p.byId, 'stage', `Started packing unit ${unit.number}`, { unitId: unit.id, from: unit.stage, to: 'packing' }),
-      }
-    }
-    case 'finishPacking': {
-      const unit = state.units.find((u) => u.id === p.unitId)
-      return {
-        ...state,
-        units: upUnit(p.unitId, { stage: 'packed', boxCount: p.boxCount }),
-        events: log(p.byId, 'stage', `Finished packing unit ${unit.number} — ${p.boxCount} boxes sealed & labeled`, { unitId: unit.id, from: 'packing', to: 'packed', media: p.media }),
-      }
-    }
-    case 'loadUnit': {
-      const unit = state.units.find((u) => u.id === p.unitId)
-      let cont = state.containers.find((c) => c.number.toUpperCase() === p.containerNumber.toUpperCase())
-      let containers = state.containers
-      if (!cont) {
-        cont = { id: `cont-new-${Date.now()}`, number: p.containerNumber.toUpperCase(), location: 'site', bay: null, unitIds: [] }
-        containers = [...containers, cont]
-      }
-      containers = containers.map((c) => (c.id === cont.id ? { ...c, location: 'site', unitIds: [...new Set([...c.unitIds, unit.id])] } : c))
-      const mismatch = unit.boxCount != null && p.boxCount !== unit.boxCount
-      let events = log(p.byId, 'stage', `Loaded unit ${unit.number} into container ${cont.number} — ${p.boxCount} of ${unit.boxCount ?? p.boxCount} boxes verified`, { unitId: unit.id, containerId: cont.id, from: unit.stage, to: 'staged', media: p.media })
-      let flag = unit.flag
-      if (mismatch) {
-        const by = state.users.find((u) => u.id === p.byId)
-        flag = { message: `Box count mismatch at load: ${p.boxCount} loaded vs ${unit.boxCount} packed. Recount pending.`, ts: Date.now(), by: by.name, open: true }
-        events = [...events, makeEvent(state, p.byId, 'flag', `FLAG raised on unit ${unit.number}: box count mismatch (${p.boxCount}/${unit.boxCount})`, { unitId: unit.id })]
-      }
-      return {
-        ...state,
-        containers,
-        units: upUnit(p.unitId, { stage: 'staged', containerIds: [...new Set([...unit.containerIds, cont.id])], crew: { ...unit.crew, mover: p.byId }, flag }),
-        events,
-      }
-    }
-    case 'containerMove': {
-      // Driver moves a whole container; every unit inside moves with it.
-      const cont = state.containers.find((c) => c.id === p.containerId)
-      const map = {
-        pickup: { loc: 'transit', to: 'in_transit', msg: (c) => `Container ${c.number} picked up from site` },
-        checkin: { loc: 'warehouse', to: 'warehouse', msg: (c) => `Container ${c.number} checked into warehouse — ${p.bay || 'bay assigned'}` },
-        dispatch: { loc: 'transit-return', to: 'return_transit', msg: (c) => `Container ${c.number} dispatched back to site` },
-        arrive: { loc: 'site-return', to: 'unloading', msg: (c) => `Container ${c.number} arrived back on site — ready to unload` },
-      }[p.move]
-      const inside = state.units.filter((u) => cont.unitIds.includes(u.id))
-      const unitNums = inside.map((u) => u.number).join(', ')
-      const expected = inside.reduce((n, u) => n + (u.boxCount || 0), 0)
-      const units = state.units.map((u) => (cont.unitIds.includes(u.id) && u.stage !== 'complete' ? { ...u, stage: map.to } : u))
-      const verified = p.verifiedBoxes != null ? ` — ${p.verifiedBoxes} boxes verified on board` : ''
-      let events = log(p.byId, 'stage', `${map.msg(cont)} (units ${unitNums})${verified}`, { containerId: cont.id, media: p.media })
-      let flag = cont.flag
-      if (p.verifiedBoxes != null && expected > 0 && p.verifiedBoxes !== expected) {
-        const by = state.users.find((u) => u.id === p.byId)
-        flag = { message: `Box count mismatch at ${p.move === 'pickup' ? 'pickup' : 'warehouse check-in'}: ${p.verifiedBoxes} counted vs ${expected} on record. Recount pending.`, ts: Date.now(), by: by.name, open: true }
-        events = [...events, makeEvent(state, p.byId, 'flag', `FLAG raised on container ${cont.number}: box count mismatch (${p.verifiedBoxes}/${expected})`, { containerId: cont.id })]
-      }
-      return {
-        ...state,
-        containers: upContainer(p.containerId, { location: map.loc, bay: p.move === 'checkin' ? p.bay || cont.bay : cont.bay, flag }),
-        units,
-        events,
-      }
-    }
-    case 'editUnit': {
-      const unit = state.units.find((u) => u.id === p.unitId)
-      const changed = Object.keys(p.patch).filter((k) => p.patch[k] !== unit[k])
-      return {
-        ...state,
-        units: upUnit(p.unitId, p.patch),
-        events: log(p.byId, 'system', `Admin edited unit ${unit.number} details (${changed.join(', ') || 'no changes'})`, { unitId: unit.id }),
-      }
-    }
-    case 'resolveContainerFlag': {
-      const cont = state.containers.find((c) => c.id === p.containerId)
-      return {
-        ...state,
-        containers: upContainer(p.containerId, { flag: { ...cont.flag, open: false } }),
-        events: log(p.byId, 'flag', `FLAG resolved on container ${cont.number}: ${p.note}`, { containerId: cont.id }),
-      }
-    }
-    case 'finishUnload': {
-      const unit = state.units.find((u) => u.id === p.unitId)
-      return {
-        ...state,
-        units: upUnit(p.unitId, { stage: 'unpacking' }),
-        events: log(p.byId, 'stage', `Unloaded unit ${unit.number} back into the unit — ${p.boxCount ?? unit.boxCount ?? '?'} boxes returned`, { unitId: unit.id, from: 'unloading', to: 'unpacking', media: p.media }),
-      }
-    }
-    case 'signOff': {
-      const unit = state.units.find((u) => u.id === p.unitId)
-      return {
-        ...state,
-        units: upUnit(p.unitId, { stage: 'complete' }),
-        events: log(p.byId, 'stage', `Unit ${unit.number} unpacked & signed off — complete`, { unitId: unit.id, from: 'unpacking', to: 'complete', media: p.media }),
-      }
-    }
-
-    case 'addMedia': {
-      const unit = state.units.find((u) => u.id === p.unitId)
-      const n = p.media.length
-      const kinds = p.media.some((m) => m.kind === 'video') ? (p.media.every((m) => m.kind === 'video') ? 'video' + (n > 1 ? 's' : '') : 'photos & video') : 'photo' + (n > 1 ? 's' : '')
-      return { ...state, events: log(p.byId, 'media', `Added ${n} ${kinds}${p.note ? ' — ' + p.note : ''} (unit ${unit.number})`, { unitId: unit.id, media: p.media }) }
-    }
-    case 'addNote': {
-      const extra = p.unitId ? { unitId: p.unitId } : { containerId: p.containerId }
-      return { ...state, events: log(p.byId, 'note', p.text, extra) }
-    }
-    case 'resolveFlag': {
-      const unit = state.units.find((u) => u.id === p.unitId)
-      return {
-        ...state,
-        units: upUnit(p.unitId, { flag: { ...unit.flag, open: false } }),
-        events: log(p.byId, 'flag', `FLAG resolved on unit ${unit.number}: ${p.note}`, { unitId: unit.id }),
-      }
-    }
-    default:
-      return state
-  }
-}
+import { makeEvent, boxMismatch } from './lib/mutations.js'
 
 const Ctx = createContext(null)
 
 export function StoreProvider({ children }) {
-  // `dispatch` still runs the old localStorage-era reducer, but its output is
-  // no longer what feeds the UI (Task 5 rewires dispatch to Firestore writes).
-  const [, dispatch] = useReducer(reducer, EMPTY_REDUCER_STATE)
-
   const [units, setUnits] = useState([])
   const [containers, setContainers] = useState([])
   const [events, setEvents] = useState([])
@@ -212,6 +42,89 @@ export function StoreProvider({ children }) {
     })
     return () => { unsubAuth(); if (unsubProfile) unsubProfile() }
   }, [])
+
+  // Targeted Firestore writes per action, mirroring the old reducer's logic —
+  // every action ends with an `event` doc so the activity log stays complete.
+  const actor = () => ({ uid: currentUser.uid, userName: currentUser.name, role: currentUser.role })
+  const ev = (type, action, extra) => addDoc(collection(db, 'events'), makeEvent(actor(), type, action, extra))
+
+  async function dispatch({ type, p }) {
+    const unit = p.unitId ? state.units.find((u) => u.id === p.unitId) : null
+    const cont0 = p.containerId ? state.containers.find((c) => c.id === p.containerId) : null
+
+    switch (type) {
+      case 'startPacking': {
+        await updateDoc(doc(db, 'units', p.unitId), { stage: 'packing', 'crew.packers': arrayUnion(currentUser.uid), 'times.packStart': Date.now() })
+        return ev('stage', `Started packing unit ${unit.number}`, { unitId: unit.id, from: unit.stage, to: 'packing' })
+      }
+      case 'finishPacking': {
+        await updateDoc(doc(db, 'units', p.unitId), { stage: 'packed', boxCount: p.boxCount, 'times.packEnd': Date.now() })
+        return ev('stage', `Finished packing unit ${unit.number} — ${p.boxCount} boxes sealed & labeled`, { unitId: unit.id, from: 'packing', to: 'packed', media: p.media })
+      }
+      case 'loadUnit': {
+        let cont = state.containers.find((c) => c.number.toUpperCase() === p.containerNumber.toUpperCase())
+        if (!cont) {
+          const ref = await addDoc(collection(db, 'containers'), { number: p.containerNumber.toUpperCase(), location: 'site', bay: null, unitIds: [p.unitId], flag: null })
+          cont = { id: ref.id, number: p.containerNumber.toUpperCase() }
+        } else {
+          await updateDoc(doc(db, 'containers', cont.id), { location: 'site', unitIds: arrayUnion(p.unitId) })
+        }
+        const mismatch = boxMismatch(unit.boxCount, p.boxCount)
+        const patch = { stage: 'loaded', containerIds: arrayUnion(cont.id), 'crew.movers': arrayUnion(currentUser.uid) }
+        if (mismatch) patch.flag = { message: `Box count mismatch at load: ${p.boxCount} loaded vs ${unit.boxCount} packed. Recount pending.`, ts: Date.now(), by: currentUser.name, open: true }
+        await updateDoc(doc(db, 'units', p.unitId), patch)
+        await ev('stage', `Loaded unit ${unit.number} into container ${cont.number} — ${p.boxCount} of ${unit.boxCount ?? p.boxCount} boxes verified`, { unitId: unit.id, containerId: cont.id, from: unit.stage, to: 'loaded', media: p.media })
+        if (mismatch) await ev('flag', `FLAG raised on unit ${unit.number}: box count mismatch (${p.boxCount}/${unit.boxCount})`, { unitId: unit.id })
+        return
+      }
+      case 'containerMove': {
+        // Driver moves a whole container; every unit inside moves with it.
+        // One-way lifecycle only: pickup (site → transit) and checkin (transit → warehouse).
+        const map = {
+          pickup: { loc: 'transit', to: 'picked_up', msg: (c) => `Container ${c.number} picked up from site` },
+          checkin: { loc: 'warehouse', to: 'at_warehouse', msg: (c) => `Container ${c.number} checked into warehouse — ${p.bay || 'bay assigned'}` },
+        }[p.move]
+        const inside = state.units.filter((u) => cont0.unitIds.includes(u.id))
+        const unitNums = inside.map((u) => u.number).join(', ')
+        const expected = inside.reduce((n, u) => n + (u.boxCount || 0), 0)
+        const mismatch = p.verifiedBoxes != null && expected > 0 && boxMismatch(expected, p.verifiedBoxes)
+        const contPatch = { location: map.loc }
+        if (p.move === 'checkin') contPatch.bay = p.bay || cont0.bay || null
+        if (mismatch) contPatch.flag = { message: `Box count mismatch at ${p.move === 'pickup' ? 'pickup' : 'warehouse check-in'}: ${p.verifiedBoxes} counted vs ${expected} on record. Recount pending.`, ts: Date.now(), by: currentUser.name, open: true }
+        await updateDoc(doc(db, 'containers', p.containerId), contPatch)
+        await Promise.all(inside.map((u) => updateDoc(doc(db, 'units', u.id), { stage: map.to })))
+        const verified = p.verifiedBoxes != null ? ` — ${p.verifiedBoxes} boxes verified on board` : ''
+        await ev('stage', `${map.msg(cont0)} (units ${unitNums})${verified}`, { containerId: cont0.id, media: p.media })
+        if (mismatch) await ev('flag', `FLAG raised on container ${cont0.number}: box count mismatch (${p.verifiedBoxes}/${expected})`, { containerId: cont0.id })
+        return
+      }
+      case 'editUnit': {
+        const changed = Object.keys(p.patch).filter((k) => p.patch[k] !== unit[k])
+        await updateDoc(doc(db, 'units', p.unitId), p.patch)
+        return ev('system', `Admin edited unit ${unit.number} details (${changed.join(', ') || 'no changes'})`, { unitId: unit.id })
+      }
+      case 'addMedia': {
+        const n = p.media.length
+        const kinds = p.media.some((m) => m.kind === 'video') ? (p.media.every((m) => m.kind === 'video') ? 'video' + (n > 1 ? 's' : '') : 'photos & video') : 'photo' + (n > 1 ? 's' : '')
+        return ev('media', `Added ${n} ${kinds}${p.note ? ' — ' + p.note : ''} (unit ${unit.number})`, { unitId: unit.id, media: p.media })
+      }
+      case 'addNote': {
+        const extra = p.unitId ? { unitId: p.unitId } : { containerId: p.containerId }
+        return ev('note', p.text, extra)
+      }
+      case 'resolveFlag': {
+        await updateDoc(doc(db, 'units', p.unitId), { 'flag.open': false })
+        return ev('flag', `FLAG resolved on unit ${unit.number}: ${p.note}`, { unitId: unit.id })
+      }
+      case 'resolveContainerFlag': {
+        await updateDoc(doc(db, 'containers', p.containerId), { 'flag.open': false })
+        return ev('flag', `FLAG resolved on container ${cont0.number}: ${p.note}`, { containerId: cont0.id })
+      }
+      default:
+        console.warn(`dispatch: unhandled action "${type}" (not part of the Phase-1 action set)`)
+        return
+    }
+  }
 
   const signup = async ({ name, email, password }) => {
     const cred = await createUserWithEmailAndPassword(auth, email, password)
@@ -253,6 +166,7 @@ export function fmtAgo(ts) {
 
 export function canAct(user, unit) {
   // Returns the action available to this user on this unit right now, or null.
+  // One-way Phase-1 lifecycle: not_started → packing → packed → loaded → picked_up → at_warehouse.
   if (!user) return null
   const role = user.role
   const admin = role === 'admin'
@@ -260,20 +174,17 @@ export function canAct(user, unit) {
     case 'not_started': return admin || role === 'packer' ? { key: 'startPacking', label: 'Start packing' } : null
     case 'packing': return admin || role === 'packer' ? { key: 'finishPacking', label: 'Finish packing' } : null
     case 'packed': return admin || role === 'mover' ? { key: 'loadUnit', label: 'Load into container' } : null
-    case 'unloading': return admin || role === 'mover' ? { key: 'finishUnload', label: 'Finish unloading' } : null
-    case 'unpacking': return admin || role === 'packer' ? { key: 'signOff', label: 'Unpacked — sign off' } : null
     default: return null
   }
 }
 
 export function containerAction(user, cont) {
+  // One-way lifecycle only: driver pickup (site → transit) then checkin (transit → warehouse).
   if (!user || !['admin', 'driver'].includes(user.role)) return null
   if (!cont.unitIds.length) return null
   switch (cont.location) {
     case 'site': return { move: 'pickup', label: 'Pick up from site' }
     case 'transit': return { move: 'checkin', label: 'Check into warehouse' }
-    case 'warehouse': return { move: 'dispatch', label: 'Dispatch back to site' }
-    case 'transit-return': return { move: 'arrive', label: 'Arrived on site' }
     default: return null
   }
 }
@@ -283,8 +194,6 @@ export const CONT_LOC = {
   site: { label: 'On site', color: '#8b5cf6' },
   transit: { label: 'In transit', color: '#f97316' },
   warehouse: { label: 'In warehouse', color: '#3b82f6' },
-  'transit-return': { label: 'Returning', color: '#ec4899' },
-  'site-return': { label: 'Back on site', color: '#6366f1' },
 }
 
 export async function filesToMedia(fileList, labelPrefix = '') {

@@ -22,7 +22,7 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
   const open = openId ? state.containers.find((c) => c.id === openId) : null
   const close = () => { setOpenId(null); setPending([]); setBay(''); setVerify(''); setResolveNote(''); clearFocus && clearFocus() }
 
-  const locOrder = ['site', 'transit', 'warehouse', 'transit-return', 'site-return']
+  const locOrder = ['site', 'transit', 'warehouse']
 
   return (
     <>
@@ -84,7 +84,7 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
                 <div style={{ marginTop: 10 }}>
                   <input className="input" placeholder="How was it resolved?" value={resolveNote} onChange={(e) => setResolveNote(e.target.value)} />
                   <button className="btn btn-dark btn-sm" style={{ marginTop: 8 }} disabled={!resolveNote.trim()} onClick={() => {
-                    dispatch({ type: 'resolveContainerFlag', p: { containerId: open.id, byId: currentUser.id, note: resolveNote.trim() } })
+                    dispatch({ type: 'resolveContainerFlag', p: { containerId: open.id, note: resolveNote.trim() } })
                     setResolveNote(''); toast('Flag resolved ✓')
                   }}>Resolve flag</button>
                 </div>
@@ -117,7 +117,7 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
                   if (!pending.some((m) => m.kind === 'photo')) return alert('A handoff photo is required — it closes the chain of custody.')
                   if (needsCount && (verify === '' || parseInt(verify) < 0)) return alert('Count the boxes on board and enter the number.')
                   const v = needsCount ? parseInt(verify) : null
-                  dispatch({ type: 'containerMove', p: { containerId: open.id, byId: currentUser.id, move: act.move, bay: bay.trim() || undefined, media: pending, verifiedBoxes: v } })
+                  dispatch({ type: 'containerMove', p: { containerId: open.id, move: act.move, bay: bay.trim() || undefined, media: pending, verifiedBoxes: v } })
                   toast(v != null && v !== expected ? `⚑ Mismatch flagged (${v} vs ${expected})` : `${open.number}: ${act.label} — logged ✓`)
                   close()
                 }}>{act.label}</button>

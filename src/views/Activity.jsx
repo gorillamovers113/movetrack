@@ -16,7 +16,7 @@ export default function Activity({ openUnit, openContainer }) {
     const s = q.toLowerCase()
     return [...state.events]
       .sort((a, b) => b.ts - a.ts)
-      .filter((e) => (!who || e.userId === who) && (!type || e.type === type) && (!s || e.action.toLowerCase().includes(s) || e.userName.toLowerCase().includes(s)))
+      .filter((e) => (!who || e.uid === who) && (!type || e.type === type) && (!s || e.action.toLowerCase().includes(s) || e.userName.toLowerCase().includes(s)))
   }, [state.events, who, type, q])
 
   return (

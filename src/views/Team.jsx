@@ -11,7 +11,7 @@ export default function Team({ toast }) {
   const ASSIGNABLE = Object.entries(ROLES).filter(([k]) => k !== 'admin')
   const pending = state.users.filter((u) => u.status === 'pending')
   const active = state.users.filter((u) => u.status === 'active')
-  const actionCount = (uid) => state.events.filter((e) => e.userId === uid).length
+  const actionCount = (uid) => state.events.filter((e) => e.uid === uid).length
   const isAdmin = currentUser?.role === 'admin'
 
   return (
@@ -41,7 +41,7 @@ export default function Team({ toast }) {
               {isAdmin ? (
                 <>
                   <button className="btn btn-primary btn-sm" onClick={() => { setRole('packer'); setApproving(u) }}>Approve…</button>
-                  <button className="btn btn-danger btn-sm" onClick={() => { dispatch({ type: 'denyUser', p: { userId: u.id, byId: currentUser.id } }); toast(`${u.name} denied`) }}>Deny</button>
+                  <button className="btn btn-danger btn-sm" onClick={() => { dispatch({ type: 'denyUser', p: { userId: u.id, byId: currentUser.uid } }); toast(`${u.name} denied`) }}>Deny</button>
                 </>
               ) : <span className="badge" style={{ background: '#fffbeb', color: '#92400e' }}>Pending admin review</span>}
             </div>
@@ -58,9 +58,9 @@ export default function Team({ toast }) {
               <tr key={u.id}>
                 <td><div className="row"><Avatar name={u.name} size="sm" /><div><b>{u.name}</b>{u.title && <div className="muted">{u.title}</div>}</div></div></td>
                 <td>
-                  {isAdmin && u.id !== currentUser.id ? (
+                  {isAdmin && u.id !== currentUser.uid ? (
                     <select className="input" style={{ width: 'auto', padding: '5px 9px', fontSize: 13 }} value={u.role}
-                      onChange={(e) => { dispatch({ type: 'changeRole', p: { userId: u.id, role: e.target.value, byId: currentUser.id } }); toast(`${u.name} → ${ROLES[e.target.value].label}`) }}>
+                      onChange={(e) => { dispatch({ type: 'changeRole', p: { userId: u.id, role: e.target.value, byId: currentUser.uid } }); toast(`${u.name} → ${ROLES[e.target.value].label}`) }}>
                       {ASSIGNABLE.map(([k, r]) => <option key={k} value={k}>{r.label}</option>)}
                     </select>
                   ) : (
@@ -85,7 +85,7 @@ export default function Team({ toast }) {
             <div className="muted" style={{ marginTop: 6 }}>There is exactly one admin on this project: you.</div>
           </div>
           <button className="btn btn-primary btn-lg" style={{ width: '100%' }} onClick={() => {
-            dispatch({ type: 'approveUser', p: { userId: approving.id, role, byId: currentUser.id } })
+            dispatch({ type: 'approveUser', p: { userId: approving.id, role, byId: currentUser.uid } })
             toast(`${approving.name} approved as ${ROLES[role].label} ✓`)
             setApproving(null)
           }}>Approve & activate</button>

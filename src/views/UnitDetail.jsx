@@ -4,11 +4,9 @@ import { useStore, canAct, filesToMedia, fmtTime } from '../store.jsx'
 import { Modal, Lightbox, Uploader, EventRow, Avatar, StagePill } from '../ui.jsx'
 
 const WAIT_HINTS = {
-  staged: 'Waiting on driver: container pickup from site.',
-  in_transit: 'On the truck — driver will check it into the warehouse.',
-  warehouse: 'Safely stored. Driver dispatches it back when the return phase starts.',
-  return_transit: 'On the truck heading back to the site.',
-  complete: 'All done. Full history preserved below.',
+  loaded: 'Waiting on driver: container pickup from site.',
+  picked_up: 'On the truck — driver will check it into the warehouse.',
+  at_warehouse: 'Safely stored in the warehouse. Full history preserved below.',
 }
 
 export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
@@ -27,32 +25,30 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
   const stage = stageOf(unit.stage)
   const conts = unit.containerIds.map((id) => state.containers.find((c) => c.id === id)).filter(Boolean)
   const crewName = (uid) => state.users.find((u) => u.id === uid)?.name
+  const crewNames = (uids) => (uids || []).map(crewName).filter(Boolean).join(', ')
 
   const openAction = () => { setForm({}); setPending([]); setModal('action') }
 
   const submitAction = () => {
-    const byId = currentUser.id
     const media = pending
-    const needsPhoto = ['finishPacking', 'loadUnit', 'finishUnload', 'signOff'].includes(action.key)
+    const needsPhoto = ['finishPacking', 'loadUnit'].includes(action.key)
     if (needsPhoto && !media.some((m) => m.kind === 'photo')) {
       return alert('At least one photo is required to complete this step — the photo record is the whole point.')
     }
-    if (action.key === 'startPacking') dispatch({ type: 'startPacking', p: { unitId, byId } })
+    if (action.key === 'startPacking') dispatch({ type: 'startPacking', p: { unitId } })
     if (action.key === 'finishPacking') {
       const n = parseInt(form.boxCount)
       if (!n || n < 1) return alert('Enter the number of boxes packed.')
-      dispatch({ type: 'finishPacking', p: { unitId, byId, boxCount: n, media } })
+      dispatch({ type: 'finishPacking', p: { unitId, boxCount: n, media } })
     }
     if (action.key === 'loadUnit') {
       const cn = (form.containerNumber || '').trim()
       const n = parseInt(form.boxCount)
       if (!cn) return alert('Enter the container number.')
       if (!n || n < 1) return alert('Enter the box count you verified while loading.')
-      dispatch({ type: 'loadUnit', p: { unitId, byId, containerNumber: cn, boxCount: n, media } })
+      dispatch({ type: 'loadUnit', p: { unitId, containerNumber: cn, boxCount: n, media } })
       if (unit.boxCount != null && n !== unit.boxCount) toast(`⚑ Box count mismatch flagged (${n} vs ${unit.boxCount})`)
     }
-    if (action.key === 'finishUnload') dispatch({ type: 'finishUnload', p: { unitId, byId, boxCount: parseInt(form.boxCount) || unit.boxCount, media } })
-    if (action.key === 'signOff') dispatch({ type: 'signOff', p: { unitId, byId, media } })
     setModal(null)
     if (action.key !== 'loadUnit' || unit.boxCount == null || parseInt(form.boxCount) === unit.boxCount) toast('Logged — timestamped under your name ✓')
   }
@@ -119,8 +115,8 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
                   <span key={c.id} className="linkish" onClick={() => openContainer(c.id)} style={{ marginRight: 10 }}>{c.number}{c.bay ? ` (${c.bay})` : ''}</span>
                 ))}
               </dd>
-              <dt>Packer</dt><dd>{crewName(unit.crew.packer) || '—'}</dd>
-              <dt>Mover</dt><dd>{crewName(unit.crew.mover) || '—'}</dd>
+              <dt>Packer</dt><dd>{crewNames(unit.crew?.packers) || '—'}</dd>
+              <dt>Mover</dt><dd>{crewNames(unit.crew?.movers) || '—'}</dd>
             </dl>
             {unit.note && <div style={{ marginTop: 10, fontSize: 13.5, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '9px 12px' }}>⚠️ {unit.note}</div>}
 
@@ -141,7 +137,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
               <div className="section-title" style={{ marginTop: 0 }}>Add to the record</div>
               <Uploader onFiles={async (files) => {
                 const media = await filesToMedia(files)
-                if (media.length) { dispatch({ type: 'addMedia', p: { unitId, byId: currentUser.id, media } }); toast(`${media.length} file${media.length > 1 ? 's' : ''} added to unit ${unit.number} ✓`) }
+                if (media.length) { dispatch({ type: 'addMedia', p: { unitId, media } }); toast(`${media.length} file${media.length > 1 ? 's' : ''} added to unit ${unit.number} ✓`) }
               }} />
               <button className="btn btn-ghost" style={{ width: '100%', marginTop: 10 }} onClick={() => { setForm({}); setModal('note') }}>📝 Add a note</button>
             </div>
@@ -163,10 +159,6 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
                 <input className="input" type="number" min="1" placeholder={unit.boxCount ?? 'count'} value={form.boxCount || ''} onChange={(e) => setForm({ ...form, boxCount: e.target.value })} /></div>
             </>
           )}
-          {action.key === 'finishUnload' && (
-            <div className="field"><label>Boxes returned to unit {unit.boxCount != null && <span className="muted">(expected {unit.boxCount})</span>}</label>
-              <input className="input" type="number" min="1" autoFocus placeholder={unit.boxCount ?? 'count'} value={form.boxCount || ''} onChange={(e) => setForm({ ...form, boxCount: e.target.value })} /></div>
-          )}
           {action.key !== 'startPacking' && (
             <div className="field">
               <label>Photos required — video encouraged</label>
@@ -184,7 +176,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
             <textarea className="input" rows="4" autoFocus placeholder="e.g. Tenant asked us to keep the bikes accessible…" value={form.text || ''} onChange={(e) => setForm({ ...form, text: e.target.value })} />
           </div>
           <button className="btn btn-primary" style={{ width: '100%' }} disabled={!form.text?.trim()} onClick={() => {
-            dispatch({ type: 'addNote', p: { unitId, byId: currentUser.id, text: form.text.trim() } })
+            dispatch({ type: 'addNote', p: { unitId, text: form.text.trim() } })
             setModal(null); toast('Note added ✓')
           }}>Save note</button>
         </Modal>
@@ -199,7 +191,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
           <div className="field"><label>Special notes</label>
             <textarea className="input" rows="2" value={form.note || ''} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="e.g. Piano — needs 4-person crew" /></div>
           <button className="btn btn-primary" style={{ width: '100%' }} onClick={() => {
-            dispatch({ type: 'editUnit', p: { unitId, byId: currentUser.id, patch: { tenant: form.tenant.trim(), phone: form.phone.trim(), note: (form.note || '').trim() } } })
+            dispatch({ type: 'editUnit', p: { unitId, patch: { tenant: form.tenant.trim(), phone: form.phone.trim(), note: (form.note || '').trim() } } })
             setModal(null); toast('Unit updated — edit logged ✓')
           }}>Save changes</button>
         </Modal>
@@ -210,7 +202,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
           <div className="field"><label>How was it resolved?</label>
             <textarea className="input" rows="3" autoFocus value={form.text || ''} onChange={(e) => setForm({ ...form, text: e.target.value })} placeholder="e.g. Recounted at warehouse — all 18 boxes present." /></div>
           <button className="btn btn-primary" style={{ width: '100%' }} disabled={!form.text?.trim()} onClick={() => {
-            dispatch({ type: 'resolveFlag', p: { unitId, byId: currentUser.id, note: form.text.trim() } })
+            dispatch({ type: 'resolveFlag', p: { unitId, note: form.text.trim() } })
             setModal(null); toast('Flag resolved ✓')
           }}>Mark resolved</button>
         </Modal>

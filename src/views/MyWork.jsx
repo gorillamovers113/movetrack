@@ -36,9 +36,9 @@ export default function MyWork({ openUnit, openContainer }) {
   }
 
   const mine = state.units.filter((u) => canAct(currentUser, u))
-  const inProgress = mine.filter((u) => ['packing', 'unpacking'].includes(u.stage))
-  const ready = mine.filter((u) => !['packing', 'unpacking'].includes(u.stage))
-  const myRecent = [...state.events].filter((e) => e.userId === currentUser.id).sort((a, b) => b.ts - a.ts).slice(0, 5)
+  const inProgress = mine.filter((u) => u.stage === 'packing')
+  const ready = mine.filter((u) => u.stage !== 'packing')
+  const myRecent = [...state.events].filter((e) => e.uid === currentUser.uid).sort((a, b) => b.ts - a.ts).slice(0, 5)
 
   const Section = ({ title, units }) => units.length > 0 && (
     <>
