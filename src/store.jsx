@@ -1,18 +1,12 @@
 import React, { createContext, useContext, useEffect, useMemo, useReducer, useState } from 'react'
 import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, signOut, updateProfile } from 'firebase/auth'
-import { doc, setDoc, onSnapshot, serverTimestamp } from 'firebase/firestore'
+import { doc, setDoc, onSnapshot, collection, query, orderBy, serverTimestamp } from 'firebase/firestore'
 import { auth, db } from './firebase.js'
 import { buildSeed, stageOf } from './seed.js'
 
-const KEY = 'movetrack_state_v2'
-
-function load() {
-  try {
-    const raw = localStorage.getItem(KEY)
-    if (raw) return JSON.parse(raw)
-  } catch { /* corrupted state falls through to reseed */ }
-  return buildSeed()
-}
+// Empty shape for the (currently inert) reducer's local state — Task 5 replaces
+// dispatch with real Firestore writes, so this no longer needs to be seeded.
+const EMPTY_REDUCER_STATE = { units: [], containers: [], events: [], users: [], project: null }
 
 let evCounter = Date.now() % 100000
 
@@ -179,15 +173,31 @@ function reducer(state, msg) {
 const Ctx = createContext(null)
 
 export function StoreProvider({ children }) {
-  const [state, dispatch] = useReducer(reducer, null, load)
+  // `dispatch` still runs the old localStorage-era reducer, but its output is
+  // no longer what feeds the UI (Task 5 rewires dispatch to Firestore writes).
+  const [, dispatch] = useReducer(reducer, EMPTY_REDUCER_STATE)
+
+  const [units, setUnits] = useState([])
+  const [containers, setContainers] = useState([])
+  const [events, setEvents] = useState([])
+  const [users, setUsers] = useState([])
+  const [schedule, setSchedule] = useState([])
   const [currentUser, setCurrentUser] = useState(null)
 
+  // Live Firestore state: five collection subscriptions replace the old
+  // localStorage-backed reducer state. Each array holds `{ id, ...data }` docs.
   useEffect(() => {
-    const t = setTimeout(() => {
-      try { localStorage.setItem(KEY, JSON.stringify(state)) } catch { /* quota exceeded: keep running in memory */ }
-    }, 300)
-    return () => clearTimeout(t)
-  }, [state])
+    const subs = [
+      onSnapshot(collection(db, 'units'), (s) => setUnits(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
+      onSnapshot(collection(db, 'containers'), (s) => setContainers(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
+      onSnapshot(query(collection(db, 'events'), orderBy('ts', 'desc')), (s) => setEvents(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
+      onSnapshot(collection(db, 'users'), (s) => setUsers(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
+      onSnapshot(collection(db, 'schedule'), (s) => setSchedule(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
+    ]
+    return () => subs.forEach((u) => u())
+  }, [])
+
+  const state = { units, containers, events, users, schedule }
 
   // Auth session: subscribe to the signed-in user's Firestore profile doc so
   // role/status changes (e.g. admin approval) show up live without a re-login.
