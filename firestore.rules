@@ -1,6 +1,64 @@
 rules_version = "2";
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} { allow read, write: if false; }
+
+    // ---- helpers ----
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function me() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    function isActive() {
+      return isSignedIn() && me().status == 'active';
+    }
+    function hasRole(r) {
+      return isActive() && me().role == r;
+    }
+    function isAdmin() {
+      return hasRole('admin');
+    }
+    // packer/mover/driver may write units/containers/events; the client enforces
+    // which specific stage transition each role is allowed to perform.
+    function isCrew() {
+      return isActive() && me().role in ['packer', 'mover', 'driver'];
+    }
+
+    // ---- users ----
+    // Signup: a user may create only their own doc, and only in the pending,
+    // roleless state. Admin approval (setting role + status='active') happens
+    // via a separate update, which only admins may perform.
+    match /users/{uid} {
+      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == uid);
+
+      allow create: if isSignedIn()
+        && request.auth.uid == uid
+        && request.resource.data.uid == uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.role == null;
+
+      allow update, delete: if isAdmin();
+    }
+
+    // ---- operational collections ----
+    match /units/{unitId} {
+      allow read: if isActive();
+      allow write: if isAdmin() || isCrew();
+    }
+
+    match /containers/{containerId} {
+      allow read: if isActive();
+      allow write: if isAdmin() || isCrew();
+    }
+
+    match /events/{eventId} {
+      allow read: if isActive();
+      allow write: if isAdmin() || isCrew();
+    }
+
+    match /schedule/{scheduleId} {
+      allow read: if isActive();
+      allow write: if isAdmin();
+    }
   }
 }
