@@ -51,6 +51,8 @@ export function StoreProvider({ children }) {
   async function dispatch({ type, p }) {
     const unit = p.unitId ? state.units.find((u) => u.id === p.unitId) : null
     const cont0 = p.containerId ? state.containers.find((c) => c.id === p.containerId) : null
+    const targetUser = p.userId ? state.users.find((u) => u.id === p.userId) : null
+    const name = targetUser ? targetUser.name : 'user'
 
     switch (type) {
       case 'startPacking': {
@@ -119,6 +121,22 @@ export function StoreProvider({ children }) {
       case 'resolveContainerFlag': {
         await updateDoc(doc(db, 'containers', p.containerId), { 'flag.open': false })
         return ev('flag', `FLAG resolved on container ${cont0.number}: ${p.note}`, { containerId: cont0.id })
+      }
+      case 'approveUser': {
+        await updateDoc(doc(db, 'users', p.userId), { status: 'active', role: p.role })
+        return ev('system', `Approved ${name} as ${p.role}`)
+      }
+      case 'changeRole': {
+        await updateDoc(doc(db, 'users', p.userId), { role: p.role })
+        return ev('system', `Changed ${name}'s role to ${p.role}`)
+      }
+      case 'removeUser': {
+        await updateDoc(doc(db, 'users', p.userId), { status: 'removed', role: null })
+        return ev('system', `Removed ${name}'s access`)
+      }
+      case 'denyUser': {
+        await updateDoc(doc(db, 'users', p.userId), { status: 'removed' })
+        return ev('system', `Denied ${name}'s request`)
       }
       default:
         console.warn(`dispatch: unhandled action "${type}" (not part of the Phase-1 action set)`)

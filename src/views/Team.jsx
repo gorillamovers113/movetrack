@@ -52,7 +52,7 @@ export default function Team({ toast }) {
       <div className="section-title">Active roster · {active.length}</div>
       <div className="card">
         <table className="tbl">
-          <thead><tr><th>Member</th><th>Role</th><th>Actions logged</th><th>Email</th></tr></thead>
+          <thead><tr><th>Member</th><th>Role</th><th>Actions logged</th><th>Email</th>{isAdmin && <th></th>}</tr></thead>
           <tbody>
             {active.map((u) => (
               <tr key={u.id}>
@@ -69,6 +69,18 @@ export default function Team({ toast }) {
                 </td>
                 <td><b>{actionCount(u.id)}</b></td>
                 <td className="muted">{u.email}</td>
+                {isAdmin && (
+                  <td>
+                    {u.id !== currentUser.uid && (
+                      <button className="btn btn-danger btn-sm" onClick={() => {
+                        if (confirm(`Remove ${u.name}'s access? They'll lose access to the board on next load.`)) {
+                          dispatch({ type: 'removeUser', p: { userId: u.id, byId: currentUser.uid } })
+                          toast(`${u.name} removed`)
+                        }
+                      }}>Remove</button>
+                    )}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
