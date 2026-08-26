@@ -1,8 +1,10 @@
-import React, { createContext, useContext, useEffect, useMemo, useReducer } from 'react'
+import React, { createContext, useContext, useEffect, useMemo, useReducer, useState } from 'react'
+import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, signOut, updateProfile } from 'firebase/auth'
+import { doc, setDoc, onSnapshot, serverTimestamp } from 'firebase/firestore'
+import { auth, db } from './firebase.js'
 import { buildSeed, stageOf } from './seed.js'
 
 const KEY = 'movetrack_state_v2'
-const SESSION_KEY = 'movetrack_session_v1'
 
 function load() {
   try {
@@ -178,9 +180,7 @@ const Ctx = createContext(null)
 
 export function StoreProvider({ children }) {
   const [state, dispatch] = useReducer(reducer, null, load)
-  const [session, setSession] = React.useState(() => {
-    try { return JSON.parse(sessionStorage.getItem(SESSION_KEY)) } catch { return null }
-  })
+  const [currentUser, setCurrentUser] = useState(null)
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -189,13 +189,37 @@ export function StoreProvider({ children }) {
     return () => clearTimeout(t)
   }, [state])
 
-  const currentUser = state.users.find((u) => u.id === session) || null
+  // Auth session: subscribe to the signed-in user's Firestore profile doc so
+  // role/status changes (e.g. admin approval) show up live without a re-login.
+  useEffect(() => {
+    let unsubProfile = null
+    const unsubAuth = onAuthStateChanged(auth, (user) => {
+      if (unsubProfile) { unsubProfile(); unsubProfile = null }
+      if (!user) { setCurrentUser(null); return }
+      unsubProfile = onSnapshot(doc(db, 'users', user.uid), (snap) => {
+        setCurrentUser(snap.exists() ? snap.data() : null)
+      })
+    })
+    return () => { unsubAuth(); if (unsubProfile) unsubProfile() }
+  }, [])
+
+  const signup = async ({ name, email, password }) => {
+    const cred = await createUserWithEmailAndPassword(auth, email, password)
+    await updateProfile(cred.user, { displayName: name })
+    await setDoc(doc(db, 'users', cred.user.uid), { uid: cred.user.uid, name, email, role: null, status: 'pending', createdAt: serverTimestamp() })
+  }
+  const login = (email, password) => signInWithEmailAndPassword(auth, email, password)
+  const resetPassword = (email) => sendPasswordResetEmail(auth, email)
+  const logout = () => signOut(auth)
+
   const api = useMemo(() => ({
     state,
     dispatch,
     currentUser,
-    login: (userId) => { setSession(userId); try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(userId)) } catch { /* ignore */ } },
-    logout: () => { setSession(null); try { sessionStorage.removeItem(SESSION_KEY) } catch { /* ignore */ } },
+    signup,
+    login,
+    resetPassword,
+    logout,
   }), [state, currentUser])
 
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>

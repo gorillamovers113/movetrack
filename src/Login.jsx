@@ -1,21 +1,82 @@
 import React, { useState } from 'react'
-import { ROLES } from './seed.js'
 import { useStore } from './store.jsx'
-import { Avatar, GorillaWordmark } from './ui.jsx'
+import { GorillaWordmark } from './ui.jsx'
+
+function friendlyError(code) {
+  switch (code) {
+    case 'auth/invalid-credential':
+    case 'auth/wrong-password':
+    case 'auth/user-not-found':
+      return 'Email or password is wrong.'
+    case 'auth/invalid-email':
+      return "That email address doesn't look right."
+    case 'auth/email-already-in-use':
+      return 'An account already exists for that email. Try signing in instead.'
+    case 'auth/weak-password':
+      return 'Password should be at least 6 characters.'
+    case 'auth/missing-password':
+      return 'Enter a password.'
+    case 'auth/too-many-requests':
+      return 'Too many attempts. Wait a bit and try again.'
+    case 'auth/network-request-failed':
+      return 'Network error — check your connection and try again.'
+    default:
+      return 'Something went wrong. Try again.'
+  }
+}
 
 export default function Login() {
-  const { state, dispatch, login } = useStore()
-  const [mode, setMode] = useState('signin') // signin | register | requested
+  const { login, signup, resetPassword } = useStore()
+  const [mode, setMode] = useState('signin') // signin | register | forgot | forgot-sent
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
 
-  const demoUsers = state.users.filter((u) => ['u-casey', 'u-maria', 'u-jake', 'u-mike', 'u-dana', 'u-robbie'].includes(u.id))
+  const switchMode = (m) => { setMode(m); setError('') }
 
-  const register = (via) => {
+  const doSignIn = async () => {
+    const e = email.trim()
+    if (!e || !password) return setError('Enter your email and password.')
+    setError(''); setBusy(true)
+    try {
+      await login(e, password)
+    } catch (err) {
+      setError(friendlyError(err.code))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const doRegister = async () => {
     const n = name.trim(); const e = email.trim()
-    if (!n || !e.includes('@')) return alert('Enter your name and a valid email.')
-    dispatch({ type: 'register', p: { name: n, email: e, via } })
-    setMode('requested')
+    if (!n) return setError('Enter your full name.')
+    if (!e.includes('@')) return setError('Enter a valid email.')
+    if (password.length < 6) return setError('Password should be at least 6 characters.')
+    setError(''); setBusy(true)
+    try {
+      await signup({ name: n, email: e, password })
+      // On success, onAuthStateChanged picks up the new (pending) user and
+      // the app switches to the PendingScreen automatically.
+    } catch (err) {
+      setError(friendlyError(err.code))
+      setBusy(false)
+    }
+  }
+
+  const doReset = async () => {
+    const e = email.trim()
+    if (!e.includes('@')) return setError('Enter a valid email.')
+    setError(''); setBusy(true)
+    try {
+      await resetPassword(e)
+      setMode('forgot-sent')
+    } catch (err) {
+      setError(friendlyError(err.code))
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
@@ -40,12 +101,26 @@ export default function Login() {
 
       <div className="login-panel">
         <div className="login-card">
-          {mode === 'requested' ? (
+          {error && (
+            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', color: 'var(--red)', borderRadius: 12, padding: '10px 14px', fontSize: 13.5, marginBottom: 14 }}>
+              {error}
+            </div>
+          )}
+
+          {mode === 'forgot-sent' ? (
             <>
-              <h2>Request sent ✓</h2>
-              <p>Casey has to approve your account and assign your role before you can sign in. You'll be in the "Awaiting approval" queue.</p>
-              <div className="pending-note">This keeps the record airtight — nobody touches the project until the admin says who they are and what they're allowed to do.</div>
-              <button className="btn btn-ghost" style={{ width: '100%', marginTop: 16 }} onClick={() => setMode('signin')}>← Back to sign in</button>
+              <h2>Check your email ✓</h2>
+              <p>We sent a password reset link to <b>{email}</b>. Follow it to set a new password, then come back and sign in.</p>
+              <button className="btn btn-ghost" style={{ width: '100%', marginTop: 16 }} onClick={() => switchMode('signin')}>← Back to sign in</button>
+            </>
+          ) : mode === 'forgot' ? (
+            <>
+              <h2>Reset your password</h2>
+              <p>Enter the email on your account and we'll send you a reset link.</p>
+              <div className="field"><label>Email</label>
+                <input className="input" autoFocus type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" onKeyDown={(e) => e.key === 'Enter' && doReset()} /></div>
+              <button className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={busy} onClick={doReset}>{busy ? 'Sending…' : 'Send reset link'}</button>
+              <button className="btn btn-ghost" style={{ width: '100%', marginTop: 10 }} onClick={() => switchMode('signin')}>← Back to sign in</button>
             </>
           ) : mode === 'register' ? (
             <>
@@ -55,33 +130,23 @@ export default function Login() {
                 <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Chris Alvarez" /></div>
               <div className="field"><label>Email</label>
                 <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" /></div>
-              <button className="btn btn-primary btn-lg" style={{ width: '100%' }} onClick={() => register('email')}>Request access</button>
-              <div className="divider">or</div>
-              <button className="btn btn-ghost btn-lg" style={{ width: '100%' }} onClick={() => register('google')}>
-                <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3l5.7-5.7C34 6.1 29.3 4 24 4 13 4 4 13 4 24s9 20 20 20 20-9 20-20c0-1.3-.1-2.6-.4-3.9z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.9 1.2 8 3l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3c-.8 2.3-2.3 4.3-4.1 5.7l6.2 5.2C36.9 39.2 44 34 44 24c0-1.3-.1-2.6-.4-3.9z"/></svg>
-                Continue with Google
-              </button>
-              <button className="btn btn-ghost" style={{ width: '100%', marginTop: 10 }} onClick={() => setMode('signin')}>← Back</button>
+              <div className="field"><label>Password</label>
+                <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="At least 6 characters" onKeyDown={(e) => e.key === 'Enter' && doRegister()} /></div>
+              <button className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={busy} onClick={doRegister}>{busy ? 'Creating account…' : 'Request access'}</button>
+              <button className="btn btn-ghost" style={{ width: '100%', marginTop: 10 }} onClick={() => switchMode('signin')}>← Back</button>
             </>
           ) : (
             <>
               <h2>Sign in</h2>
-              <p>Demo build — tap anyone to see the app exactly as their role sees it.</p>
-              <div className="demo-users">
-                {demoUsers.map((u) => (
-                  <button key={u.id} className="demo-user" onClick={() => login(u.id)}>
-                    <Avatar name={u.name} />
-                    <div>
-                      <b>{u.name}</b>
-                      <span>{u.status === 'pending' ? 'Pending approval — see the wait screen' : (u.title || ROLES[u.role].label)}</span>
-                    </div>
-                    <span className="go">→</span>
-                  </button>
-                ))}
-              </div>
+              <p>Sign in with the email and password on your MoveTrack account.</p>
+              <div className="field"><label>Email</label>
+                <input className="input" autoFocus type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" /></div>
+              <div className="field"><label>Password</label>
+                <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" onKeyDown={(e) => e.key === 'Enter' && doSignIn()} /></div>
+              <button className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={busy} onClick={doSignIn}>{busy ? 'Signing in…' : 'Sign in'}</button>
+              <button className="btn btn-ghost" style={{ width: '100%', marginTop: 10 }} onClick={() => switchMode('forgot')}>Forgot password?</button>
               <div className="divider">new here?</div>
-              <button className="btn btn-dark btn-lg" style={{ width: '100%' }} onClick={() => setMode('register')}>Create an account</button>
-              <p className="muted" style={{ marginTop: 14, textAlign: 'center' }}>Passwords & Google sign-in go live with the production backend.</p>
+              <button className="btn btn-dark btn-lg" style={{ width: '100%' }} onClick={() => switchMode('register')}>Create an account</button>
             </>
           )}
         </div>
