@@ -130,7 +130,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
       dispatch({ type: 'unpackUnit', p: { unitId, media } })
     }
     closeActionModal()
-    const pieceCheckKeys = ['loadUnit', 'unloadReturn']
+    const pieceCheckKeys = ['loadUnit', 'unloadReturn', 'loadForReturn']
     if (!pieceCheckKeys.includes(action.key) || unit.pieces == null || parseInt(form.pieces) === unit.pieces) toast('Logged, timestamped under your name ✓')
   }
 

@@ -94,6 +94,7 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
 
   const submitDispatchReturn = async () => {
     if (!driverName.trim()) return alert('Enter the driver name.')
+    if (!drUrl) return alert('Add a photo of the container being dispatched for return.')
     setBusy(true)
     try {
       const media = drUrl ? [{ id: `dispatch-${Date.now()}`, kind: 'photo', url: drUrl, label: `Container ${open.number} dispatched for return` }] : []
@@ -248,7 +249,7 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
               <div className="field"><label>Driver name / truck #</label>
                 <input className="input" autoFocus placeholder="e.g. Mike, Truck 12" value={driverName} onChange={(e) => setDriverName(e.target.value)} /></div>
               <div className="field">
-                <label>Photo <span className="muted">(optional)</span></label>
+                <label>Photo <span className="muted">(required)</span></label>
                 <label className="dropzone camera-capture" style={{ display: 'block' }}>
                   <input
                     type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
@@ -264,7 +265,7 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
                   ) : <>📷 Tap to add a photo</>}
                 </label>
               </div>
-              <button className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={busy || drUploading || !driverName.trim()} onClick={submitDispatchReturn}>
+              <button className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={busy || drUploading || !driverName.trim() || !drUrl} onClick={submitDispatchReturn}>
                 {busy ? 'Logging…' : 'Confirm dispatch for return'}
               </button>
             </div>
