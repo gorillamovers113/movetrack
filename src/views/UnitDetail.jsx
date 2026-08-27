@@ -67,7 +67,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
   const action = canAct(currentUser, unit, state.project?.returnPhase)
   const canContribute = currentUser && currentUser.role !== 'viewer'
   const stage = stageOf(unit.stage)
-  const conts = unit.containerIds.map((id) => state.containers.find((c) => c.id === id)).filter(Boolean)
+  const conts = (unit.containerIds || []).map((id) => state.containers.find((c) => c.id === id)).filter(Boolean)
   // On-site containers still available to load into — mover picks from
   // this list instead of typing a container number.
   const loadableContainers = state.containers.filter((c) => c.status === 'empty' || c.status === 'filling')

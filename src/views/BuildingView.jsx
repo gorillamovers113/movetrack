@@ -24,7 +24,7 @@ function bayCounts(n) {
 export default function BuildingView({ selected, onSelect }) {
   const { state } = useStore()
   const floors = []
-  for (let f = 9; f >= 1; f--) floors.push({ f, units: state.units.filter((u) => u.floor === f).sort((a, b) => a.number.localeCompare(b.number)) })
+  for (let f = 9; f >= 1; f--) floors.push({ f, units: state.units.filter((u) => u.floor === f).sort((a, b) => (a.number || '').localeCompare(b.number || '')) })
 
   const floorsBottom = TOP + floors.length * FLOOR_H // 488
 

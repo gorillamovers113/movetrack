@@ -82,7 +82,7 @@ export default function Team({ toast }) {
                       {ASSIGNABLE.map(([k, r]) => <option key={k} value={k}>{r.label}</option>)}
                     </select>
                   ) : (
-                    <span className="badge" style={{ background: ROLES[u.role].color + '22', color: ROLES[u.role].color }}>{ROLES[u.role].label}</span>
+                    <span className="badge" style={{ background: (ROLES[u.role]?.color || '#8a93a2') + '22', color: ROLES[u.role]?.color || '#8a93a2' }}>{ROLES[u.role]?.label || u.role}</span>
                   )}
                 </td>
                 <td><b>{actionCount(u.id)}</b></td>

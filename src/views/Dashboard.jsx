@@ -112,7 +112,7 @@ export default function Dashboard({ openUnit, toast }) {
     if (stageFilter && u.stage !== stageFilter) return false
     if (q) {
       const s = q.toLowerCase()
-      const contNums = u.containerIds.map((id) => state.containers.find((c) => c.id === id)?.number.toLowerCase() || '')
+      const contNums = (u.containerIds || []).map((id) => state.containers.find((c) => c.id === id)?.number.toLowerCase() || '')
       if (!u.number.includes(s) && !(u.tenant || '').toLowerCase().includes(s) && !contNums.some((c) => c.includes(s))) return false
     }
     return true
