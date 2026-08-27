@@ -17,9 +17,25 @@ export default function Team({ toast }) {
   // driver is a legacy role with no action anywhere in canAct/containerAction/
   // overflowAction: filtered out here so admins can't newly assign a dead
   // login. Existing driver users, if any, are left untouched.
-  const ASSIGNABLE = Object.entries(ROLES).filter(([k]) => k !== 'admin' && k !== 'driver')
+  // admin IS assignable here (the Firestore rules already allow an admin to
+  // set role: 'admin' on another user's doc, isAdmin() gates users update),
+  // this is what makes it possible to ever create a second admin from the
+  // UI. Promoting to admin is gated by a confirm() at the call site below,
+  // not by leaving it out of the list.
+  const ASSIGNABLE = Object.entries(ROLES).filter(([k]) => k !== 'driver')
   const pending = state.users.filter((u) => u.status === 'pending')
   const active = state.users.filter((u) => u.status === 'active')
+  const activeAdmins = active.filter((u) => u.role === 'admin')
+  // Last-admin lockout guard: if this were allowed, removing (or demoting)
+  // the only remaining admin would permanently lock the project's admin
+  // controls, recovery would need the Firebase console. A rules-level guard
+  // would need to count docs across the whole users collection, which is
+  // expensive/awkward in security rules, so this is a UI-only guard.
+  // Covers (a) removing the sole admin below. (b) changing the sole admin's
+  // role away from admin doesn't need a separate check: admin rows never
+  // render an editable role select at all (see the Role column below), so
+  // there's no control that could do it, for any admin, last one or not.
+  const isLastAdmin = (u) => u.role === 'admin' && activeAdmins.length === 1
   const actionCount = (uid) => state.events.filter((e) => e.uid === uid).length
   const isAdmin = currentUser?.role === 'admin'
 
@@ -78,12 +94,29 @@ export default function Team({ toast }) {
                 <tr key={u.id}>
                   <td><div className="row"><Avatar name={u.name} size="sm" /><div><b>{u.name}</b>{u.title && <div className="muted">{u.title}</div>}</div></div></td>
                   <td>
-                    {isAdmin && u.id !== currentUser.uid ? (
+                    {/* Admin rows never get an editable select, only the badge, same as
+                        the current-user row always showed. A controlled <select
+                        value={u.role}> has no matching option when u.role is 'admin'
+                        (ASSIGNABLE used to exclude it), so it rendered a wrong role and
+                        one stray click silently demoted a fellow admin. Now that admin
+                        IS in ASSIGNABLE this particular bug can't recur either way, but
+                        the badge-only rendering also is what makes fix 3's guard (b)
+                        above true: there's simply no control here that could change an
+                        admin's role. */}
+                    {isAdmin && u.id !== currentUser.uid && u.role !== 'admin' ? (
                       <select className="input" style={{ width: 'auto', padding: '5px 9px', fontSize: 13 }} value={u.role} disabled={busyIds.has(u.id)}
-                        onChange={(e) => { const nextRole = e.target.value; withUserBusy(u.id, async () => {
-                          const status = await submitWrite(dispatch({ type: 'changeRole', p: { userId: u.id, role: nextRole, byId: currentUser.uid } }))
-                          toast(status === 'queued' ? QUEUED_MESSAGE : `${u.name} → ${ROLES[nextRole].label}`)
-                        }) }}>
+                        onChange={(e) => {
+                          const nextRole = e.target.value
+                          // Promoting to admin is powerful (approve/remove/change roles,
+                          // edit everything), so it needs a deliberate confirmation, not
+                          // a single mis-click on a dropdown. Cancelling just leaves the
+                          // select's value alone since it's controlled by u.role.
+                          if (nextRole === 'admin' && !confirm(`Make ${u.name} a full admin? Admins can approve/remove users, change roles, and edit everything.`)) return
+                          withUserBusy(u.id, async () => {
+                            const status = await submitWrite(dispatch({ type: 'changeRole', p: { userId: u.id, role: nextRole, byId: currentUser.uid } }))
+                            toast(status === 'queued' ? QUEUED_MESSAGE : `${u.name} → ${ROLES[nextRole].label}`)
+                          })
+                        }}>
                         {ASSIGNABLE.map(([k, r]) => <option key={k} value={k}>{r.label}</option>)}
                       </select>
                     ) : (
@@ -95,14 +128,18 @@ export default function Team({ toast }) {
                   {isAdmin && (
                     <td>
                       {u.id !== currentUser.uid && (
-                        <button className="btn btn-danger btn-sm" disabled={busyIds.has(u.id)} onClick={() => {
-                          if (confirm(`Remove ${u.name}'s access? They'll lose access to the board on next load.`)) {
-                            withUserBusy(u.id, async () => {
-                              const status = await submitWrite(dispatch({ type: 'removeUser', p: { userId: u.id, byId: currentUser.uid } }))
-                              toast(status === 'queued' ? QUEUED_MESSAGE : `${u.name} removed`)
-                            })
-                          }
-                        }}>{busyIds.has(u.id) ? 'Working…' : 'Remove'}</button>
+                        isLastAdmin(u) ? (
+                          <span className="muted" style={{ fontSize: 12.5 }}>Only admin, promote someone else first</span>
+                        ) : (
+                          <button className="btn btn-danger btn-sm" disabled={busyIds.has(u.id)} onClick={() => {
+                            if (confirm(`Remove ${u.name}'s access? They'll lose access to the board on next load.`)) {
+                              withUserBusy(u.id, async () => {
+                                const status = await submitWrite(dispatch({ type: 'removeUser', p: { userId: u.id, byId: currentUser.uid } }))
+                                toast(status === 'queued' ? QUEUED_MESSAGE : `${u.name} removed`)
+                              })
+                            }
+                          }}>{busyIds.has(u.id) ? 'Working…' : 'Remove'}</button>
+                        )
                       )}
                     </td>
                   )}
@@ -120,9 +157,17 @@ export default function Team({ toast }) {
             <select className="input" value={role} onChange={(e) => setRole(e.target.value)}>
               {ASSIGNABLE.map(([k, r]) => <option key={k} value={k}>{r.label}</option>)}
             </select>
-            <div className="muted" style={{ marginTop: 6 }}>There is exactly one admin on this project: you.</div>
+            {/* Was "There is exactly one admin on this project: you." That stopped
+                being true once admin became assignable (fix 2): multiple admins are
+                now possible, so this reports the live count instead of a hardcoded
+                claim. */}
+            <div className="muted" style={{ marginTop: 6 }}>{activeAdmins.length === 1 ? 'There is currently 1 admin on this project.' : `There are currently ${activeAdmins.length} admins on this project.`}</div>
           </div>
           <button className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={busy} onClick={async () => {
+            // Same reasoning as the role-change select: promoting straight to admin
+            // on approval is powerful, so it gets its own confirmation instead of
+            // riding along with the normal approve flow on a single click.
+            if (role === 'admin' && !confirm(`Make ${approving.name} a full admin? Admins can approve/remove users, change roles, and edit everything.`)) return
             setBusy(true)
             try {
               const status = await submitWrite(dispatch({ type: 'approveUser', p: { userId: approving.id, role, byId: currentUser.uid } }))
