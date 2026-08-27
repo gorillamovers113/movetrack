@@ -259,6 +259,80 @@ describe('containers — second load regression guard', () => {
       })
     )
   })
+
+  it('warehouse loading a second unit into a return_filling container allowed', async () => {
+    await setReturnPhase(true)
+    await seed('containers', 'c1', baseContainer({ status: 'return_filling', unitIds: ['u1'] }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(WAREHOUSE), 'containers', 'c1'), {
+        status: 'return_filling',
+        unitIds: arrayUnion('u2'),
+      })
+    )
+  })
+})
+
+// =====================================================================
+// 4b. Container self-loop lock: a filling->filling (or return_filling->
+//     return_filling) no-op status write must only be able to touch the
+//     fields the real second-load dispatch touches (status, unitIds), not
+//     media/driverName/bay/flag, which would let a direct write alter an
+//     already-filling container with no event trail.
+// =====================================================================
+describe('containers - self-loop field lock', () => {
+  it('mover self-loop also changing media denied', async () => {
+    await seed('containers', 'c1', baseContainer({ status: 'filling', unitIds: ['u1'] }))
+    await assertFails(
+      updateDoc(doc(dbAs(MOVER), 'containers', 'c1'), {
+        status: 'filling',
+        unitIds: arrayUnion('u2'),
+        media: arrayUnion({ id: 'm1', kind: 'photo', url: 'x' }),
+      })
+    )
+  })
+
+  it('mover self-loop also changing driverName denied', async () => {
+    await seed('containers', 'c1', baseContainer({ status: 'filling', unitIds: ['u1'] }))
+    await assertFails(
+      updateDoc(doc(dbAs(MOVER), 'containers', 'c1'), { status: 'filling', driverName: 'Dave' })
+    )
+  })
+
+  it('mover self-loop also changing bay denied', async () => {
+    await seed('containers', 'c1', baseContainer({ status: 'filling', unitIds: ['u1'] }))
+    await assertFails(
+      updateDoc(doc(dbAs(MOVER), 'containers', 'c1'), { status: 'filling', bay: 'B1' })
+    )
+  })
+
+  it('mover self-loop also opening a flag denied', async () => {
+    await seed('containers', 'c1', baseContainer({ status: 'filling', unitIds: ['u1'] }))
+    await assertFails(
+      updateDoc(doc(dbAs(MOVER), 'containers', 'c1'), {
+        status: 'filling',
+        flag: { message: 'tamper', ts: 1, by: 'x', open: true },
+      })
+    )
+  })
+
+  it('warehouse return self-loop also changing bay denied', async () => {
+    await setReturnPhase(true)
+    await seed('containers', 'c1', baseContainer({ status: 'return_filling', unitIds: ['u1'] }))
+    await assertFails(
+      updateDoc(doc(dbAs(WAREHOUSE), 'containers', 'c1'), { status: 'return_filling', bay: 'B2' })
+    )
+  })
+
+  it('warehouse return self-loop also changing media denied', async () => {
+    await setReturnPhase(true)
+    await seed('containers', 'c1', baseContainer({ status: 'return_filling', unitIds: ['u1'] }))
+    await assertFails(
+      updateDoc(doc(dbAs(WAREHOUSE), 'containers', 'c1'), {
+        status: 'return_filling',
+        media: arrayUnion({ id: 'm1', kind: 'photo', url: 'x' }),
+      })
+    )
+  })
 })
 
 // =====================================================================
@@ -396,15 +470,31 @@ describe('create rules', () => {
   })
 
   it('createOverflow: mover at identified allowed', async () => {
-    await assertSucceeds(addDoc(collection(dbAs(MOVER), 'overflow'), baseOverflow({ stage: 'identified' })))
+    await assertSucceeds(
+      addDoc(collection(dbAs(MOVER), 'overflow'), baseOverflow({ stage: 'identified', createdBy: MOVER }))
+    )
   })
 
   it('createOverflow: warehouse (wrong role) denied', async () => {
-    await assertFails(addDoc(collection(dbAs(WAREHOUSE), 'overflow'), baseOverflow({ stage: 'identified' })))
+    await assertFails(
+      addDoc(collection(dbAs(WAREHOUSE), 'overflow'), baseOverflow({ stage: 'identified', createdBy: WAREHOUSE }))
+    )
   })
 
   it('createOverflow: wrong initial stage denied', async () => {
     await assertFails(addDoc(collection(dbAs(MOVER), 'overflow'), baseOverflow({ stage: 'prepped' })))
+  })
+
+  it('createOverflow: mover forging createdBy as another user denied', async () => {
+    await assertFails(
+      addDoc(collection(dbAs(MOVER), 'overflow'), baseOverflow({ stage: 'identified', createdBy: PACKER }))
+    )
+  })
+
+  it('createOverflow: packer forging createdBy as another user denied', async () => {
+    await assertFails(
+      addDoc(collection(dbAs(PACKER), 'overflow'), baseOverflow({ stage: 'identified', createdBy: OTHER_PACKER }))
+    )
   })
 })
 
@@ -469,6 +559,223 @@ describe('events — append-only accountability log', () => {
   it('admin deleting an existing event allowed', async () => {
     await seed('events', 'e1', { uid: PACKER, userName: 'Test packer-1', role: 'packer', type: 'stage', action: 'x', ts: 1 })
     await assertSucceeds(deleteDoc(doc(dbAs(ADMIN), 'events', 'e1')))
+  })
+})
+
+// =====================================================================
+// 9b. Custody attribution fields (receivedBy/handoffBy/prepBy/transportBy/
+//     returnedBy) must equal the caller's own uid on a non-admin write.
+//     Mirrors the events.uid guard, but for the fields that record who
+//     physically handled a handoff on units/containers/overflow.
+// =====================================================================
+describe('custody attribution fields locked to the actor', () => {
+  it('warehouseReceive: receivedBy == own uid allowed', async () => {
+    await seed('containers', 'c1', baseContainer({ status: 'picked_up', unitIds: ['u1'] }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(WAREHOUSE), 'containers', 'c1'), {
+        status: 'at_warehouse',
+        bay: 'B1',
+        verifiedPieces: 5,
+        receivedBy: WAREHOUSE,
+        warehouseAt: 1,
+      })
+    )
+  })
+
+  it('warehouseReceive: receivedBy forged as another user denied', async () => {
+    await seed('containers', 'c1', baseContainer({ status: 'picked_up', unitIds: ['u1'] }))
+    await assertFails(
+      updateDoc(doc(dbAs(WAREHOUSE), 'containers', 'c1'), {
+        status: 'at_warehouse',
+        bay: 'B1',
+        verifiedPieces: 5,
+        receivedBy: PACKER,
+        warehouseAt: 1,
+      })
+    )
+  })
+
+  it('bigboxSwap: handoffBy == own uid allowed', async () => {
+    await seed('containers', 'c1', baseContainer({ status: 'full', unitIds: ['u1'] }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(MOVER), 'containers', 'c1'), {
+        status: 'picked_up',
+        driverName: 'Dave',
+        pickedUpAt: 1,
+        handoffBy: MOVER,
+      })
+    )
+  })
+
+  it('bigboxSwap: handoffBy forged as another user denied', async () => {
+    await seed('containers', 'c1', baseContainer({ status: 'full', unitIds: ['u1'] }))
+    await assertFails(
+      updateDoc(doc(dbAs(MOVER), 'containers', 'c1'), {
+        status: 'picked_up',
+        driverName: 'Dave',
+        pickedUpAt: 1,
+        handoffBy: OTHER_PACKER,
+      })
+    )
+  })
+
+  it('deliverReturn: receivedBy forged as another user denied', async () => {
+    await setReturnPhase(true)
+    await seed('containers', 'c1', baseContainer({ status: 'return_transit', unitIds: ['u1'] }))
+    await assertFails(
+      updateDoc(doc(dbAs(MOVER), 'containers', 'c1'), {
+        status: 'back_on_site',
+        receivedBy: WAREHOUSE,
+        backOnSiteAt: 1,
+      })
+    )
+  })
+
+  it('dispatchReturn: handoffBy forged as another user denied', async () => {
+    await setReturnPhase(true)
+    await seed('containers', 'c1', baseContainer({ status: 'return_full', unitIds: ['u1'] }))
+    await assertFails(
+      updateDoc(doc(dbAs(WAREHOUSE), 'containers', 'c1'), {
+        status: 'return_transit',
+        driverName: 'Dave',
+        dispatchedAt: 1,
+        handoffBy: MOVER,
+      })
+    )
+  })
+
+  it('prepOverflow: prepBy == own uid allowed', async () => {
+    await seed('overflow', 'o1', baseOverflow({ stage: 'identified' }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(MOVER), 'overflow', 'o1'), { stage: 'prepped', preppedAt: 1, prepBy: MOVER })
+    )
+  })
+
+  it('prepOverflow: prepBy forged as another user denied', async () => {
+    await seed('overflow', 'o1', baseOverflow({ stage: 'identified' }))
+    await assertFails(
+      updateDoc(doc(dbAs(MOVER), 'overflow', 'o1'), { stage: 'prepped', preppedAt: 1, prepBy: OTHER_PACKER })
+    )
+  })
+
+  it('transportOverflow: transportBy == own uid allowed', async () => {
+    await seed('overflow', 'o1', baseOverflow({ stage: 'prepped' }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(MOVER), 'overflow', 'o1'), { stage: 'in_transit', transitAt: 1, transportBy: MOVER })
+    )
+  })
+
+  it('transportOverflow: transportBy forged as another user denied', async () => {
+    await seed('overflow', 'o1', baseOverflow({ stage: 'prepped' }))
+    await assertFails(
+      updateDoc(doc(dbAs(MOVER), 'overflow', 'o1'), { stage: 'in_transit', transitAt: 1, transportBy: OTHER_PACKER })
+    )
+  })
+
+  it('receiveOverflow: receivedBy forged as another user denied', async () => {
+    await seed('overflow', 'o1', baseOverflow({ stage: 'in_transit' }))
+    await assertFails(
+      updateDoc(doc(dbAs(WAREHOUSE), 'overflow', 'o1'), {
+        stage: 'at_warehouse',
+        warehouseAt: 1,
+        receivedBy: MOVER,
+        warehouseLocation: 'Rack 4',
+      })
+    )
+  })
+
+  it('transportOverflowBack: transportBy forged as another user denied', async () => {
+    await setReturnPhase(true)
+    await seed('overflow', 'o1', baseOverflow({ stage: 'at_warehouse' }))
+    await assertFails(
+      updateDoc(doc(dbAs(MOVER), 'overflow', 'o1'), { stage: 'rt_transit', rtTransitAt: 1, transportBy: OTHER_PACKER })
+    )
+  })
+
+  it('returnOverflow: returnedBy == own uid allowed', async () => {
+    await setReturnPhase(true)
+    await seed('overflow', 'o1', baseOverflow({ stage: 'rt_transit' }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(MOVER), 'overflow', 'o1'), { stage: 'returned', returnedAt: 1, returnedBy: MOVER })
+    )
+  })
+
+  it('returnOverflow: returnedBy forged as another user denied', async () => {
+    await setReturnPhase(true)
+    await seed('overflow', 'o1', baseOverflow({ stage: 'rt_transit' }))
+    await assertFails(
+      updateDoc(doc(dbAs(MOVER), 'overflow', 'o1'), { stage: 'returned', returnedAt: 1, returnedBy: OTHER_PACKER })
+    )
+  })
+
+  it('admin may set receivedBy to any uid (bypass)', async () => {
+    await seed('containers', 'c1', baseContainer({ status: 'picked_up', unitIds: ['u1'] }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(ADMIN), 'containers', 'c1'), {
+        status: 'at_warehouse',
+        bay: 'B1',
+        verifiedPieces: 5,
+        receivedBy: WAREHOUSE,
+        warehouseAt: 1,
+      })
+    )
+  })
+
+  // Regression: a custody field stamped by an earlier stage (by a different
+  // actor) must not block a later, unrelated write that never touches that
+  // field. Without diffing against the pre-write doc, request.resource.data
+  // (the full post-write doc) still carries the old value forward, and a
+  // naive "value == request.auth.uid" check would wrongly deny every later
+  // step in the chain.
+  it('warehouseReceive allowed even though the container already carries a different user\'s handoffBy from bigboxSwap', async () => {
+    await seed('containers', 'c1', baseContainer({ status: 'picked_up', unitIds: ['u1'], handoffBy: MOVER, driverName: 'Dave', pickedUpAt: 1 }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(WAREHOUSE), 'containers', 'c1'), {
+        status: 'at_warehouse',
+        bay: 'B1',
+        verifiedPieces: 5,
+        receivedBy: WAREHOUSE,
+        warehouseAt: 1,
+      })
+    )
+  })
+
+  it('deliverReturn allowed even though the container already carries a different user\'s handoffBy from dispatchReturn', async () => {
+    await setReturnPhase(true)
+    await seed('containers', 'c1', baseContainer({ status: 'return_transit', unitIds: ['u1'], handoffBy: WAREHOUSE, driverName: 'Dave', dispatchedAt: 1 }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(MOVER), 'containers', 'c1'), {
+        status: 'back_on_site',
+        receivedBy: MOVER,
+        backOnSiteAt: 1,
+      })
+    )
+  })
+
+  it('receiveOverflow allowed even though the item already carries a different user\'s prepBy from prepOverflow', async () => {
+    await seed('overflow', 'o1', baseOverflow({ stage: 'in_transit', prepBy: MOVER, preppedAt: 1, transportBy: MOVER, transitAt: 1 }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(WAREHOUSE), 'overflow', 'o1'), {
+        stage: 'at_warehouse',
+        warehouseAt: 1,
+        receivedBy: WAREHOUSE,
+        warehouseLocation: 'Rack 4',
+      })
+    )
+  })
+
+  it('a carried-over custody field still cannot be reassigned to a third uid in the same write', async () => {
+    await seed('containers', 'c1', baseContainer({ status: 'picked_up', unitIds: ['u1'], handoffBy: MOVER, driverName: 'Dave', pickedUpAt: 1 }))
+    await assertFails(
+      updateDoc(doc(dbAs(WAREHOUSE), 'containers', 'c1'), {
+        status: 'at_warehouse',
+        bay: 'B1',
+        verifiedPieces: 5,
+        receivedBy: WAREHOUSE,
+        warehouseAt: 1,
+        handoffBy: OTHER_PACKER,
+      })
+    )
   })
 })
 
