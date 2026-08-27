@@ -5,6 +5,11 @@ import { auth, db } from './firebase.js'
 import { makeEvent, boxMismatch } from './lib/mutations.js'
 import { DEFAULT_SCHEDULE } from './lib/schedule.js'
 
+// meta/project doc default, used whenever the doc is absent (brand-new
+// project, or before an admin has touched return phase). Keeps name/address
+// consistent with the hardcoded fallback App.jsx used before this doc existed.
+const DEFAULT_PROJECT = { returnPhase: false, name: 'Trinity Manor', address: '3940 Park Blvd' }
+
 const Ctx = createContext(null)
 
 export function StoreProvider({ children }) {
@@ -14,10 +19,12 @@ export function StoreProvider({ children }) {
   const [events, setEvents] = useState([])
   const [users, setUsers] = useState([])
   const [schedule, setSchedule] = useState([])
+  const [project, setProject] = useState(null)
   const [currentUser, setCurrentUser] = useState(null)
 
-  // Live Firestore state: six collection subscriptions replace the old
-  // localStorage-backed reducer state. Each array holds `{ id, ...data }` docs.
+  // Live Firestore state: collection (+ one singleton doc) subscriptions
+  // replace the old localStorage-backed reducer state. Each array holds
+  // `{ id, ...data }` docs.
   useEffect(() => {
     const subs = [
       onSnapshot(collection(db, 'units'), (s) => setUnits(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
@@ -26,11 +33,12 @@ export function StoreProvider({ children }) {
       onSnapshot(query(collection(db, 'events'), orderBy('ts', 'desc')), (s) => setEvents(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
       onSnapshot(collection(db, 'users'), (s) => setUsers(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
       onSnapshot(collection(db, 'schedule'), (s) => setSchedule(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
+      onSnapshot(doc(db, 'meta', 'project'), (d) => setProject(d.exists() ? { id: d.id, ...d.data() } : null)),
     ]
     return () => subs.forEach((u) => u())
   }, [])
 
-  const state = { units, containers, overflow, events, users, schedule }
+  const state = { units, containers, overflow, events, users, schedule, project: project || DEFAULT_PROJECT }
 
   // Auth session: subscribe to the signed-in user's Firestore profile doc so
   // role/status changes (e.g. admin approval) show up live without a re-login.
@@ -146,6 +154,22 @@ export function StoreProvider({ children }) {
         if (mismatch) await ev('flag', `FLAG raised on container ${cont0.number}: piece count mismatch (${p.verifiedPieces}/${expected})`, { containerId: cont0.id })
         return
       }
+
+      // ---- Return phase (docs/superpowers/specs/2026-08-26-return-phase-design.md) ----
+      // Exact reverse of the outbound actions above: same piece-count
+      // verification + photo trail at every handoff, same roles doing the
+      // reverse of their outbound step, back into the same apartment. See
+      // §3's mirror table for which outbound action each one undoes.
+
+      case 'setReturnPhase': {
+        // Admin toggle. Preserve name/address on the write (not just merge)
+        // so a first-ever toggle doesn't create a meta/project doc missing
+        // those fields, which would drop the project chip's fallback text.
+        const current = state.project
+        await setDoc(doc(db, 'meta', 'project'), { returnPhase: p.on, name: current.name, address: current.address }, { merge: true })
+        return ev('system', `${p.on ? 'Began' : 'Ended'} the return phase`)
+      }
+
       case 'createOverflow': {
         // Oversized piece that won't fit a BigBox container, so Gorilla
         // Movers transports it to the warehouse directly, on its own chain
@@ -346,6 +370,13 @@ export const CONT_STATUS = {
   full: { label: 'Full · ready', color: '#f59e0b' },
   picked_up: { label: 'In transit', color: '#f97316' },
   at_warehouse: { label: 'At warehouse', color: '#3b82f6' },
+  // Return leg (cool-to-warm palette, distinct from the outbound colors
+  // above, so the board reads direction at a glance).
+  return_filling: { label: 'Filling for return', color: '#0891b2' },
+  return_full: { label: 'Full · ready for dispatch', color: '#0ea5e9' },
+  return_transit: { label: 'In transit to site', color: '#6366f1' },
+  back_on_site: { label: 'Back on site', color: '#22c55e' },
+  returned_empty: { label: 'Returned, empty', color: '#15803d' },
 }
 
 export function overflowAction(user, item) {
@@ -370,6 +401,9 @@ export const OVERFLOW_STATUS = {
   prepped: { label: 'Ready to transport', color: '#8b5cf6' },
   in_transit: { label: 'In transit', color: '#f97316' },
   at_warehouse: { label: 'At warehouse', color: '#3b82f6' },
+  // Return leg, same cool-to-warm palette as CONT_STATUS above.
+  rt_transit: { label: 'In transit to site', color: '#6366f1' },
+  returned: { label: 'Returned', color: '#15803d' },
 }
 
 export async function filesToMedia(fileList, labelPrefix = '') {

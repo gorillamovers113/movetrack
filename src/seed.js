@@ -25,8 +25,12 @@ export function photoThumb(label, sub = '') {
   return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg)
 }
 
-// Phase-1 one-way lifecycle (matches src/lib/mutations.js STAGES): the project
-// ends at the BigBox warehouse — no return trip / unload / sign-off yet.
+// Outbound lifecycle (matches src/lib/mutations.js STAGES) ends at the BigBox
+// warehouse (step 5). The return phase (docs/superpowers/specs/2026-08-26-return-phase-design.md)
+// continues an item forward from at_warehouse, walking the same steps backward:
+// return_loaded (6) through unpacked (10, terminal). Return stages use a
+// distinct cool-to-warm palette (cyan through green) so the board reads
+// direction at a glance, separate from the outbound gray/teal/purple/orange/blue set.
 export const STAGES = [
   { key: 'not_started', label: 'Not started', short: 'Not started', color: '#8a93a2', step: 0 },
   { key: 'packing', label: 'Packing & prep', short: 'Packing', color: '#14b8a6', step: 1 },
@@ -34,6 +38,11 @@ export const STAGES = [
   { key: 'loaded', label: 'Loaded in container on site', short: 'Loaded', color: '#8b5cf6', step: 3 },
   { key: 'picked_up', label: 'Picked up — en route to warehouse', short: 'Picked up', color: '#f97316', step: 4 },
   { key: 'at_warehouse', label: 'In warehouse', short: 'Warehouse', color: '#3b82f6', step: 5 },
+  { key: 'return_loaded', label: 'Loaded for return at warehouse', short: 'Return loaded', color: '#0891b2', step: 6 },
+  { key: 'return_transit', label: 'In transit back to site', short: 'Return transit', color: '#0ea5e9', step: 7 },
+  { key: 'back_on_site', label: 'Back on site', short: 'Back on site', color: '#6366f1', step: 8 },
+  { key: 'unloaded', label: 'Unloaded into apartment', short: 'Unloaded', color: '#22c55e', step: 9 },
+  { key: 'unpacked', label: 'Unpacked, complete', short: 'Unpacked', color: '#15803d', step: 10 },
 ]
 // Safe fallback for an unrecognized/typo'd stage string — callers can rely on
 // stageOf() always returning a renderable stage object instead of undefined.
