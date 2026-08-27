@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react'
 import { useStore, OVERFLOW_STATUS, overflowAction } from '../store.jsx'
 import { Modal, Lightbox, EventRow, AttributedMedia } from '../ui.jsx'
-import { uploadImage } from '../lib/upload.js'
+import { captureMedia } from '../lib/upload.js'
+import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import ReportOverflowButton from '../components/ReportOverflowButton.jsx'
 
 // Lifecycle order the pool view groups by, matches OVERFLOW_STATUS in
@@ -18,6 +19,10 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
   const [resolveNote, setResolveNote] = useState('')
   const [location, setLocation] = useState('')
   const [busy, setBusy] = useState(false)
+  // Per-item busy set so a double-tap on the "load & transport" quick action
+  // (rendered once per card) can't fire the same write twice.
+  const [busyIds, setBusyIds] = useState(() => new Set())
+  const SAVE_ERROR = "Couldn't save that. Check your signal and try again."
 
   // Prep photo (required) and receive photo (optional), same upload-as-you-go
   // capture pattern as Containers' warehouse-receive photo. The prep photo
@@ -66,10 +71,10 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
   const capturePrepPhoto = async (file) => {
     setPError(null); setPPreview(URL.createObjectURL(file)); setPUrl(null); setPUploading(true)
     try {
-      const url = await uploadImage(file, `overflow/${open.id}/prep/${Date.now()}-${currentUser.uid}.jpg`)
+      const { url } = await captureMedia(file, `overflow/${open.id}/prep/${Date.now()}-${currentUser.uid}.jpg`)
       setPUrl(url)
     } catch (err) {
-      setPError(err.message || 'Upload failed, try again.')
+      setPError(err.message || 'Capture failed, try again.')
     } finally {
       setPUploading(false)
     }
@@ -78,10 +83,10 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
   const captureReceivePhoto = async (file) => {
     setRError(null); setRPreview(URL.createObjectURL(file)); setRUrl(null); setRUploading(true)
     try {
-      const url = await uploadImage(file, `overflow/${open.id}/receive/${Date.now()}-${currentUser.uid}.jpg`)
+      const { url } = await captureMedia(file, `overflow/${open.id}/receive/${Date.now()}-${currentUser.uid}.jpg`)
       setRUrl(url)
     } catch (err) {
-      setRError(err.message || 'Upload failed, try again.')
+      setRError(err.message || 'Capture failed, try again.')
     } finally {
       setRUploading(false)
     }
@@ -90,18 +95,31 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
   const captureTransportBackPhoto = async (file) => {
     setBError(null); setBPreview(URL.createObjectURL(file)); setBUrl(null); setBUploading(true)
     try {
-      const url = await uploadImage(file, `overflow/${open.id}/transport-back/${Date.now()}-${currentUser.uid}.jpg`)
+      const { url } = await captureMedia(file, `overflow/${open.id}/transport-back/${Date.now()}-${currentUser.uid}.jpg`)
       setBUrl(url)
     } catch (err) {
-      setBError(err.message || 'Upload failed, try again.')
+      setBError(err.message || 'Capture failed, try again.')
     } finally {
       setBUploading(false)
     }
   }
 
-  const transport = (item) => {
-    dispatch({ type: 'transportOverflow', p: { overflowId: item.id } })
-    toast(`Unit ${item.unitNumber} overflow item: loaded for transport ✓`)
+  // Returns a success boolean (instead of throwing) so a modal-context
+  // caller can decide whether to close the modal: close on success, stay
+  // open with the error toast already shown on failure.
+  const transport = async (item) => {
+    if (busyIds.has(item.id)) return false
+    setBusyIds((s) => new Set(s).add(item.id))
+    try {
+      const status = await submitWrite(dispatch({ type: 'transportOverflow', p: { overflowId: item.id } }))
+      toast(status === 'queued' ? QUEUED_MESSAGE : `Unit ${item.unitNumber} overflow item: loaded for transport ✓`)
+      return true
+    } catch (err) {
+      toast(err.message || SAVE_ERROR)
+      return false
+    } finally {
+      setBusyIds((s) => { const n = new Set(s); n.delete(item.id); return n })
+    }
   }
 
   const submitPrep = async () => {
@@ -110,9 +128,11 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
     setBusy(true)
     try {
       const media = [{ id: `prep-${Date.now()}`, kind: 'photo', url: pUrl, label: 'Padded, wrapped & labeled' }]
-      await dispatch({ type: 'prepOverflow', p: { overflowId: open.id, media } })
-      toast(`Unit ${open.unitNumber} overflow item: prepped ✓`)
+      const status = await submitWrite(dispatch({ type: 'prepOverflow', p: { overflowId: open.id, media } }))
+      toast(status === 'queued' ? QUEUED_MESSAGE : `Unit ${open.unitNumber} overflow item: prepped ✓`)
       close()
+    } catch (err) {
+      toast(err.message || SAVE_ERROR)
     } finally {
       setBusy(false)
     }
@@ -123,9 +143,11 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
     setBusy(true)
     try {
       const media = rUrl ? [{ id: `recv-${Date.now()}`, kind: 'photo', url: rUrl, label: 'Received condition' }] : []
-      await dispatch({ type: 'receiveOverflow', p: { overflowId: open.id, warehouseLocation: location.trim(), media } })
-      toast(`Unit ${open.unitNumber} overflow item: received at ${location.trim()} ✓`)
+      const status = await submitWrite(dispatch({ type: 'receiveOverflow', p: { overflowId: open.id, warehouseLocation: location.trim(), media } }))
+      toast(status === 'queued' ? QUEUED_MESSAGE : `Unit ${open.unitNumber} overflow item: received at ${location.trim()} ✓`)
       close()
+    } catch (err) {
+      toast(err.message || SAVE_ERROR)
     } finally {
       setBusy(false)
     }
@@ -135,9 +157,11 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
     setBusy(true)
     try {
       const media = bUrl ? [{ id: `back-${Date.now()}`, kind: 'photo', url: bUrl, label: 'Loaded for return transport' }] : []
-      await dispatch({ type: 'transportOverflowBack', p: { overflowId: open.id, media } })
-      toast(`Unit ${open.unitNumber} overflow item: loaded for return transport ✓`)
+      const status = await submitWrite(dispatch({ type: 'transportOverflowBack', p: { overflowId: open.id, media } }))
+      toast(status === 'queued' ? QUEUED_MESSAGE : `Unit ${open.unitNumber} overflow item: loaded for return transport ✓`)
       close()
+    } catch (err) {
+      toast(err.message || SAVE_ERROR)
     } finally {
       setBusy(false)
     }
@@ -149,9 +173,11 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
     setBusy(true)
     try {
       const media = [{ id: `return-${Date.now()}`, kind: 'photo', url: pUrl, label: 'Unwrapped & placed back' }]
-      await dispatch({ type: 'returnOverflow', p: { overflowId: open.id, media } })
-      toast(`Unit ${open.unitNumber} overflow item: back in place ✓`)
+      const status = await submitWrite(dispatch({ type: 'returnOverflow', p: { overflowId: open.id, media } }))
+      toast(status === 'queued' ? QUEUED_MESSAGE : `Unit ${open.unitNumber} overflow item: back in place ✓`)
       close()
+    } catch (err) {
+      toast(err.message || SAVE_ERROR)
     } finally {
       setBusy(false)
     }
@@ -191,7 +217,7 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
                     </span>
                   </div>
                   <div className="cont-units">
-                    {item.unitTenant || '—'} · Floor {item.floor}<br />{item.description}
+                    {item.unitTenant || '-'} · Floor {item.floor}<br />{item.description}
                     {stage === 'at_warehouse' && item.warehouseLocation ? <><br />📍 {item.warehouseLocation}</> : null}
                   </div>
                   {stage === 'identified' && isMover && (
@@ -203,8 +229,9 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
                   {act && act.key === 'transportOverflow' && (
                     <button
                       className="btn btn-primary btn-sm" style={{ marginTop: 10, width: '100%' }}
+                      disabled={busyIds.has(item.id)}
                       onClick={(e) => { e.stopPropagation(); transport(item) }}
-                    >{act.label}</button>
+                    >{busyIds.has(item.id) ? 'Saving…' : act.label}</button>
                   )}
                   {act && (act.key === 'transportOverflowBack' || act.key === 'returnOverflow') && (
                     <button
@@ -228,8 +255,8 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
       {open && (
         <Modal
           title={`Overflow item · Unit ${open.unitNumber}`}
-          sub={`${OVERFLOW_STATUS[open.stage]?.label || open.stage} · ${open.unitTenant || '—'} · Floor ${open.floor}`}
-          onClose={close}
+          sub={`${OVERFLOW_STATUS[open.stage]?.label || open.stage} · ${open.unitTenant || '-'} · Floor ${open.floor}`}
+          onClose={() => { if (!busy) close() }}
         >
           <div className="field"><label>Description</label><div>{open.description}</div></div>
 
@@ -250,10 +277,17 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
               {open.flag.open && isAdmin && (
                 <div style={{ marginTop: 10 }}>
                   <input className="input" placeholder="How was it resolved?" value={resolveNote} onChange={(e) => setResolveNote(e.target.value)} />
-                  <button className="btn btn-dark btn-sm" style={{ marginTop: 8 }} disabled={!resolveNote.trim()} onClick={() => {
-                    dispatch({ type: 'resolveOverflowFlag', p: { overflowId: open.id, note: resolveNote.trim() } })
-                    setResolveNote(''); toast('Flag resolved ✓')
-                  }}>Resolve flag</button>
+                  <button className="btn btn-dark btn-sm" style={{ marginTop: 8 }} disabled={busy || !resolveNote.trim()} onClick={async () => {
+                    setBusy(true)
+                    try {
+                      const status = await submitWrite(dispatch({ type: 'resolveOverflowFlag', p: { overflowId: open.id, note: resolveNote.trim() } }))
+                      setResolveNote(''); toast(status === 'queued' ? QUEUED_MESSAGE : 'Flag resolved ✓')
+                    } catch (err) {
+                      toast(err.message || SAVE_ERROR)
+                    } finally {
+                      setBusy(false)
+                    }
+                  }}>{busy ? 'Saving…' : 'Resolve flag'}</button>
                 </div>
               )}
               {open.flag.open && !isAdmin && <div className="muted" style={{ marginTop: 6 }}>Only the admin can resolve flags.</div>}
@@ -274,7 +308,7 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
                     <div className="inv-preview">
                       <img src={pPreview} alt="Padded, wrapped & labeled" className="inv-thumb" />
                       <div className="muted" style={{ marginTop: 8 }}>
-                        {pUploading ? 'Uploading…' : pUrl ? '✓ Uploaded, tap to retake' : pError || 'Tap to retake'}
+                        {pUploading ? 'Saving…' : pUrl ? '✓ Photo saved, tap to retake' : pError || 'Tap to retake'}
                       </div>
                     </div>
                   ) : <>📷 Tap to photograph the padded, wrapped & labeled item</>}
@@ -288,7 +322,9 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
 
           {open.stage === 'prepped' && isMover && (
             <div style={{ marginTop: 16 }}>
-              <button className="btn btn-primary btn-lg" style={{ width: '100%' }} onClick={() => { transport(open); close() }}>Load & transport to warehouse</button>
+              <button className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={busyIds.has(open.id)} onClick={async () => { if (await transport(open)) close() }}>
+                {busyIds.has(open.id) ? 'Saving…' : 'Load & transport to warehouse'}
+              </button>
             </div>
           )}
 
@@ -308,7 +344,7 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
                     <div className="inv-preview">
                       <img src={rPreview} alt="Received condition" className="inv-thumb" />
                       <div className="muted" style={{ marginTop: 8 }}>
-                        {rUploading ? 'Uploading…' : rUrl ? '✓ Uploaded, tap to retake' : rError || 'Tap to retake'}
+                        {rUploading ? 'Saving…' : rUrl ? '✓ Photo saved, tap to retake' : rError || 'Tap to retake'}
                       </div>
                     </div>
                   ) : <>📷 Tap to add a photo</>}
@@ -334,7 +370,7 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
                     <div className="inv-preview">
                       <img src={bPreview} alt="Loaded for return transport" className="inv-thumb" />
                       <div className="muted" style={{ marginTop: 8 }}>
-                        {bUploading ? 'Uploading…' : bUrl ? '✓ Uploaded, tap to retake' : bError || 'Tap to retake'}
+                        {bUploading ? 'Saving…' : bUrl ? '✓ Photo saved, tap to retake' : bError || 'Tap to retake'}
                       </div>
                     </div>
                   ) : <>📷 Tap to add a photo</>}
@@ -360,7 +396,7 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
                     <div className="inv-preview">
                       <img src={pPreview} alt="Unwrapped and placed back" className="inv-thumb" />
                       <div className="muted" style={{ marginTop: 8 }}>
-                        {pUploading ? 'Uploading…' : pUrl ? '✓ Uploaded, tap to retake' : pError || 'Tap to retake'}
+                        {pUploading ? 'Saving…' : pUrl ? '✓ Photo saved, tap to retake' : pError || 'Tap to retake'}
                       </div>
                     </div>
                   ) : <>📷 Tap to photograph the item unwrapped and back in place</>}

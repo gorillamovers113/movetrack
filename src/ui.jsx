@@ -39,7 +39,7 @@ export function Modal({ title, sub, onClose, children }) {
       <div className="modal">
         <div className="row" style={{ marginBottom: 4 }}>
           <h3 className="grow">{title}</h3>
-          <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
+          <button className="btn btn-ghost btn-sm btn-icon-sm" onClick={onClose} aria-label="Close">✕</button>
         </div>
         {sub && <p className="sub">{sub}</p>}
         {children}
@@ -51,7 +51,7 @@ export function Modal({ title, sub, onClose, children }) {
 export function Lightbox({ media, onClose }) {
   if (!media) return null
   const who = media.userName || 'Unknown'
-  const when = media.ts ? fmtTime(media.ts) : '—'
+  const when = media.ts ? fmtTime(media.ts) : '-'
   return (
     <div className="lightbox" onClick={onClose}>
       {media.kind === 'video'
@@ -91,7 +91,7 @@ export function AttributedMedia({ media, onOpen }) {
             ? <div className="media-video" onClick={() => onOpen(m)} title={m.label}>▶</div>
             : <img className="media-thumb" src={m.url} alt={m.label} onClick={() => onOpen(m)} />}
           <div className="muted" style={{ fontSize: 11, marginTop: 3, lineHeight: 1.3 }}>
-            {m.userName || 'Unknown'}<br />{m.ts ? fmtTime(m.ts) : '—'}
+            {m.userName || 'Unknown'}<br />{m.ts ? fmtTime(m.ts) : '-'}
           </div>
         </div>
       ))}
@@ -127,7 +127,7 @@ export function EventRow({ e, onOpenMedia, linkUnit, linkContainer, showTarget =
       <div className="tl-body">
         <div className="tl-action">{e.action}</div>
         <div className="tl-meta">
-          <b>{e.userName}</b> · {e.role} — {fmtTime(e.ts)} <span style={{ opacity: 0.7 }}>({fmtAgo(e.ts)})</span>
+          <b>{e.userName}</b> · {e.role} · {fmtTime(e.ts)} <span style={{ opacity: 0.7 }}>({fmtAgo(e.ts)})</span>
           {showTarget && e.unitId && linkUnit && <> · <span className="linkish" onClick={() => linkUnit(e.unitId)}>unit</span></>}
           {showTarget && e.containerId && linkContainer && <> · <span className="linkish" onClick={() => linkContainer(e.containerId)}>container</span></>}
         </div>

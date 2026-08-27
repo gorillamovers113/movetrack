@@ -13,13 +13,51 @@ service firebase.storage {
       return isSignedIn() && me().status == 'active';
     }
 
-    // NOTE: Storage isn't provisioned yet (Phase 2). These rules are written
-    // ahead of time but are not deployed until a bucket exists.
+    function withinSizeAndType() {
+      return request.resource.size < 15 * 1024 * 1024
+          && request.resource.contentType.matches('image/.*|video/.*');
+    }
+
+    // Every real upload goes through uploadImage() (src/lib/upload.js),
+    // called only with paths like `containers/{id}/receive/{ts}-{uid}.jpg`,
+    // `containers/swaps/{ts}-{uid}.jpg`, `overflow/{id}/prep/{ts}-{uid}.jpg`,
+    // `units/{id}/inventory/{ts}-{uid}.jpg` (see the call sites in
+    // src/components/*.jsx, src/views/*.jsx). The uploader's own uid is
+    // always baked into the filename, right before the extension. A
+    // multi-segment wildcard (`{x=**}`) is a path object, not a string, so
+    // this checks `request.resource.name` (the full object path, already a
+    // string) instead of trying to isolate the last segment; requiring it
+    // here means a direct write can't plant a file that claims to have come
+    // from a different user.
+    function pathHasOwnUid() {
+      return request.resource.name.matches('.*' + request.auth.uid + '.*');
+    }
+
+    // NOTE: Storage is live (deployed, not a Phase-2 placeholder). Reads stay
+    // open to any active user across all paths (crew need to see each
+    // other's photos regardless of who's assigned where); writes are scoped
+    // below to the app's three known top-level prefixes plus an own-uid
+    // filename check, so a devtools write can't land under an arbitrary path
+    // or masquerade as another user's upload.
+    //
+    // Follow-up (not done here): fully role-scoping writes (e.g. excluding
+    // `viewer`) would need Firebase Auth custom claims. Storage rules can
+    // call firestore.get() (used above for isActive()) but there is no path
+    // pattern here that maps cleanly to "the role that owns this specific
+    // stage transition" the way the Firestore rules do, so that's tracked as
+    // a separate follow-up rather than attempted here.
     match /{allPaths=**} {
       allow read: if isActive();
-      allow write: if isActive()
-        && request.resource.size < 15 * 1024 * 1024
-        && request.resource.contentType.matches('image/.*|video/.*');
+    }
+
+    match /containers/{allPaths=**} {
+      allow write: if isActive() && withinSizeAndType() && pathHasOwnUid();
+    }
+    match /overflow/{allPaths=**} {
+      allow write: if isActive() && withinSizeAndType() && pathHasOwnUid();
+    }
+    match /units/{allPaths=**} {
+      allow write: if isActive() && withinSizeAndType() && pathHasOwnUid();
     }
   }
 }

@@ -5,6 +5,7 @@ import { todayKey, findScheduleDay, nextScheduleDay, fmtScheduleDate, progressFo
 import BuildingView from './BuildingView.jsx'
 import NewUnitButton from '../components/NewUnitModal.jsx'
 import ReturnPhaseToggle from '../components/ReturnPhaseToggle.jsx'
+import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 
 // Compact "today" banner: floor + work type + progress vs plan, or a
 // sensible off-day / empty-schedule fallback. Never crashes on an empty
@@ -37,12 +38,14 @@ function TodayBanner({ toast }) {
               setBusy(true)
               try {
                 if (phase === 'return') {
-                  await dispatch({ type: 'seedReturnSchedule', p: {} })
-                  toast?.('Return schedule loaded ✓')
+                  const status = await submitWrite(dispatch({ type: 'seedReturnSchedule', p: {} }))
+                  toast?.(status === 'queued' ? QUEUED_MESSAGE : 'Return schedule loaded ✓')
                 } else {
-                  await dispatch({ type: 'seedSchedule', p: {} })
-                  toast?.('Schedule loaded: 27 days, Sep 8 to Oct 8 ✓')
+                  const status = await submitWrite(dispatch({ type: 'seedSchedule', p: {} }))
+                  toast?.(status === 'queued' ? QUEUED_MESSAGE : 'Schedule loaded: 27 days, Sep 8 to Oct 8 ✓')
                 }
+              } catch (err) {
+                toast?.(err?.message || "Couldn't load the plan. Check your signal and try again.")
               } finally {
                 setBusy(false)
               }
@@ -104,20 +107,20 @@ export default function Dashboard({ openUnit, toast }) {
   }, [state.units])
 
   const piecesTracked = state.units.reduce((n, u) => n + (u.pieces || 0), 0)
-  const openFlags = state.units.filter((u) => u.flag?.open).length + state.containers.filter((c) => c.flag?.open).length
+  const openFlags = state.units.filter((u) => u.flag?.open).length + state.containers.filter((c) => c.flag?.open).length + state.overflow.filter((o) => o.flag?.open).length
 
   const match = (u) => {
     if (stageFilter && u.stage !== stageFilter) return false
     if (q) {
       const s = q.toLowerCase()
-      const contNums = u.containerIds.map((id) => state.containers.find((c) => c.id === id)?.number.toLowerCase() || '')
+      const contNums = (u.containerIds || []).map((id) => state.containers.find((c) => c.id === id)?.number.toLowerCase() || '')
       if (!u.number.includes(s) && !(u.tenant || '').toLowerCase().includes(s) && !contNums.some((c) => c.includes(s))) return false
     }
     return true
   }
 
   // C1 fix: skip floors with zero units (day 1, an empty board has all nine
-  // floors empty) — an empty array would otherwise crash the `units[0].floor`
+  // floors empty), an empty array would otherwise crash the `units[0].floor`
   // read below. Track the floor number alongside its units instead.
   const floors = []
   for (let f = 9; f >= 1; f--) {
@@ -131,7 +134,7 @@ export default function Dashboard({ openUnit, toast }) {
       <div className="page-head">
         <div>
           <h1>{state.project?.name || 'Trinity Manor'}</h1>
-          <p>{state.project?.address || '3940 Park Blvd'}{state.units.length > 0 ? ` — ${state.units.length}-unit relocation` : ''} — live status</p>
+          <p>{state.project?.address || '3940 Park Blvd'}{state.units.length > 0 ? ` · ${state.units.length}-unit relocation` : ''} · live status</p>
         </div>
         <div className="row">
           <input className="search" placeholder="Search unit, tenant, container…" value={q} onChange={(e) => setQ(e.target.value)} />
@@ -161,7 +164,7 @@ export default function Dashboard({ openUnit, toast }) {
 
       <div className="dash-cols">
         <div className="card" style={{ padding: '14px 14px 8px' }}>
-          <div className="section-title" style={{ margin: '2px 6px 0' }}>The building — tap a floor</div>
+          <div className="section-title" style={{ margin: '2px 6px 0' }}>The building: tap a floor</div>
           <BuildingView selected={floorSel} onSelect={(f) => setFloorSel(floorSel === f ? null : f)} />
         </div>
 
@@ -200,7 +203,7 @@ export default function Dashboard({ openUnit, toast }) {
                 <div className="unit-tiles">
                   {units.map((u) => {
                     const on = match(u)
-                    // C2 fix: unit.tenant is guarded — a hand-created unit doc
+                    // C2 fix: unit.tenant is guarded, a hand-created unit doc
                     // may not have it yet (see the field-naming note in seed.js).
                     const tenant = u.tenant || ''
                     return (
@@ -208,10 +211,10 @@ export default function Dashboard({ openUnit, toast }) {
                         key={u.id} className={`tile ${on ? '' : 'dim'}`}
                         style={{ background: stageOf(u.stage).color }}
                         onClick={() => openUnit(u.id)}
-                        title={`Unit ${u.number} — ${tenant || 'no tenant on file'} — ${stageOf(u.stage).label}`}
+                        title={`Unit ${u.number} · ${tenant || 'no tenant on file'} · ${stageOf(u.stage).label}`}
                       >
                         {u.number}
-                        <small>{tenant.split(' ')[1] || tenant || '—'}</small>
+                        <small>{tenant.split(' ')[1] || tenant || '-'}</small>
                         {u.flag?.open && <span className="flagdot" />}
                       </button>
                     )

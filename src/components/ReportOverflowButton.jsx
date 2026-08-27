@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useStore } from '../store.jsx'
 import { Modal } from '../ui.jsx'
+import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 
 // "＋ Report overflow item" logs an oversized piece that won't fit inside a
 // BigBox container; Gorilla Movers transports it to the warehouse directly
@@ -27,9 +28,11 @@ export default function ReportOverflowButton({ unitId, toast, fullWidth = false 
     if (!ready) return
     setBusy(true)
     try {
-      await dispatch({ type: 'createOverflow', p: { unitId: pickUnitId, description: description.trim() } })
+      const status = await submitWrite(dispatch({ type: 'createOverflow', p: { unitId: pickUnitId, description: description.trim() } }))
       setOpen(false)
-      toast?.('Overflow item logged ✓')
+      toast?.(status === 'queued' ? QUEUED_MESSAGE : 'Overflow item logged ✓')
+    } catch (err) {
+      toast?.(err.message || "Couldn't save that. Check your signal and try again.")
     } finally {
       setBusy(false)
     }
@@ -46,7 +49,7 @@ export default function ReportOverflowButton({ unitId, toast, fullWidth = false 
         >
           {unitId ? (
             <div className="field"><label>Unit</label>
-              <div className="muted">Unit {unit ? unit.number : '—'}{unit?.tenant ? ` · ${unit.tenant}` : ''}</div>
+              <div className="muted">Unit {unit ? unit.number : '-'}{unit?.tenant ? ` · ${unit.tenant}` : ''}</div>
             </div>
           ) : (
             <div className="field">
@@ -56,7 +59,7 @@ export default function ReportOverflowButton({ unitId, toast, fullWidth = false 
               ) : (
                 <select className="input" autoFocus value={pickUnitId} onChange={(e) => setPickUnitId(e.target.value)}>
                   <option value="">Select unit…</option>
-                  {state.units.map((u) => <option key={u.id} value={u.id}>Unit {u.number} · {u.tenant || '—'}</option>)}
+                  {state.units.map((u) => <option key={u.id} value={u.id}>Unit {u.number} · {u.tenant || '-'}</option>)}
                 </select>
               )}
             </div>

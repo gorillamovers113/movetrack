@@ -1,13 +1,14 @@
 import React, { useEffect, useState } from 'react'
 import { useStore } from '../store.jsx'
 import { Modal } from '../ui.jsx'
-import { uploadImage } from '../lib/upload.js'
+import { captureMedia } from '../lib/upload.js'
+import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 
-// "BigBox swap" — the driver hands off full containers and drops new empties,
+// "BigBox swap": the driver hands off full containers and drops new empties,
 // but never touches the app. The on-site mover is the custody witness: pick
 // which full containers are going out, record the driver's name/truck,
 // photograph the loaded containers, and log any new empties dropped in the
-// same trip. One screen, big tap targets — self-gates for mover/admin.
+// same trip. One screen, big tap targets, self-gates for mover/admin.
 export default function BigBoxSwapButton({ toast }) {
   const { state, currentUser, dispatch } = useStore()
   const [open, setOpen] = useState(false)
@@ -42,10 +43,10 @@ export default function BigBoxSwapButton({ toast }) {
   const capturePhoto = async (file) => {
     setPhotoError(null); setPreview(URL.createObjectURL(file)); setPhotoUrl(null); setUploading(true)
     try {
-      const url = await uploadImage(file, `containers/swaps/${Date.now()}-${currentUser.uid}.jpg`)
+      const { url } = await captureMedia(file, `containers/swaps/${Date.now()}-${currentUser.uid}.jpg`)
       setPhotoUrl(url)
     } catch (err) {
-      setPhotoError(err.message || 'Upload failed — try again.')
+      setPhotoError(err.message || 'Capture failed, try again.')
     } finally {
       setUploading(false)
     }
@@ -58,9 +59,11 @@ export default function BigBoxSwapButton({ toast }) {
     setBusy(true)
     try {
       const media = photoUrl ? [{ id: `swap-${Date.now()}`, kind: 'photo', url: photoUrl, label: 'BigBox handoff' }] : []
-      await dispatch({ type: 'bigboxSwap', p: { fullIds: selected, driverName: driverName.trim(), newEmptyNumbers: newNumbers, media } })
+      const status = await submitWrite(dispatch({ type: 'bigboxSwap', p: { fullIds: selected, driverName: driverName.trim(), newEmptyNumbers: newNumbers, media } }))
       setOpen(false)
-      toast?.(`Swap logged with ${driverName.trim()} — ${selected.length} out${newNumbers.length ? `, ${newNumbers.length} new empt${newNumbers.length === 1 ? 'y' : 'ies'} in` : ''} ✓`)
+      toast?.(status === 'queued' ? QUEUED_MESSAGE : `Swap logged with ${driverName.trim()}, ${selected.length} out${newNumbers.length ? `, ${newNumbers.length} new empt${newNumbers.length === 1 ? 'y' : 'ies'} in` : ''} ✓`)
+    } catch (err) {
+      toast?.(err.message || "Couldn't save that. Check your signal and try again.")
     } finally {
       setBusy(false)
     }
@@ -70,7 +73,7 @@ export default function BigBoxSwapButton({ toast }) {
     <>
       <button className="btn btn-primary btn-lg" onClick={openModal}>🔄 BigBox swap</button>
       {open && (
-        <Modal title="BigBox swap" sub="The driver never opens the app — you're the custody witness for this hand-off." onClose={close}>
+        <Modal title="BigBox swap" sub="The driver never opens the app, you're the custody witness for this hand-off." onClose={close}>
           <div className="field">
             <label>Full containers going out</label>
             {fulls.length === 0 ? (
@@ -95,7 +98,7 @@ export default function BigBoxSwapButton({ toast }) {
             <input className="input" autoFocus placeholder="e.g. Mike, Truck 12" value={driverName} onChange={(e) => setDriverName(e.target.value)} /></div>
 
           <div className="field">
-            <label>Photo of the loaded container(s) — required</label>
+            <label>Photo of the loaded container(s) (required)</label>
             <label className="dropzone camera-capture" style={{ display: 'block' }}>
               <input
                 type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
@@ -105,7 +108,7 @@ export default function BigBoxSwapButton({ toast }) {
                 <div className="inv-preview">
                   <img src={preview} alt="Loaded container" className="inv-thumb" />
                   <div className="muted" style={{ marginTop: 8 }}>
-                    {uploading ? 'Uploading…' : photoUrl ? '✓ Uploaded — tap to retake' : photoError || 'Tap to retake'}
+                    {uploading ? 'Saving…' : photoUrl ? '✓ Photo saved, tap to retake' : photoError || 'Tap to retake'}
                   </div>
                 </div>
               ) : <>📷 Tap to photograph the loaded container(s)</>}
@@ -119,7 +122,7 @@ export default function BigBoxSwapButton({ toast }) {
                 <div className="row" key={i}>
                   <input className="input grow" placeholder={`e.g. BB-${2001 + i}`} value={v} onChange={(e) => setRow(i, e.target.value)} />
                   {rows.length > 1 && (
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeRow(i)}>✕</button>
+                    <button type="button" className="btn btn-ghost btn-sm btn-icon-sm" onClick={() => removeRow(i)} aria-label="Remove row">✕</button>
                   )}
                 </div>
               ))}

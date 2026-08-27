@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react'
 import { useStore } from '../store.jsx'
 import { Modal } from '../ui.jsx'
-import { uploadImage } from '../lib/upload.js'
+import { captureMedia } from '../lib/upload.js'
+import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import { matchContainerByNumber } from '../lib/mutations.js'
 
 // "Receive incoming BigBox": the blind container-number check on the
@@ -46,10 +47,10 @@ export default function ReceiveContainerButton({ toast }) {
   const capturePhoto = async (file) => {
     setPhotoError(null); setPreview(URL.createObjectURL(file)); setPhotoUrl(null); setUploading(true)
     try {
-      const url = await uploadImage(file, `containers/${matched.id}/receive/${Date.now()}-${currentUser.uid}.jpg`)
+      const { url } = await captureMedia(file, `containers/${matched.id}/receive/${Date.now()}-${currentUser.uid}.jpg`)
       setPhotoUrl(url)
     } catch (err) {
-      setPhotoError(err.message || 'Upload failed, try again.')
+      setPhotoError(err.message || 'Capture failed, try again.')
     } finally {
       setUploading(false)
     }
@@ -75,10 +76,16 @@ export default function ReceiveContainerButton({ toast }) {
     setBusy(true)
     try {
       const media = photoUrl ? [{ id: `recv-${Date.now()}`, kind: 'photo', url: photoUrl, label: `Container ${matched.number} received` }] : []
-      await dispatch({ type: 'warehouseReceive', p: { containerId: matched.id, verifiedPieces: n, bay: bay.trim(), media } })
+      const status = await submitWrite(dispatch({ type: 'warehouseReceive', p: { containerId: matched.id, verifiedPieces: n, bay: bay.trim(), media } }))
       const expected = matched.unitIds.reduce((sum, id) => sum + (state.units.find((u) => u.id === id)?.pieces || 0), 0)
       setOpen(false)
-      toast?.(expected && n !== expected ? `Mismatch flagged (${n} vs ${expected}) ⚑` : `Verified, BigBox ${matched.number} received at ${bay.trim()} ✓`)
+      if (status === 'queued') {
+        toast?.(QUEUED_MESSAGE)
+      } else {
+        toast?.(expected && n !== expected ? `Mismatch flagged (${n} vs ${expected}) ⚑` : `Verified, BigBox ${matched.number} received at ${bay.trim()} ✓`)
+      }
+    } catch (err) {
+      toast?.(err.message || "Couldn't save that. Check your signal and try again.")
     } finally {
       setBusy(false)
     }
@@ -91,12 +98,14 @@ export default function ReceiveContainerButton({ toast }) {
   const reportDiscrepancy = async () => {
     setBusy(true)
     try {
-      await dispatch({
+      const status = await submitWrite(dispatch({
         type: 'addNote',
         p: { containerId: '', text: `Warehouse receive check: typed container number "${typed.trim()}" did not match any incoming BigBox expected at warehouse. Flagged for admin review.` },
-      })
+      }))
       setOpen(false)
-      toast?.('Discrepancy reported to admin ✓')
+      toast?.(status === 'queued' ? QUEUED_MESSAGE : 'Discrepancy reported to admin ✓')
+    } catch (err) {
+      toast?.(err.message || "Couldn't save that. Check your signal and try again.")
     } finally {
       setBusy(false)
     }
@@ -159,7 +168,7 @@ export default function ReceiveContainerButton({ toast }) {
                     <div className="inv-preview">
                       <img src={preview} alt="Received container" className="inv-thumb" />
                       <div className="muted" style={{ marginTop: 8 }}>
-                        {uploading ? 'Uploading…' : photoUrl ? '✓ Uploaded, tap to retake' : photoError || 'Tap to retake'}
+                        {uploading ? 'Saving…' : photoUrl ? '✓ Photo saved, tap to retake' : photoError || 'Tap to retake'}
                       </div>
                     </div>
                   ) : <>📷 Tap to add a photo</>}

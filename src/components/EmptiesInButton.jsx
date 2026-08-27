@@ -1,8 +1,9 @@
 import React, { useState } from 'react'
 import { useStore } from '../store.jsx'
 import { Modal } from '../ui.jsx'
+import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 
-// "＋ Empties in" — BigBox drops off a batch of empty containers on site
+// "＋ Empties in": BigBox drops off a batch of empty containers on site
 // (5 at a time is the norm, but any count works). One screen: add rows,
 // type each container number, log the batch. Self-gates for mover/admin
 // so callers can drop it in without checking the role first.
@@ -26,9 +27,11 @@ export default function EmptiesInButton({ toast }) {
     if (numbers.length === 0) return
     setBusy(true)
     try {
-      await dispatch({ type: 'logEmpties', p: { numbers } })
+      const status = await submitWrite(dispatch({ type: 'logEmpties', p: { numbers } }))
       setOpen(false)
-      toast?.(`${numbers.length} empty container${numbers.length === 1 ? '' : 's'} logged ✓`)
+      toast?.(status === 'queued' ? QUEUED_MESSAGE : `${numbers.length} empty container${numbers.length === 1 ? '' : 's'} logged ✓`)
+    } catch (err) {
+      toast?.(err.message || "Couldn't save that. Check your signal and try again.")
     } finally {
       setBusy(false)
     }
@@ -38,7 +41,7 @@ export default function EmptiesInButton({ toast }) {
     <>
       <button className="btn btn-dark btn-lg" onClick={openModal}>＋ Empties in</button>
       {open && (
-        <Modal title="Log empties delivered" sub="BigBox dropped these off on site — enter each container number, one per row." onClose={close}>
+        <Modal title="Log empties delivered" sub="BigBox dropped these off on site, enter each container number, one per row." onClose={close}>
           <div className="field">
             <label>Container numbers</label>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -50,7 +53,7 @@ export default function EmptiesInButton({ toast }) {
                     onChange={(e) => setRow(i, e.target.value)}
                   />
                   {rows.length > 1 && (
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeRow(i)}>✕</button>
+                    <button type="button" className="btn btn-ghost btn-sm btn-icon-sm" onClick={() => removeRow(i)} aria-label="Remove row">✕</button>
                   )}
                 </div>
               ))}

@@ -111,6 +111,49 @@ service cloud.firestore {
               && before == 'rt_transit' && after == 'returned');       // returnOverflow
     }
 
+    // ---- container self-loop field lock (non-admin update only) ----
+    // The filling->filling / return_filling->return_filling self-loop above
+    // exists only so a second loadUnit/loadForReturn onto an already-filling
+    // container isn't rejected as a no-op transition. Left unchecked, that
+    // same no-op status opens the door to a direct write that holds status
+    // steady while tampering with media/driverName/bay/flag/etc, with no
+    // event trail. Lock it down: on a same-status write, only the fields the
+    // real dispatch touches (status, unitIds) may change. Non-self-loop
+    // writes (any real stage advance) always pass this check.
+    function containerSelfLoopOK(before, after) {
+      return before != after
+          || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'unitIds']);
+    }
+
+    // ---- custody attribution guard (non-admin update only) ----
+    // receivedBy/handoffBy/prepBy/transportBy/returnedBy each record who
+    // physically handled a custody handoff (warehouseReceive/deliverReturn,
+    // bigboxSwap/dispatchReturn, prepOverflow, transportOverflow/
+    // transportOverflowBack, returnOverflow). Every real dispatch sets these
+    // to currentUser.uid; a non-admin write may only set/change one of them
+    // to its own uid, mirroring the events.uid guard below so custody can't
+    // be misattributed to someone else.
+    //
+    // request.resource.data is the full post-write document, so a field
+    // stamped by an earlier stage (e.g. handoffBy from bigboxSwap) is still
+    // present, unchanged, on a later write by a different actor (e.g.
+    // warehouseReceive's receivedBy). Only flag the field when THIS write is
+    // the one setting/changing it (its value differs from resource.data,
+    // the pre-write doc). A carried-over value from a prior legitimate
+    // handoff is left alone.
+    function custodyFieldOK(field) {
+      return !(field in request.resource.data)
+          || request.resource.data[field] == resource.data.get(field, null)
+          || request.resource.data[field] == request.auth.uid;
+    }
+    function custodyFieldsOK() {
+      return custodyFieldOK('receivedBy')
+          && custodyFieldOK('handoffBy')
+          && custodyFieldOK('prepBy')
+          && custodyFieldOK('transportBy')
+          && custodyFieldOK('returnedBy');
+    }
+
     // ---- identity-field guards (non-admin update only) ----
     // "modify only your own current part" — a stage-advancing write may not
     // also rename/re-floor/re-number the doc it's advancing.
@@ -161,7 +204,8 @@ service cloud.firestore {
       allow update: if isAdmin()
         || (isCrew()
             && unitTransitionOK(me().role, resource.data.stage, request.resource.data.stage)
-            && unitIdentityUnchanged());
+            && unitIdentityUnchanged()
+            && custodyFieldsOK());
 
       allow delete: if isAdmin();
     }
@@ -178,7 +222,9 @@ service cloud.firestore {
       allow update: if isAdmin()
         || (isCrew()
             && containerTransitionOK(me().role, resource.data.status, request.resource.data.status)
-            && containerIdentityUnchanged());
+            && containerIdentityUnchanged()
+            && containerSelfLoopOK(resource.data.status, request.resource.data.status)
+            && custodyFieldsOK());
 
       allow delete: if isAdmin();
     }
@@ -189,14 +235,19 @@ service cloud.firestore {
     match /overflow/{overflowId} {
       allow read: if isActive();
 
-      // createOverflow: admin, packer, or mover, always starting at identified.
+      // createOverflow: admin, packer, or mover, always starting at
+      // identified, and createdBy must be the caller (mirrors events.uid
+      // below) so custody of a freshly identified item can't be forged onto
+      // someone else from the very first write.
       allow create: if (isAdmin() || hasRole('packer') || hasRole('mover'))
-        && request.resource.data.stage == 'identified';
+        && request.resource.data.stage == 'identified'
+        && request.resource.data.createdBy == request.auth.uid;
 
       allow update: if isAdmin()
         || (isCrew()
             && overflowTransitionOK(me().role, resource.data.stage, request.resource.data.stage)
-            && overflowIdentityUnchanged());
+            && overflowIdentityUnchanged()
+            && custodyFieldsOK());
 
       allow delete: if isAdmin();
     }

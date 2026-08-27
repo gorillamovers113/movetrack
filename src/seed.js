@@ -1,6 +1,6 @@
 // Stage/role vocabulary + photo-placeholder generator for MoveTrack.
 // (The old deterministic demo-data generator, buildSeed(), lived here and is
-// gone — see M1 in the final review: it was dead code, unimported, and
+// gone, see M1 in the final review: it was dead code, unimported, and
 // modeled the stale round-trip stage strings. Real data now comes from
 // Firestore; scripts/seed-schedule.mjs seeds only `schedule` + the admin.)
 
@@ -34,9 +34,9 @@ export function photoThumb(label, sub = '') {
 export const STAGES = [
   { key: 'not_started', label: 'Not started', short: 'Not started', color: '#8a93a2', step: 0 },
   { key: 'packing', label: 'Packing & prep', short: 'Packing', color: '#14b8a6', step: 1 },
-  { key: 'packed', label: 'Packed — ready to load', short: 'Packed', color: '#0d9488', step: 2 },
+  { key: 'packed', label: 'Packed, ready to load', short: 'Packed', color: '#0d9488', step: 2 },
   { key: 'loaded', label: 'Loaded in container on site', short: 'Loaded', color: '#8b5cf6', step: 3 },
-  { key: 'picked_up', label: 'Picked up — en route to warehouse', short: 'Picked up', color: '#f97316', step: 4 },
+  { key: 'picked_up', label: 'Picked up, en route to warehouse', short: 'Picked up', color: '#f97316', step: 4 },
   { key: 'at_warehouse', label: 'In warehouse', short: 'Warehouse', color: '#3b82f6', step: 5 },
   { key: 'return_loaded', label: 'Loaded for return at warehouse', short: 'Return loaded', color: '#0891b2', step: 6 },
   { key: 'return_transit', label: 'In transit back to site', short: 'Return transit', color: '#0ea5e9', step: 7 },
@@ -44,12 +44,12 @@ export const STAGES = [
   { key: 'unloaded', label: 'Unloaded into apartment', short: 'Unloaded', color: '#22c55e', step: 9 },
   { key: 'unpacked', label: 'Unpacked, complete', short: 'Unpacked', color: '#15803d', step: 10 },
 ]
-// Safe fallback for an unrecognized/typo'd stage string — callers can rely on
+// Safe fallback for an unrecognized/typo'd stage string, callers can rely on
 // stageOf() always returning a renderable stage object instead of undefined.
 const UNKNOWN_STAGE = { key: 'unknown', label: 'Unknown stage', short: 'Unknown', color: '#8a93a2', step: 0 }
 export const stageOf = (key) => STAGES.find((s) => s.key === key) || UNKNOWN_STAGE
 
-// Units per floor — 9 floors, 100 units total, matching the real building's massing.
+// Units per floor: 9 floors, 100 units total, matching the real building's massing.
 export const FLOOR_UNITS = { 1: 12, 2: 12, 3: 12, 4: 12, 5: 11, 6: 11, 7: 11, 8: 11, 9: 8 }
 
 export const ROLES = {
@@ -66,6 +66,6 @@ export const ROLES = {
 // (Dashboard, BuildingView, UnitDetail, Containers, MyWork) and the CSV
 // export read `unit.tenant`, and the forthcoming create-unit UI will write
 // it too. Until that UI ships, units are hand-created in the Firestore
-// console — always include `tenant` on the doc: `{ number, floor, tenant,
+// console, always include `tenant` on the doc: `{ number, floor, tenant,
 // stage: 'not_started' }`. Reads of `tenant` are null-guarded anyway (a
 // missing field degrades to a placeholder instead of crashing).

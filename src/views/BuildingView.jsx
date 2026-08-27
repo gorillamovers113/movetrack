@@ -24,12 +24,12 @@ function bayCounts(n) {
 export default function BuildingView({ selected, onSelect }) {
   const { state } = useStore()
   const floors = []
-  for (let f = 9; f >= 1; f--) floors.push({ f, units: state.units.filter((u) => u.floor === f).sort((a, b) => a.number.localeCompare(b.number)) })
+  for (let f = 9; f >= 1; f--) floors.push({ f, units: state.units.filter((u) => u.floor === f).sort((a, b) => (a.number || '').localeCompare(b.number || '')) })
 
   const floorsBottom = TOP + floors.length * FLOOR_H // 488
 
   return (
-    <svg viewBox="0 0 360 540" width="100%" role="img" aria-label="Trinity Manor — live progress by floor">
+    <svg viewBox="0 0 360 540" width="100%" role="img" aria-label="Trinity Manor: live progress by floor">
       <text x="200" y="66" textAnchor="middle" fontSize="9.5" letterSpacing="3.5" fill="#8a93a2" fontWeight="600">TRINITY MANOR</text>
 
       {/* terracotta stair tower */}
@@ -70,7 +70,7 @@ export default function BuildingView({ selected, onSelect }) {
                     rx="1.5"
                     fill={stageOf(u.stage).color}
                   >
-                    <title>{`Unit ${u.number} — ${u.tenant || 'no tenant on file'} — ${stageOf(u.stage).label}`}</title>
+                    <title>{`Unit ${u.number} · ${u.tenant || 'no tenant on file'} · ${stageOf(u.stage).label}`}</title>
                   </rect>
                 )
               }
@@ -92,7 +92,7 @@ export default function BuildingView({ selected, onSelect }) {
               style={{ cursor: 'pointer' }}
               onClick={() => onSelect(fl.f)}
             >
-              <title>{`Floor ${fl.f} — tap to focus`}</title>
+              <title>{`Floor ${fl.f}: tap to focus`}</title>
             </rect>
           </g>
         )

@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, signOut, updateProfile } from 'firebase/auth'
-import { doc, setDoc, updateDoc, deleteDoc, addDoc, arrayUnion, onSnapshot, collection, query, orderBy, serverTimestamp } from 'firebase/firestore'
+import { doc, setDoc, updateDoc, deleteDoc, addDoc, arrayUnion, onSnapshot, collection, query, orderBy, serverTimestamp, writeBatch } from 'firebase/firestore'
 import { auth, db } from './firebase.js'
 import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction } from './lib/mutations.js'
 import { DEFAULT_SCHEDULE, DEFAULT_RETURN_SCHEDULE, scheduleDocId } from './lib/schedule.js'
@@ -55,7 +55,7 @@ export function StoreProvider({ children }) {
     return () => { unsubAuth(); if (unsubProfile) unsubProfile() }
   }, [])
 
-  // Targeted Firestore writes per action, mirroring the old reducer's logic —
+  // Targeted Firestore writes per action, mirroring the old reducer's logic:
   // every action ends with an `event` doc so the activity log stays complete.
   const actor = () => ({ uid: currentUser.uid, userName: currentUser.name, role: currentUser.role })
   const ev = (type, action, extra) => addDoc(collection(db, 'events'), makeEvent(actor(), type, action, extra))
@@ -87,13 +87,13 @@ export function StoreProvider({ children }) {
       }
       case 'finishPacking': {
         // Packer captures a photo of the handwritten paper inventory sheet
-        // plus a total piece count — units move via BigBox containers whose
+        // plus a total piece count, units move via BigBox containers whose
         // loads mix beds, dressers, boxes, etc., so a single "box count"
         // never fit; p.media carries the inventory photo (arrayUnion'd onto
         // the unit's media so it shows in the unit's photo record).
         p.media = attributeMedia(p.media)
         await updateDoc(doc(db, 'units', p.unitId), { stage: 'packed', pieces: p.pieces, 'times.packEnd': Date.now(), media: arrayUnion(...p.media) })
-        return ev('stage', `Finished packing unit ${unit.number} — ${p.pieces} pieces inventoried (inventory photo attached)`, { unitId: unit.id, from: 'packing', to: 'packed', media: p.media })
+        return ev('stage', `Finished packing unit ${unit.number}, ${p.pieces} pieces inventoried (inventory photo attached)`, { unitId: unit.id, from: 'packing', to: 'packed', media: p.media })
       }
       case 'logEmpties': {
         // BigBox drops off empty containers before any loading happens.
@@ -102,46 +102,74 @@ export function StoreProvider({ children }) {
         return ev('system', `${numbers.length} empty BigBox container${numbers.length === 1 ? '' : 's'} delivered: ${numbers.join(', ')}`)
       }
       case 'loadUnit': {
-        p.media = attributeMedia(p.media)
         const cont = state.containers.find((c) => c.id === p.containerId)
+        // Abort BEFORE any write if the container can't accept this load:
+        // gone, or already past filling (full/picked_up/at_warehouse/...).
+        // Mirrors loadForReturn's guard below: checking first (instead of
+        // omitting status on the later container write) avoids a partial
+        // write where the unit gets promoted to loaded but the container
+        // update then self-loops and the rules reject it as a no-op
+        // transition, leaving the unit orphaned.
+        if (!cont || (cont.status !== 'empty' && cont.status !== 'filling')) {
+          throw new Error('That BigBox is no longer accepting items. Refresh and pick another container.')
+        }
+        p.media = attributeMedia(p.media)
         const mismatch = boxMismatch(unit.pieces, p.pieces)
         const patch = { stage: 'loaded', containerIds: arrayUnion(p.containerId), 'crew.movers': arrayUnion(currentUser.uid) }
-        if (mismatch) patch.flag = { message: `Piece count mismatch at load: ${p.pieces} loaded vs ${unit.pieces} packed. Recount pending.`, ts: Date.now(), by: currentUser.name, open: true }
+        // Only raise a new flag when there isn't already an open one: an
+        // unresolved flag from an earlier step (e.g. finishPacking) would
+        // otherwise get silently overwritten here, erasing it before the
+        // admin ever sees it. The mismatch event below is still logged
+        // every time regardless, so the new discrepancy is never lost.
+        if (mismatch && !unit.flag?.open) patch.flag = { message: `Piece count mismatch at load: ${p.pieces} loaded vs ${unit.pieces} packed. Recount pending.`, ts: Date.now(), by: currentUser.name, open: true }
         await updateDoc(doc(db, 'units', p.unitId), patch)
         await updateDoc(doc(db, 'containers', p.containerId), { status: 'filling', unitIds: arrayUnion(p.unitId) })
-        await ev('stage', `Loaded unit ${unit.number} into container ${cont.number} — ${p.pieces} of ${unit.pieces ?? p.pieces} pieces verified`, { unitId: unit.id, containerId: p.containerId, from: unit.stage, to: 'loaded', media: p.media })
+        await ev('stage', `Loaded unit ${unit.number} into container ${cont.number}, ${p.pieces} of ${unit.pieces ?? p.pieces} pieces verified`, { unitId: unit.id, containerId: p.containerId, from: unit.stage, to: 'loaded', media: p.media })
         if (mismatch) await ev('flag', `FLAG raised on unit ${unit.number}: piece count mismatch (${p.pieces}/${unit.pieces})`, { unitId: unit.id })
         return
       }
       case 'markContainerFull': {
         await updateDoc(doc(db, 'containers', p.containerId), { status: 'full' })
-        return ev('stage', `Container ${cont0.number} marked full — ready for BigBox pickup`, { containerId: cont0.id })
+        return ev('stage', `Container ${cont0.number} marked full, ready for BigBox pickup`, { containerId: cont0.id })
       }
       case 'bigboxSwap': {
         // Mover logs the hand-off to the BigBox driver: selected full containers
-        // go out (with the driver's name recorded), new empties come in — the
+        // go out (with the driver's name recorded), new empties come in, the
         // driver never touches the app; the mover is the custody witness.
-        // p.media (optional) is the handoff photo, already uploaded to Storage
-        // by the caller via uploadImage() — stored on each outgoing container
-        // and on the swap event so it shows in both the container's custody
-        // log and the global activity feed.
+        // p.media (optional) is the handoff photo, captured by the caller via
+        // captureMedia() (Storage when reachable, a resized data URL fallback
+        // when offline), stored on each outgoing container and on the swap
+        // event so it shows in both the container's custody log and the
+        // global activity feed.
+        // Every container update, every unit update, every new-empty create
+        // and the audit event all go into one batch so the whole hand-off is
+        // all-or-nothing: a partial failure used to be able to move a
+        // container to picked_up while its units stayed at loaded (or skip
+        // the audit event entirely), leaving the board and the log out of
+        // sync. Same field writes and flag/mismatch logic as before, only
+        // the atomicity changes.
         const fulls = p.fullIds.map((id) => state.containers.find((c) => c.id === id)).filter(Boolean)
         const media = attributeMedia(p.media || [])
-        await Promise.all(fulls.map(async (c) => {
+        const batch = writeBatch(db)
+        for (const c of fulls) {
           const patch = { status: 'picked_up', driverName: p.driverName, pickedUpAt: Date.now(), handoffBy: currentUser.uid }
           if (media.length) patch.media = arrayUnion(...media)
-          await updateDoc(doc(db, 'containers', c.id), patch)
-          await Promise.all(c.unitIds.map((uid) => updateDoc(doc(db, 'units', uid), { stage: 'picked_up' })))
-        }))
+          batch.update(doc(db, 'containers', c.id), patch)
+          for (const uid of c.unitIds) batch.update(doc(db, 'units', uid), { stage: 'picked_up' })
+        }
         const newNumbers = p.newEmptyNumbers.map((n) => n.toUpperCase())
-        await Promise.all(newNumbers.map((number) => addDoc(collection(db, 'containers'), { number, status: 'empty', unitIds: [], deliveredAt: Date.now() })))
+        for (const number of newNumbers) batch.set(doc(collection(db, 'containers')), { number, status: 'empty', unitIds: [], deliveredAt: Date.now() })
         const fullNums = fulls.map((c) => c.number).join(', ')
-        return ev('system', `BigBox swap with ${p.driverName}: ${fulls.length} full container${fulls.length === 1 ? '' : 's'} out (${fullNums}), ${newNumbers.length} empty${newNumbers.length === 1 ? '' : 's'} in (${newNumbers.join(', ')})`, media.length ? { media } : {})
+        batch.set(doc(collection(db, 'events')), makeEvent(actor(), 'system', `BigBox swap with ${p.driverName}: ${fulls.length} full container${fulls.length === 1 ? '' : 's'} out (${fullNums}), ${newNumbers.length} empty${newNumbers.length === 1 ? '' : 's'} in (${newNumbers.join(', ')})`, media.length ? { media } : {}))
+        await batch.commit()
+        return
       }
       case 'warehouseReceive': {
         // Warehouse closes the custody loop: verify piece count against what the
         // container's units were packed with, assign a bay. p.media (optional)
-        // is the received-condition photo, already uploaded via uploadImage().
+        // is the received-condition photo, captured by the caller via
+        // captureMedia() (Storage when reachable, a resized data URL fallback
+        // when offline).
         const insideUnits = cont0.unitIds.map((id) => state.units.find((u) => u.id === id)).filter(Boolean)
         const expected = insideUnits.reduce((n, u) => n + (u.pieces || 0), 0)
         const mismatch = boxMismatch(expected, p.verifiedPieces)
@@ -149,10 +177,14 @@ export function StoreProvider({ children }) {
         const patch = { status: 'at_warehouse', bay: p.bay, verifiedPieces: p.verifiedPieces, receivedBy: currentUser.uid, warehouseAt: Date.now() }
         if (media.length) patch.media = arrayUnion(...media)
         if (mismatch) patch.flag = { message: `Piece count mismatch at warehouse receive: ${p.verifiedPieces} verified vs ${expected} on record. Recount pending.`, ts: Date.now(), by: currentUser.name, open: true }
-        await updateDoc(doc(db, 'containers', p.containerId), patch)
-        await Promise.all(insideUnits.map((u) => updateDoc(doc(db, 'units', u.id), { stage: 'at_warehouse' })))
-        await ev('stage', `Container ${cont0.number} received at warehouse — ${p.bay}, ${p.verifiedPieces} pieces verified`, { containerId: cont0.id, ...(media.length ? { media } : {}) })
-        if (mismatch) await ev('flag', `FLAG raised on container ${cont0.number}: piece count mismatch (${p.verifiedPieces}/${expected})`, { containerId: cont0.id })
+        // Same all-or-nothing batch as bigboxSwap: container + every unit
+        // inside it + the audit event(s) commit together, or none do.
+        const batch = writeBatch(db)
+        batch.update(doc(db, 'containers', p.containerId), patch)
+        for (const u of insideUnits) batch.update(doc(db, 'units', u.id), { stage: 'at_warehouse' })
+        batch.set(doc(collection(db, 'events')), makeEvent(actor(), 'stage', `Container ${cont0.number} received at warehouse, ${p.bay}, ${p.verifiedPieces} pieces verified`, { containerId: cont0.id, ...(media.length ? { media } : {}) }))
+        if (mismatch) batch.set(doc(collection(db, 'events')), makeEvent(actor(), 'flag', `FLAG raised on container ${cont0.number}: piece count mismatch (${p.verifiedPieces}/${expected})`, { containerId: cont0.id }))
+        await batch.commit()
         return
       }
 
@@ -187,7 +219,10 @@ export function StoreProvider({ children }) {
         p.media = attributeMedia(p.media)
         const mismatch = boxMismatch(unit.pieces, p.pieces)
         const patch = { stage: 'return_loaded', containerIds: arrayUnion(p.containerId) }
-        if (mismatch) patch.flag = { message: `Piece count mismatch at return load: ${p.pieces} loaded vs ${unit.pieces} packed. Recount pending.`, ts: Date.now(), by: currentUser.name, open: true }
+        // Same "don't clobber an open flag" guard as loadUnit: an unresolved
+        // flag from earlier in the round trip stays intact; the mismatch
+        // event is still logged unconditionally below.
+        if (mismatch && !unit.flag?.open) patch.flag = { message: `Piece count mismatch at return load: ${p.pieces} loaded vs ${unit.pieces} packed. Recount pending.`, ts: Date.now(), by: currentUser.name, open: true }
         await updateDoc(doc(db, 'units', p.unitId), patch)
         // Status is always written explicitly here (never omitted), same as
         // outbound loadUnit: both at_warehouse->return_filling and
@@ -205,40 +240,49 @@ export function StoreProvider({ children }) {
       case 'dispatchReturn': {
         // Mirror of bigboxSwap, but the return leg doesn't necessarily bring
         // new empties back (newEmptyNumbers is optional), and it hands off
-        // one container at a time rather than a batch.
+        // one container at a time rather than a batch of containers. Same
+        // all-or-nothing writeBatch as bigboxSwap/warehouseReceive: container
+        // + units + new empties + audit event commit together or not at all.
         const media = attributeMedia(p.media || [])
         const patch = { status: 'return_transit', driverName: p.driverName, dispatchedAt: Date.now(), handoffBy: currentUser.uid }
         if (media.length) patch.media = arrayUnion(...media)
-        await updateDoc(doc(db, 'containers', p.containerId), patch)
         // cont0.unitIds is stale: it still holds every unit ever loaded onto
         // this physical container, including its outbound trip. Only
         // promote units actually loaded for THIS return trip (loadForReturn
         // already flipped them to return_loaded) so a sibling that was
         // never loaded for return (still at_warehouse) isn't force-promoted.
         const toDispatch = (cont0.unitIds || []).map((uid) => state.units.find((u) => u.id === uid)).filter((u) => u && u.stage === 'return_loaded')
-        await Promise.all(toDispatch.map((u) => updateDoc(doc(db, 'units', u.id), { stage: 'return_transit' })))
+        const batch = writeBatch(db)
+        batch.update(doc(db, 'containers', p.containerId), patch)
+        for (const u of toDispatch) batch.update(doc(db, 'units', u.id), { stage: 'return_transit' })
         let addedMsg = ''
         if (p.newEmptyNumbers && p.newEmptyNumbers.length) {
           const newNumbers = p.newEmptyNumbers.map((n) => n.toUpperCase())
-          await Promise.all(newNumbers.map((number) => addDoc(collection(db, 'containers'), { number, status: 'empty', unitIds: [], deliveredAt: Date.now() })))
+          for (const number of newNumbers) batch.set(doc(collection(db, 'containers')), { number, status: 'empty', unitIds: [], deliveredAt: Date.now() })
           addedMsg = `, ${newNumbers.length} empty${newNumbers.length === 1 ? '' : 's'} in (${newNumbers.join(', ')})`
         }
-        return ev('system', `Return dispatch with ${p.driverName}: container ${cont0.number} out for delivery back to site${addedMsg}`, { containerId: cont0.id, ...(media.length ? { media } : {}) })
+        batch.set(doc(collection(db, 'events')), makeEvent(actor(), 'system', `Return dispatch with ${p.driverName}: container ${cont0.number} out for delivery back to site${addedMsg}`, { containerId: cont0.id, ...(media.length ? { media } : {}) }))
+        await batch.commit()
+        return
       }
       case 'deliverReturn': {
         // Mirror of the BigBox drive to the warehouse (no dedicated outbound
         // action): the container and its units arrive back on site. Piece
-        // verification happens per-unit at unloadReturn, not here.
+        // verification happens per-unit at unloadReturn, not here. Same
+        // all-or-nothing writeBatch as the other three multi-doc actions.
         const media = attributeMedia(p.media || [])
         const patch = { status: 'back_on_site', receivedBy: currentUser.uid, backOnSiteAt: Date.now() }
         if (media.length) patch.media = arrayUnion(...media)
-        await updateDoc(doc(db, 'containers', p.containerId), patch)
         // Same staleness guard as dispatchReturn: only promote units that
         // are actually in transit on this return trip (return_transit), not
         // every unit ever associated with this container.
         const toDeliver = (cont0.unitIds || []).map((uid) => state.units.find((u) => u.id === uid)).filter((u) => u && u.stage === 'return_transit')
-        await Promise.all(toDeliver.map((u) => updateDoc(doc(db, 'units', u.id), { stage: 'back_on_site' })))
-        return ev('stage', `Container ${cont0.number} delivered back on site`, { containerId: cont0.id, ...(media.length ? { media } : {}) })
+        const batch = writeBatch(db)
+        batch.update(doc(db, 'containers', p.containerId), patch)
+        for (const u of toDeliver) batch.update(doc(db, 'units', u.id), { stage: 'back_on_site' })
+        batch.set(doc(collection(db, 'events')), makeEvent(actor(), 'stage', `Container ${cont0.number} delivered back on site`, { containerId: cont0.id, ...(media.length ? { media } : {}) }))
+        await batch.commit()
+        return
       }
       case 'unloadReturn': {
         // Mirror of loadUnit's piece verify, reversed: the mover carries the
@@ -249,7 +293,8 @@ export function StoreProvider({ children }) {
         p.media = attributeMedia(p.media)
         const mismatch = boxMismatch(unit.pieces, p.pieces)
         const patch = { stage: 'unloaded', 'crew.movers': arrayUnion(currentUser.uid) }
-        if (mismatch) patch.flag = { message: `Piece count mismatch at return unload: ${p.pieces} unloaded vs ${unit.pieces} packed. Recount pending.`, ts: Date.now(), by: currentUser.name, open: true }
+        // Same "don't clobber an open flag" guard as loadUnit/loadForReturn.
+        if (mismatch && !unit.flag?.open) patch.flag = { message: `Piece count mismatch at return unload: ${p.pieces} unloaded vs ${unit.pieces} packed. Recount pending.`, ts: Date.now(), by: currentUser.name, open: true }
         await updateDoc(doc(db, 'units', p.unitId), patch)
         const cont = state.containers.find((c) => c.status === 'back_on_site' && (c.unitIds || []).includes(p.unitId))
         if (cont) {
@@ -308,9 +353,10 @@ export function StoreProvider({ children }) {
       }
       case 'prepOverflow': {
         // Padded, wrapped, labeled: the photo (required by the UI) is the
-        // proof of prep and the label. p.media is already uploaded to
-        // Storage by the caller via uploadImage(); attribution is stamped
-        // here so every capture site (not just Overflow) stays consistent.
+        // proof of prep and the label. p.media comes from the caller's
+        // captureMedia() call (Storage when reachable, a resized data URL
+        // fallback when offline); attribution is stamped here so every
+        // capture site (not just Overflow) stays consistent.
         p.media = attributeMedia(p.media)
         await updateDoc(doc(db, 'overflow', p.overflowId), { stage: 'prepped', preppedAt: Date.now(), prepBy: currentUser.uid, media: arrayUnion(...p.media) })
         return ev('media', `Overflow item padded, wrapped & labeled, unit ${over0.unitNumber}: ${over0.description}`, { unitId: over0.unitId, overflowId: over0.id, media: p.media })
@@ -322,7 +368,8 @@ export function StoreProvider({ children }) {
       case 'receiveOverflow': {
         // Warehouse closes the custody loop: assign a specific per-item
         // location. p.media (optional) is the received-condition photo,
-        // already uploaded via uploadImage().
+        // captured by the caller via captureMedia() (Storage when reachable,
+        // a resized data URL fallback when offline).
         const media = attributeMedia(p.media || [])
         const patch = { stage: 'at_warehouse', warehouseAt: Date.now(), receivedBy: currentUser.uid, warehouseLocation: p.warehouseLocation }
         if (media.length) patch.media = arrayUnion(...media)
@@ -360,10 +407,15 @@ export function StoreProvider({ children }) {
         p.media = attributeMedia(p.media)
         const n = p.media.length
         const kinds = p.media.some((m) => m.kind === 'video') ? (p.media.every((m) => m.kind === 'video') ? 'video' + (n > 1 ? 's' : '') : 'photos & video') : 'photo' + (n > 1 ? 's' : '')
-        return ev('media', `Added ${n} ${kinds}${p.note ? ' — ' + p.note : ''} (unit ${unit.number})`, { unitId: unit.id, media: p.media })
+        return ev('media', `Added ${n} ${kinds}${p.note ? ', ' + p.note : ''} (unit ${unit.number})`, { unitId: unit.id, media: p.media })
       }
       case 'addNote': {
-        const extra = p.unitId ? { unitId: p.unitId } : { containerId: p.containerId }
+        // Only attach containerId/unitId when truthy so a discrepancy note
+        // with no real container/unit ref (e.g. a blind-check mismatch)
+        // doesn't get polluted with an empty-string field.
+        const extra = {}
+        if (p.unitId) extra.unitId = p.unitId
+        if (p.containerId) extra.containerId = p.containerId
         return ev('note', p.text, extra)
       }
       case 'resolveFlag': {
@@ -387,7 +439,10 @@ export function StoreProvider({ children }) {
         return ev('system', `Removed ${name}'s access`)
       }
       case 'denyUser': {
-        await updateDoc(doc(db, 'users', p.userId), { status: 'removed' })
+        // Marked denied: true (in addition to status: 'removed') so the
+        // access-revoked screen can tell "never had access, request denied"
+        // apart from "had access, admin removed it" and word it accordingly.
+        await updateDoc(doc(db, 'users', p.userId), { status: 'removed', denied: true })
         return ev('system', `Denied ${name}'s request`)
       }
       case 'seedSchedule': {
@@ -420,8 +475,17 @@ export function StoreProvider({ children }) {
           phase,
         }
         const nextId = scheduleDocId(next.date, phase)
-        if (nextId !== p.dateId) await deleteDoc(doc(db, 'schedule', p.dateId))
+        if (nextId !== p.dateId) {
+          // Collision guard: if the target id already belongs to a different
+          // scheduled day, refuse instead of silently clobbering it.
+          const collision = state.schedule.find((d) => d.id === nextId && d.id !== p.dateId)
+          if (collision) throw new Error('Another day is already scheduled for that date. Pick a different date.')
+        }
+        // Write the new doc first, then remove the old one only once the
+        // new one is confirmed on the server: if setDoc fails, the old day
+        // stays intact instead of the day being lost.
         await setDoc(doc(db, 'schedule', nextId), next, { merge: true })
+        if (nextId !== p.dateId) await deleteDoc(doc(db, 'schedule', p.dateId))
         const moved = nextId !== p.dateId ? ` (moved to ${next.date})` : ''
         return ev('system', `Admin edited schedule day ${p.dateId}${moved}: Floor ${next.floor}, ${next.work}, ${next.unitCount} units`)
       }
@@ -497,7 +561,7 @@ export function containerAction(user, cont, returnPhase = false) {
   // Container status lifecycle: empty → filling → full → picked_up → at_warehouse.
   // The swap (full → picked_up) and warehouse receive (picked_up → at_warehouse)
   // are batch/dedicated screens, not a single-container quick action, so they
-  // return null here rather than a one-tap action — this only covers the
+  // return null here rather than a one-tap action, this only covers the
   // simple in-place transition (filling → full). Same story on the return
   // leg: dispatchReturn/deliverReturn are dedicated screens, so only
   // return_filling gets a quick action here. returnPhase defaults to false
@@ -510,7 +574,7 @@ export function containerAction(user, cont, returnPhase = false) {
   const admin = user.role === 'admin'
   switch (cont.status) {
     case 'filling':
-      return admin || user.role === 'mover' ? { key: 'markContainerFull', label: 'Mark full — ready for pickup' } : null
+      return admin || user.role === 'mover' ? { key: 'markContainerFull', label: 'Mark full, ready for pickup' } : null
     default:
       return null
   }
@@ -569,7 +633,7 @@ export async function filesToMedia(fileList, labelPrefix = '') {
   const out = []
   for (const f of files) {
     if (f.type.startsWith('video')) {
-      if (f.size > 12 * 1024 * 1024) { alert(`${f.name} is over 12 MB — video skipped (demo build keeps uploads small).`); continue }
+      if (f.size > 12 * 1024 * 1024) { alert(`${f.name} is over 12 MB, video skipped (demo build keeps uploads small).`); continue }
       out.push({ id: `up-${Date.now()}-${out.length}`, kind: 'video', label: labelPrefix || f.name, url: await readAsDataURL(f) })
     } else if (f.type.startsWith('image')) {
       out.push({ id: `up-${Date.now()}-${out.length}`, kind: 'photo', label: labelPrefix || f.name, url: await resizeImage(f) })
