@@ -374,10 +374,10 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
             <input className="input" value={form.phone || ''} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></div>
           <div className="field"><label>Special notes</label>
             <textarea className="input" rows="2" value={form.note || ''} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="e.g. Piano — needs 4-person crew" /></div>
-          <button className="btn btn-primary" style={{ width: '100%' }} disabled={busy} onClick={async () => {
+          <button className="btn btn-primary" style={{ width: '100%' }} disabled={busy || !(form.tenant || '').trim()} onClick={async () => {
             setBusy(true)
             try {
-              await dispatch({ type: 'editUnit', p: { unitId, patch: { tenant: form.tenant.trim(), phone: form.phone.trim(), note: (form.note || '').trim() } } })
+              await dispatch({ type: 'editUnit', p: { unitId, patch: { tenant: (form.tenant || '').trim(), phone: (form.phone || '').trim(), note: (form.note || '').trim() } } })
               setModal(null); toast('Unit updated — edit logged ✓')
             } catch (err) {
               toast(err.message || SAVE_ERROR)
