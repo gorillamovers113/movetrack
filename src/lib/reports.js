@@ -94,6 +94,13 @@ export function computeUserReport(state, user) {
 
   const unitsPacked = unitsWithCrew(units, uid, 'packers')
   const unitsLoaded = unitsWithCrew(units, uid, 'movers')
+  // Return-leg crew, tracked in their own arrays (crew.unpackers/
+  // crew.unloaders) rather than crew.packers/crew.movers so return-only work
+  // is never mislabeled as outbound packing/loading, and so a return-only
+  // unpacker never gets credited with the outbound piece count
+  // (docs/superpowers/specs/2026-08-27-return-leg-correctness-fixes.md #4).
+  const unitsUnpacked = unitsWithCrew(units, uid, 'unpackers')
+  const unitsUnloaded = unitsWithCrew(units, uid, 'unloaders')
   const piecesPacked = sumPieces(unitsPacked)
   const piecesLoaded = sumPieces(unitsLoaded)
   const pack = packTimeStats(unitsPacked)
@@ -117,6 +124,8 @@ export function computeUserReport(state, user) {
 
     unitsPackedCount: unitsPacked.length,
     unitsLoadedCount: unitsLoaded.length,
+    unitsUnpackedCount: unitsUnpacked.length,
+    unitsUnloadedCount: unitsUnloaded.length,
     piecesPacked,
     piecesLoaded,
     piecesHandled: piecesPacked + piecesLoaded,
@@ -156,7 +165,7 @@ export function computeAllReports(state, users) {
 export function summarizeRoster(reports) {
   const init = {
     people: reports.length,
-    unitsPackedCount: 0, unitsLoadedCount: 0, piecesHandled: 0,
+    unitsPackedCount: 0, unitsLoadedCount: 0, unitsUnpackedCount: 0, unitsUnloadedCount: 0, piecesHandled: 0,
     photosSubmitted: 0, videosSubmitted: 0, mediaSubmitted: 0,
     packTimeMs: 0, totalActions: 0,
   }
@@ -164,6 +173,8 @@ export function summarizeRoster(reports) {
     people: sum.people,
     unitsPackedCount: sum.unitsPackedCount + r.unitsPackedCount,
     unitsLoadedCount: sum.unitsLoadedCount + r.unitsLoadedCount,
+    unitsUnpackedCount: sum.unitsUnpackedCount + r.unitsUnpackedCount,
+    unitsUnloadedCount: sum.unitsUnloadedCount + r.unitsUnloadedCount,
     piecesHandled: sum.piecesHandled + r.piecesHandled,
     photosSubmitted: sum.photosSubmitted + r.photosSubmitted,
     videosSubmitted: sum.videosSubmitted + r.videosSubmitted,
@@ -190,14 +201,16 @@ export function fmtDuration(ms) {
 export function reportsToCSV(reports) {
   const esc = (s) => '"' + String(s ?? '').replace(/"/g, '""') + '"'
   const header = [
-    'Name', 'Role', 'Units packed', 'Units loaded', 'Pieces packed', 'Pieces loaded',
+    'Name', 'Role', 'Units packed', 'Units loaded', 'Units unpacked (return)', 'Units unloaded (return)',
+    'Pieces packed', 'Pieces loaded',
     'Photos submitted', 'Videos submitted', 'Packing time (min)', 'Avg packing time (min)',
     'Total actions', 'Active days', 'First activity', 'Last activity',
   ]
   const rows = [header.map(esc).join(',')]
   for (const r of reports) {
     rows.push([
-      esc(r.name), esc(r.role), r.unitsPackedCount, r.unitsLoadedCount, r.piecesPacked, r.piecesLoaded,
+      esc(r.name), esc(r.role), r.unitsPackedCount, r.unitsLoadedCount, r.unitsUnpackedCount, r.unitsUnloadedCount,
+      r.piecesPacked, r.piecesLoaded,
       r.photosSubmitted, r.videosSubmitted, Math.round(r.packTimeMs / 60000), Math.round(r.avgPackTimeMs / 60000),
       r.totalActions, r.activeDays,
       esc(r.firstActivityTs ? new Date(r.firstActivityTs).toLocaleString('en-US') : ''),

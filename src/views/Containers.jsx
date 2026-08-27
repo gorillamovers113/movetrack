@@ -191,7 +191,7 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
       {open && (
         <Modal
           title={`Container ${open.number}`}
-          sub={`${CONT_STATUS[open.status]?.label || open.status}${open.bay ? ' · ' + open.bay : ''}${open.driverName ? ' · driver: ' + open.driverName : ''}`}
+          sub={`${CONT_STATUS[open.status]?.label || open.status}${open.bay ? ' · ' + open.bay : ''}${open.driverName ? ' · outbound driver: ' + open.driverName : ''}${open.returnDriverName ? ' · return driver: ' + open.returnDriverName : ''}`}
           onClose={() => { if (!busy) close() }}
         >
           <div className="section-title" style={{ marginTop: 0 }}>Units inside</div>

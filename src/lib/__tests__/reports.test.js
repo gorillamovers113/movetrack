@@ -43,6 +43,48 @@ describe('computeUserReport: mover (loads)', () => {
   it('does not count packs', () => expect(r.unitsPackedCount).toBe(0))
 })
 
+// Return-leg crew: unpackUnit/unloadReturn credit crew.unpackers/crew.unloaders
+// (not crew.packers/crew.movers), so return-only work must never show up as
+// outbound packing/loading, and outbound counts must never pick up return
+// work (docs/superpowers/specs/2026-08-27-return-leg-correctness-fixes.md #4).
+describe('computeUserReport: return-leg crew (unpackers/unloaders)', () => {
+  const units = [
+    { id: 'unit-1', pieces: 10, crew: { packers: [], movers: [], unpackers: ['u-packer'], unloaders: [] } },
+    { id: 'unit-2', pieces: 6, crew: { packers: [], movers: [], unpackers: [], unloaders: ['u-mover'] } },
+    { id: 'unit-3', pieces: 4, crew: { packers: [], movers: [], unpackers: ['u-packer'], unloaders: ['u-mover'] } },
+  ]
+  const state = baseState({ units })
+  const packerReport = computeUserReport(state, packer)
+  const moverReport = computeUserReport(state, mover)
+
+  it('counts distinct units unpacked, separate from units packed', () => {
+    expect(packerReport.unitsUnpackedCount).toBe(2)
+    expect(packerReport.unitsPackedCount).toBe(0)
+  })
+  it('counts distinct units unloaded, separate from units loaded', () => {
+    expect(moverReport.unitsUnloadedCount).toBe(2)
+    expect(moverReport.unitsLoadedCount).toBe(0)
+  })
+  it('outbound counts are unaffected by units with no outbound crew, only return crew', () => {
+    const outboundOnly = baseState({
+      units: [{ id: 'unit-1', pieces: 10, crew: { packers: ['u-packer'], movers: ['u-mover'], unpackers: ['u-packer'], unloaders: ['u-mover'] } }],
+    })
+    const p = computeUserReport(outboundOnly, packer)
+    const m = computeUserReport(outboundOnly, mover)
+    expect(p.unitsPackedCount).toBe(1)
+    expect(p.unitsUnpackedCount).toBe(1)
+    expect(m.unitsLoadedCount).toBe(1)
+    expect(m.unitsUnloadedCount).toBe(1)
+  })
+  it('handles units missing the unpackers/unloaders arrays without crashing', () => {
+    const legacy = baseState({ units: [{ id: 'unit-x', crew: { packers: [], movers: [] } }] })
+    expect(() => computeUserReport(legacy, packer)).not.toThrow()
+    const r = computeUserReport(legacy, packer)
+    expect(r.unitsUnpackedCount).toBe(0)
+    expect(r.unitsUnloadedCount).toBe(0)
+  })
+})
+
 describe('computeUserReport: warehouse user (receives)', () => {
   const containers = [
     { id: 'c-1', receivedBy: 'u-wh' },
@@ -69,6 +111,8 @@ describe('computeUserReport: zero-activity user', () => {
   it('is all zeros, never NaN or undefined', () => {
     expect(r.unitsPackedCount).toBe(0)
     expect(r.unitsLoadedCount).toBe(0)
+    expect(r.unitsUnpackedCount).toBe(0)
+    expect(r.unitsUnloadedCount).toBe(0)
     expect(r.piecesPacked).toBe(0)
     expect(r.piecesLoaded).toBe(0)
     expect(r.piecesHandled).toBe(0)
