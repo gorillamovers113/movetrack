@@ -118,11 +118,15 @@ img { display: block; max-width: 100%; }
 .gridwrap { padding: 20px; }
 .floor-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
 .floor-label { width: 56px; flex-shrink: 0; font-size: 12px; font-weight: 700; color: var(--ink-3); text-align: right; }
-.unit-tiles { display: grid; grid-template-columns: repeat(12, 1fr); gap: 7px; flex: 1; }
+/* Real floors have 4-6 units, not a fixed 12 - auto-fill lets the grid size
+   columns to fit whatever the floor actually has instead of squeezing every
+   tile into 1/12 of the row. Track size floors at 44px (the tap-target
+   minimum) and caps at 68px so tiles don't sprawl on wide screens. */
+.unit-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(clamp(44px, 18vw, 68px), 1fr)); gap: 7px; flex: 1; }
 .tile {
   position: relative; border-radius: 9px; padding: 9px 4px 7px; text-align: center; color: #fff;
   font-weight: 700; font-size: 13px; font-family: var(--display); letter-spacing: 0.2px;
-  transition: transform 0.12s, box-shadow 0.12s; overflow: hidden;
+  min-height: 44px; transition: transform 0.12s, box-shadow 0.12s; overflow: hidden;
 }
 .tile:hover { transform: translateY(-2px) scale(1.04); box-shadow: 0 8px 20px -6px rgba(0, 0, 0, 0.35); z-index: 2; }
 .tile:active { transform: translateY(0) scale(0.96); box-shadow: 0 2px 8px -4px rgba(0, 0, 0, 0.4); z-index: 2; }
@@ -359,7 +363,10 @@ a.linkish, .linkish { color: #b45309; font-weight: 600; cursor: pointer; text-de
   .hero-stats { gap: 22px; padding-top: 24px; }
   .login-panel { padding: 32px 22px calc(32px + env(safe-area-inset-bottom)); }
   .unit-tiles { gap: 5px; }
-  .tile { font-size: 11px; padding: 7px 2px 5px; border-radius: 7px; }
+  /* Unit number is the only content once .tile small is hidden below, so
+     center it in the full 44px hit area instead of top-aligning it in
+     leftover padding - keeps "101" / "12A" fully visible, never clipped. */
+  .tile { font-size: 13px; padding: 4px; min-height: 44px; border-radius: 7px; display: flex; align-items: center; justify-content: center; }
   .tile small { display: none; }
   .floor-label { width: 36px; font-size: 11px; }
   .page-head h1 { font-size: 21px; }
