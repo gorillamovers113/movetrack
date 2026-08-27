@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { useStore, CONT_STATUS, containerAction } from '../store.jsx'
 import { Modal, Lightbox, EventRow, StagePill } from '../ui.jsx'
-import { uploadImage } from '../lib/upload.js'
+import { captureMedia } from '../lib/upload.js'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import EmptiesInButton from '../components/EmptiesInButton.jsx'
 import BigBoxSwapButton from '../components/BigBoxSwapButton.jsx'
@@ -57,10 +57,10 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
   const captureDispatchPhoto = async (file) => {
     setDrError(null); setDrPreview(URL.createObjectURL(file)); setDrUrl(null); setDrUploading(true)
     try {
-      const url = await uploadImage(file, `containers/${open.id}/dispatch-return/${Date.now()}-${currentUser.uid}.jpg`)
+      const { url } = await captureMedia(file, `containers/${open.id}/dispatch-return/${Date.now()}-${currentUser.uid}.jpg`)
       setDrUrl(url)
     } catch (err) {
-      setDrError(err.message || 'Upload failed, try again.')
+      setDrError(err.message || 'Capture failed, try again.')
     } finally {
       setDrUploading(false)
     }
@@ -263,7 +263,7 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
                     <div className="inv-preview">
                       <img src={drPreview} alt="Container ready for return dispatch" className="inv-thumb" />
                       <div className="muted" style={{ marginTop: 8 }}>
-                        {drUploading ? 'Uploading…' : drUrl ? '✓ Uploaded, tap to retake' : drError || 'Tap to retake'}
+                        {drUploading ? 'Saving…' : drUrl ? '✓ Photo saved, tap to retake' : drError || 'Tap to retake'}
                       </div>
                     </div>
                   ) : <>📷 Tap to add a photo</>}

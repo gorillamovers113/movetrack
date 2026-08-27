@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { STAGES, stageOf } from '../seed.js'
 import { useStore, canAct, filesToMedia, fmtTime, CONT_STATUS } from '../store.jsx'
 import { Modal, Lightbox, Uploader, EventRow, Avatar, StagePill } from '../ui.jsx'
-import { uploadImage } from '../lib/upload.js'
+import { captureMedia } from '../lib/upload.js'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import ReportOverflowButton from '../components/ReportOverflowButton.jsx'
 
@@ -53,10 +53,10 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
     setInvUploading(true)
     try {
       const path = `units/${unitId}/inventory/${Date.now()}-${currentUser.uid}.jpg`
-      const url = await uploadImage(file, path)
+      const { url } = await captureMedia(file, path)
       setInvUrl(url)
     } catch (err) {
-      setInvError(err.message || 'Upload failed, try again.')
+      setInvError(err.message || 'Capture failed, try again.')
     } finally {
       setInvUploading(false)
     }
@@ -278,7 +278,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
                     <div className="inv-preview">
                       <img src={invPreview} alt="Inventory sheet" className="inv-thumb" />
                       <div className="muted" style={{ marginTop: 8 }}>
-                        {invUploading ? 'Uploading…' : invUrl ? '✓ Uploaded, tap to retake' : invError || 'Tap to retake'}
+                        {invUploading ? 'Saving…' : invUrl ? '✓ Photo saved, tap to retake' : invError || 'Tap to retake'}
                       </div>
                     </div>
                   ) : <>📷 Tap to photograph the inventory sheet</>}

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useStore } from '../store.jsx'
 import { Modal } from '../ui.jsx'
-import { uploadImage } from '../lib/upload.js'
+import { captureMedia } from '../lib/upload.js'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 
 // "BigBox swap" — the driver hands off full containers and drops new empties,
@@ -43,10 +43,10 @@ export default function BigBoxSwapButton({ toast }) {
   const capturePhoto = async (file) => {
     setPhotoError(null); setPreview(URL.createObjectURL(file)); setPhotoUrl(null); setUploading(true)
     try {
-      const url = await uploadImage(file, `containers/swaps/${Date.now()}-${currentUser.uid}.jpg`)
+      const { url } = await captureMedia(file, `containers/swaps/${Date.now()}-${currentUser.uid}.jpg`)
       setPhotoUrl(url)
     } catch (err) {
-      setPhotoError(err.message || 'Upload failed, try again.')
+      setPhotoError(err.message || 'Capture failed, try again.')
     } finally {
       setUploading(false)
     }
@@ -108,7 +108,7 @@ export default function BigBoxSwapButton({ toast }) {
                 <div className="inv-preview">
                   <img src={preview} alt="Loaded container" className="inv-thumb" />
                   <div className="muted" style={{ marginTop: 8 }}>
-                    {uploading ? 'Uploading…' : photoUrl ? '✓ Uploaded, tap to retake' : photoError || 'Tap to retake'}
+                    {uploading ? 'Saving…' : photoUrl ? '✓ Photo saved, tap to retake' : photoError || 'Tap to retake'}
                   </div>
                 </div>
               ) : <>📷 Tap to photograph the loaded container(s)</>}

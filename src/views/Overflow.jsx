@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { useStore, OVERFLOW_STATUS, overflowAction } from '../store.jsx'
 import { Modal, Lightbox, EventRow, AttributedMedia } from '../ui.jsx'
-import { uploadImage } from '../lib/upload.js'
+import { captureMedia } from '../lib/upload.js'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import ReportOverflowButton from '../components/ReportOverflowButton.jsx'
 
@@ -71,10 +71,10 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
   const capturePrepPhoto = async (file) => {
     setPError(null); setPPreview(URL.createObjectURL(file)); setPUrl(null); setPUploading(true)
     try {
-      const url = await uploadImage(file, `overflow/${open.id}/prep/${Date.now()}-${currentUser.uid}.jpg`)
+      const { url } = await captureMedia(file, `overflow/${open.id}/prep/${Date.now()}-${currentUser.uid}.jpg`)
       setPUrl(url)
     } catch (err) {
-      setPError(err.message || 'Upload failed, try again.')
+      setPError(err.message || 'Capture failed, try again.')
     } finally {
       setPUploading(false)
     }
@@ -83,10 +83,10 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
   const captureReceivePhoto = async (file) => {
     setRError(null); setRPreview(URL.createObjectURL(file)); setRUrl(null); setRUploading(true)
     try {
-      const url = await uploadImage(file, `overflow/${open.id}/receive/${Date.now()}-${currentUser.uid}.jpg`)
+      const { url } = await captureMedia(file, `overflow/${open.id}/receive/${Date.now()}-${currentUser.uid}.jpg`)
       setRUrl(url)
     } catch (err) {
-      setRError(err.message || 'Upload failed, try again.')
+      setRError(err.message || 'Capture failed, try again.')
     } finally {
       setRUploading(false)
     }
@@ -95,10 +95,10 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
   const captureTransportBackPhoto = async (file) => {
     setBError(null); setBPreview(URL.createObjectURL(file)); setBUrl(null); setBUploading(true)
     try {
-      const url = await uploadImage(file, `overflow/${open.id}/transport-back/${Date.now()}-${currentUser.uid}.jpg`)
+      const { url } = await captureMedia(file, `overflow/${open.id}/transport-back/${Date.now()}-${currentUser.uid}.jpg`)
       setBUrl(url)
     } catch (err) {
-      setBError(err.message || 'Upload failed, try again.')
+      setBError(err.message || 'Capture failed, try again.')
     } finally {
       setBUploading(false)
     }
@@ -308,7 +308,7 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
                     <div className="inv-preview">
                       <img src={pPreview} alt="Padded, wrapped & labeled" className="inv-thumb" />
                       <div className="muted" style={{ marginTop: 8 }}>
-                        {pUploading ? 'Uploading…' : pUrl ? '✓ Uploaded, tap to retake' : pError || 'Tap to retake'}
+                        {pUploading ? 'Saving…' : pUrl ? '✓ Photo saved, tap to retake' : pError || 'Tap to retake'}
                       </div>
                     </div>
                   ) : <>📷 Tap to photograph the padded, wrapped & labeled item</>}
@@ -344,7 +344,7 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
                     <div className="inv-preview">
                       <img src={rPreview} alt="Received condition" className="inv-thumb" />
                       <div className="muted" style={{ marginTop: 8 }}>
-                        {rUploading ? 'Uploading…' : rUrl ? '✓ Uploaded, tap to retake' : rError || 'Tap to retake'}
+                        {rUploading ? 'Saving…' : rUrl ? '✓ Photo saved, tap to retake' : rError || 'Tap to retake'}
                       </div>
                     </div>
                   ) : <>📷 Tap to add a photo</>}
@@ -370,7 +370,7 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
                     <div className="inv-preview">
                       <img src={bPreview} alt="Loaded for return transport" className="inv-thumb" />
                       <div className="muted" style={{ marginTop: 8 }}>
-                        {bUploading ? 'Uploading…' : bUrl ? '✓ Uploaded, tap to retake' : bError || 'Tap to retake'}
+                        {bUploading ? 'Saving…' : bUrl ? '✓ Photo saved, tap to retake' : bError || 'Tap to retake'}
                       </div>
                     </div>
                   ) : <>📷 Tap to add a photo</>}
@@ -396,7 +396,7 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
                     <div className="inv-preview">
                       <img src={pPreview} alt="Unwrapped and placed back" className="inv-thumb" />
                       <div className="muted" style={{ marginTop: 8 }}>
-                        {pUploading ? 'Uploading…' : pUrl ? '✓ Uploaded, tap to retake' : pError || 'Tap to retake'}
+                        {pUploading ? 'Saving…' : pUrl ? '✓ Photo saved, tap to retake' : pError || 'Tap to retake'}
                       </div>
                     </div>
                   ) : <>📷 Tap to photograph the item unwrapped and back in place</>}

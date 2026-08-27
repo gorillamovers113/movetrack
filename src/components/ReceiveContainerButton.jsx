@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useStore } from '../store.jsx'
 import { Modal } from '../ui.jsx'
-import { uploadImage } from '../lib/upload.js'
+import { captureMedia } from '../lib/upload.js'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import { matchContainerByNumber } from '../lib/mutations.js'
 
@@ -47,10 +47,10 @@ export default function ReceiveContainerButton({ toast }) {
   const capturePhoto = async (file) => {
     setPhotoError(null); setPreview(URL.createObjectURL(file)); setPhotoUrl(null); setUploading(true)
     try {
-      const url = await uploadImage(file, `containers/${matched.id}/receive/${Date.now()}-${currentUser.uid}.jpg`)
+      const { url } = await captureMedia(file, `containers/${matched.id}/receive/${Date.now()}-${currentUser.uid}.jpg`)
       setPhotoUrl(url)
     } catch (err) {
-      setPhotoError(err.message || 'Upload failed, try again.')
+      setPhotoError(err.message || 'Capture failed, try again.')
     } finally {
       setUploading(false)
     }
@@ -168,7 +168,7 @@ export default function ReceiveContainerButton({ toast }) {
                     <div className="inv-preview">
                       <img src={preview} alt="Received container" className="inv-thumb" />
                       <div className="muted" style={{ marginTop: 8 }}>
-                        {uploading ? 'Uploading…' : photoUrl ? '✓ Uploaded, tap to retake' : photoError || 'Tap to retake'}
+                        {uploading ? 'Saving…' : photoUrl ? '✓ Photo saved, tap to retake' : photoError || 'Tap to retake'}
                       </div>
                     </div>
                   ) : <>📷 Tap to add a photo</>}

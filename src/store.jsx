@@ -136,10 +136,11 @@ export function StoreProvider({ children }) {
         // Mover logs the hand-off to the BigBox driver: selected full containers
         // go out (with the driver's name recorded), new empties come in — the
         // driver never touches the app; the mover is the custody witness.
-        // p.media (optional) is the handoff photo, already uploaded to Storage
-        // by the caller via uploadImage() — stored on each outgoing container
-        // and on the swap event so it shows in both the container's custody
-        // log and the global activity feed.
+        // p.media (optional) is the handoff photo, captured by the caller via
+        // captureMedia() (Storage when reachable, a resized data URL fallback
+        // when offline), stored on each outgoing container and on the swap
+        // event so it shows in both the container's custody log and the
+        // global activity feed.
         // Every container update, every unit update, every new-empty create
         // and the audit event all go into one batch so the whole hand-off is
         // all-or-nothing: a partial failure used to be able to move a
@@ -166,7 +167,9 @@ export function StoreProvider({ children }) {
       case 'warehouseReceive': {
         // Warehouse closes the custody loop: verify piece count against what the
         // container's units were packed with, assign a bay. p.media (optional)
-        // is the received-condition photo, already uploaded via uploadImage().
+        // is the received-condition photo, captured by the caller via
+        // captureMedia() (Storage when reachable, a resized data URL fallback
+        // when offline).
         const insideUnits = cont0.unitIds.map((id) => state.units.find((u) => u.id === id)).filter(Boolean)
         const expected = insideUnits.reduce((n, u) => n + (u.pieces || 0), 0)
         const mismatch = boxMismatch(expected, p.verifiedPieces)
@@ -350,9 +353,10 @@ export function StoreProvider({ children }) {
       }
       case 'prepOverflow': {
         // Padded, wrapped, labeled: the photo (required by the UI) is the
-        // proof of prep and the label. p.media is already uploaded to
-        // Storage by the caller via uploadImage(); attribution is stamped
-        // here so every capture site (not just Overflow) stays consistent.
+        // proof of prep and the label. p.media comes from the caller's
+        // captureMedia() call (Storage when reachable, a resized data URL
+        // fallback when offline); attribution is stamped here so every
+        // capture site (not just Overflow) stays consistent.
         p.media = attributeMedia(p.media)
         await updateDoc(doc(db, 'overflow', p.overflowId), { stage: 'prepped', preppedAt: Date.now(), prepBy: currentUser.uid, media: arrayUnion(...p.media) })
         return ev('media', `Overflow item padded, wrapped & labeled, unit ${over0.unitNumber}: ${over0.description}`, { unitId: over0.unitId, overflowId: over0.id, media: p.media })
@@ -364,7 +368,8 @@ export function StoreProvider({ children }) {
       case 'receiveOverflow': {
         // Warehouse closes the custody loop: assign a specific per-item
         // location. p.media (optional) is the received-condition photo,
-        // already uploaded via uploadImage().
+        // captured by the caller via captureMedia() (Storage when reachable,
+        // a resized data URL fallback when offline).
         const media = attributeMedia(p.media || [])
         const patch = { stage: 'at_warehouse', warehouseAt: Date.now(), receivedBy: currentUser.uid, warehouseLocation: p.warehouseLocation }
         if (media.length) patch.media = arrayUnion(...media)
