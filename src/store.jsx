@@ -9,17 +9,19 @@ const Ctx = createContext(null)
 export function StoreProvider({ children }) {
   const [units, setUnits] = useState([])
   const [containers, setContainers] = useState([])
+  const [overflow, setOverflow] = useState([])
   const [events, setEvents] = useState([])
   const [users, setUsers] = useState([])
   const [schedule, setSchedule] = useState([])
   const [currentUser, setCurrentUser] = useState(null)
 
-  // Live Firestore state: five collection subscriptions replace the old
+  // Live Firestore state: six collection subscriptions replace the old
   // localStorage-backed reducer state. Each array holds `{ id, ...data }` docs.
   useEffect(() => {
     const subs = [
       onSnapshot(collection(db, 'units'), (s) => setUnits(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
       onSnapshot(collection(db, 'containers'), (s) => setContainers(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
+      onSnapshot(collection(db, 'overflow'), (s) => setOverflow(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
       onSnapshot(query(collection(db, 'events'), orderBy('ts', 'desc')), (s) => setEvents(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
       onSnapshot(collection(db, 'users'), (s) => setUsers(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
       onSnapshot(collection(db, 'schedule'), (s) => setSchedule(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
@@ -27,7 +29,7 @@ export function StoreProvider({ children }) {
     return () => subs.forEach((u) => u())
   }, [])
 
-  const state = { units, containers, events, users, schedule }
+  const state = { units, containers, overflow, events, users, schedule }
 
   // Auth session: subscribe to the signed-in user's Firestore profile doc so
   // role/status changes (e.g. admin approval) show up live without a re-login.
@@ -51,6 +53,7 @@ export function StoreProvider({ children }) {
   async function dispatch({ type, p }) {
     const unit = p.unitId ? state.units.find((u) => u.id === p.unitId) : null
     const cont0 = p.containerId ? state.containers.find((c) => c.id === p.containerId) : null
+    const over0 = p.overflowId ? state.overflow.find((o) => o.id === p.overflowId) : null
     const targetUser = p.userId ? state.users.find((u) => u.id === p.userId) : null
     const name = targetUser ? targetUser.name : 'user'
 
@@ -126,6 +129,55 @@ export function StoreProvider({ children }) {
         await ev('stage', `Container ${cont0.number} received at warehouse — ${p.bay}, ${p.verifiedPieces} pieces verified`, { containerId: cont0.id, ...(media.length ? { media } : {}) })
         if (mismatch) await ev('flag', `FLAG raised on container ${cont0.number}: piece count mismatch (${p.verifiedPieces}/${expected})`, { containerId: cont0.id })
         return
+      }
+      case 'createOverflow': {
+        // Oversized piece that won't fit a BigBox container, so Gorilla
+        // Movers transports it to the warehouse directly, on its own chain
+        // of custody. Denormalize unit info at creation for display on the
+        // pool card without a join.
+        const ref = await addDoc(collection(db, 'overflow'), {
+          unitId: unit.id, unitNumber: unit.number, unitTenant: unit.tenant, floor: unit.floor,
+          description: p.description,
+          stage: 'identified',
+          media: [],
+          createdBy: currentUser.uid,
+          createdAt: Date.now(),
+        })
+        return ev('system', `Logged overflow item on unit ${unit.number}: ${p.description}`, { unitId: unit.id, overflowId: ref.id })
+      }
+      case 'prepOverflow': {
+        // Padded, wrapped, labeled: the photo (required by the UI) is the
+        // proof of prep and the label. p.media is already uploaded to
+        // Storage by the caller via uploadImage() and carries
+        // uid/userName/ts for per-photo attribution.
+        await updateDoc(doc(db, 'overflow', p.overflowId), { stage: 'prepped', preppedAt: Date.now(), prepBy: currentUser.uid, media: arrayUnion(...p.media) })
+        return ev('media', `Overflow item padded, wrapped & labeled, unit ${over0.unitNumber}: ${over0.description}`, { unitId: over0.unitId, overflowId: over0.id, media: p.media })
+      }
+      case 'transportOverflow': {
+        await updateDoc(doc(db, 'overflow', p.overflowId), { stage: 'in_transit', transitAt: Date.now(), transportBy: currentUser.uid })
+        return ev('stage', `Gorilla loaded overflow item for transport to warehouse, unit ${over0.unitNumber}: ${over0.description}`, { unitId: over0.unitId, overflowId: over0.id, from: 'prepped', to: 'in_transit' })
+      }
+      case 'receiveOverflow': {
+        // Warehouse closes the custody loop: assign a specific per-item
+        // location. p.media (optional) is the received-condition photo,
+        // already uploaded via uploadImage().
+        const media = p.media || []
+        const patch = { stage: 'at_warehouse', warehouseAt: Date.now(), receivedBy: currentUser.uid, warehouseLocation: p.warehouseLocation }
+        if (media.length) patch.media = arrayUnion(...media)
+        await updateDoc(doc(db, 'overflow', p.overflowId), patch)
+        return ev('stage', `Overflow item received at warehouse, ${p.warehouseLocation} (unit ${over0.unitNumber}: ${over0.description})`, { unitId: over0.unitId, overflowId: over0.id, ...(media.length ? { media } : {}) })
+      }
+      case 'editOverflow': {
+        const changed = Object.keys(p.patch).filter((k) => p.patch[k] !== over0[k])
+        await updateDoc(doc(db, 'overflow', p.overflowId), p.patch)
+        return ev('system', `Admin edited overflow item details (unit ${over0.unitNumber}): ${changed.join(', ') || 'no changes'}`, { unitId: over0.unitId, overflowId: over0.id })
+      }
+      case 'addOverflowNote': {
+        return ev('note', p.text, { overflowId: p.overflowId, unitId: p.unitId })
+      }
+      case 'resolveOverflowFlag': {
+        await updateDoc(doc(db, 'overflow', p.overflowId), { 'flag.open': false })
+        return ev('flag', `FLAG resolved on overflow item (unit ${over0.unitNumber}): ${p.note}`, { overflowId: over0.id, unitId: over0.unitId })
       }
       case 'createUnit': {
         const ref = await addDoc(collection(db, 'units'), {
@@ -254,6 +306,30 @@ export const CONT_STATUS = {
   filling: { label: 'Filling', color: '#8b5cf6' },
   full: { label: 'Full · ready', color: '#f59e0b' },
   picked_up: { label: 'In transit', color: '#f97316' },
+  at_warehouse: { label: 'At warehouse', color: '#3b82f6' },
+}
+
+export function overflowAction(user, item) {
+  // Overflow lifecycle: identified → prepped → in_transit → at_warehouse.
+  // Only the prepped → in_transit hop is a simple one-tap transition (no
+  // form): identify/prep/receive all need a bit of input (description,
+  // required photo, warehouse location) so they get dedicated forms in
+  // Overflow.jsx instead of a quick action here, matching how
+  // containerAction() only covers container's filling → full hop.
+  if (!user) return null
+  const admin = user.role === 'admin'
+  switch (item.stage) {
+    case 'prepped':
+      return admin || user.role === 'mover' ? { key: 'transportOverflow', label: 'Load & transport to warehouse' } : null
+    default:
+      return null
+  }
+}
+
+export const OVERFLOW_STATUS = {
+  identified: { label: 'Needs prep', color: '#8a93a2' },
+  prepped: { label: 'Ready to transport', color: '#8b5cf6' },
+  in_transit: { label: 'In transit', color: '#f97316' },
   at_warehouse: { label: 'At warehouse', color: '#3b82f6' },
 }
 
