@@ -93,27 +93,37 @@ export function StoreProvider({ children }) {
         // Mover logs the hand-off to the BigBox driver: selected full containers
         // go out (with the driver's name recorded), new empties come in — the
         // driver never touches the app; the mover is the custody witness.
+        // p.media (optional) is the handoff photo, already uploaded to Storage
+        // by the caller via uploadImage() — stored on each outgoing container
+        // and on the swap event so it shows in both the container's custody
+        // log and the global activity feed.
         const fulls = p.fullIds.map((id) => state.containers.find((c) => c.id === id)).filter(Boolean)
+        const media = p.media || []
         await Promise.all(fulls.map(async (c) => {
-          await updateDoc(doc(db, 'containers', c.id), { status: 'picked_up', driverName: p.driverName, pickedUpAt: Date.now(), handoffBy: currentUser.uid })
+          const patch = { status: 'picked_up', driverName: p.driverName, pickedUpAt: Date.now(), handoffBy: currentUser.uid }
+          if (media.length) patch.media = arrayUnion(...media)
+          await updateDoc(doc(db, 'containers', c.id), patch)
           await Promise.all(c.unitIds.map((uid) => updateDoc(doc(db, 'units', uid), { stage: 'picked_up' })))
         }))
         const newNumbers = p.newEmptyNumbers.map((n) => n.toUpperCase())
         await Promise.all(newNumbers.map((number) => addDoc(collection(db, 'containers'), { number, status: 'empty', unitIds: [], deliveredAt: Date.now() })))
         const fullNums = fulls.map((c) => c.number).join(', ')
-        return ev('system', `BigBox swap with ${p.driverName}: ${fulls.length} full container${fulls.length === 1 ? '' : 's'} out (${fullNums}), ${newNumbers.length} empty${newNumbers.length === 1 ? '' : 's'} in (${newNumbers.join(', ')})`)
+        return ev('system', `BigBox swap with ${p.driverName}: ${fulls.length} full container${fulls.length === 1 ? '' : 's'} out (${fullNums}), ${newNumbers.length} empty${newNumbers.length === 1 ? '' : 's'} in (${newNumbers.join(', ')})`, media.length ? { media } : {})
       }
       case 'warehouseReceive': {
         // Warehouse closes the custody loop: verify piece count against what the
-        // container's units were packed with, assign a bay.
+        // container's units were packed with, assign a bay. p.media (optional)
+        // is the received-condition photo, already uploaded via uploadImage().
         const insideUnits = cont0.unitIds.map((id) => state.units.find((u) => u.id === id)).filter(Boolean)
         const expected = insideUnits.reduce((n, u) => n + (u.pieces || 0), 0)
         const mismatch = boxMismatch(expected, p.verifiedPieces)
+        const media = p.media || []
         const patch = { status: 'at_warehouse', bay: p.bay, verifiedPieces: p.verifiedPieces, receivedBy: currentUser.uid, warehouseAt: Date.now() }
+        if (media.length) patch.media = arrayUnion(...media)
         if (mismatch) patch.flag = { message: `Piece count mismatch at warehouse receive: ${p.verifiedPieces} verified vs ${expected} on record. Recount pending.`, ts: Date.now(), by: currentUser.name, open: true }
         await updateDoc(doc(db, 'containers', p.containerId), patch)
         await Promise.all(insideUnits.map((u) => updateDoc(doc(db, 'units', u.id), { stage: 'at_warehouse' })))
-        await ev('stage', `Container ${cont0.number} received at warehouse — ${p.bay}, ${p.verifiedPieces} pieces verified`, { containerId: cont0.id })
+        await ev('stage', `Container ${cont0.number} received at warehouse — ${p.bay}, ${p.verifiedPieces} pieces verified`, { containerId: cont0.id, ...(media.length ? { media } : {}) })
         if (mismatch) await ev('flag', `FLAG raised on container ${cont0.number}: piece count mismatch (${p.verifiedPieces}/${expected})`, { containerId: cont0.id })
         return
       }
@@ -218,7 +228,7 @@ export function canAct(user, unit) {
   switch (unit.stage) {
     case 'not_started': return admin || role === 'packer' ? { key: 'startPacking', label: 'Start packing' } : null
     case 'packing': return admin || role === 'packer' ? { key: 'finishPacking', label: 'Finish packing' } : null
-    case 'packed': return admin || role === 'mover' ? { key: 'loadUnit', label: 'Load into container' } : null
+    case 'packed': return admin || role === 'mover' ? { key: 'loadUnit', label: 'Load into a BigBox' } : null
     default: return null
   }
 }

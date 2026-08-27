@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { STAGES, stageOf } from '../seed.js'
-import { useStore, canAct, filesToMedia, fmtTime } from '../store.jsx'
+import { useStore, canAct, filesToMedia, fmtTime, CONT_STATUS } from '../store.jsx'
 import { Modal, Lightbox, Uploader, EventRow, Avatar, StagePill } from '../ui.jsx'
 import { uploadImage } from '../lib/upload.js'
 
@@ -58,6 +58,9 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
   const canContribute = currentUser && currentUser.role !== 'viewer'
   const stage = stageOf(unit.stage)
   const conts = unit.containerIds.map((id) => state.containers.find((c) => c.id === id)).filter(Boolean)
+  // On-site containers still available to load into — mover picks from
+  // this list instead of typing a container number.
+  const loadableContainers = state.containers.filter((c) => c.status === 'empty' || c.status === 'filling')
   const crewName = (uid) => state.users.find((u) => u.id === uid)?.name
   const crewNames = (uids) => (uids || []).map(crewName).filter(Boolean).join(', ')
 
@@ -80,11 +83,11 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
       dispatch({ type: 'finishPacking', p: { unitId, pieces: n, media: invMedia } })
     }
     if (action.key === 'loadUnit') {
-      const cn = (form.containerNumber || '').trim()
+      const containerId = form.containerId
       const n = parseInt(form.pieces)
-      if (!cn) return alert('Enter the container number.')
+      if (!containerId) return alert('Pick a container to load into.')
       if (!n || n < 1) return alert('Enter the piece count you verified while loading.')
-      dispatch({ type: 'loadUnit', p: { unitId, containerNumber: cn, pieces: n, media } })
+      dispatch({ type: 'loadUnit', p: { unitId, containerId, pieces: n, media } })
       if (unit.pieces != null && n !== unit.pieces) toast(`⚑ Piece count mismatch flagged (${n} vs ${unit.pieces})`)
     }
     closeActionModal()
@@ -210,10 +213,29 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
           )}
           {action.key === 'loadUnit' && (
             <>
-              <div className="field"><label>Container number</label>
-                <input className="input" autoFocus placeholder="e.g. C-21" value={form.containerNumber || ''} onChange={(e) => setForm({ ...form, containerNumber: e.target.value })} /></div>
+              <div className="field">
+                <label>Load into which container?</label>
+                {loadableContainers.length === 0 ? (
+                  <div className="empty" style={{ padding: '22px 10px' }}>
+                    <div className="big">📦</div>No containers on site yet — log empties in from the Containers page first.
+                  </div>
+                ) : (
+                  <div className="pick-list">
+                    {loadableContainers.map((c) => (
+                      <button
+                        type="button" key={c.id}
+                        className={`pick-row ${form.containerId === c.id ? 'sel' : ''}`}
+                        onClick={() => setForm({ ...form, containerId: c.id })}
+                      >
+                        <span className="cont-num grow">{c.number}</span>
+                        <span className="badge" style={{ background: CONT_STATUS[c.status].color + '22', color: CONT_STATUS[c.status].color }}>{CONT_STATUS[c.status].label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div className="field"><label>Pieces counted while loading {unit.pieces != null && <span className="muted">(packer recorded {unit.pieces})</span>}</label>
-                <input className="input" type="number" min="1" placeholder={unit.pieces ?? 'count'} value={form.pieces || ''} onChange={(e) => setForm({ ...form, pieces: e.target.value })} /></div>
+                <input className="input" type="number" min="1" inputMode="numeric" placeholder={unit.pieces ?? 'count'} value={form.pieces || ''} onChange={(e) => setForm({ ...form, pieces: e.target.value })} /></div>
             </>
           )}
           {action.key !== 'startPacking' && action.key !== 'finishPacking' && (
