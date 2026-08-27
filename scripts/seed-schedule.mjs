@@ -52,41 +52,16 @@
 import { initializeApp, cert } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
 import { readFileSync } from 'node:fs'
+import { DEFAULT_SCHEDULE as SCHEDULE } from '../src/lib/schedule.js'
 
 const PROJECT_ID = 'movetrack-gorilla'
 
 // 27 scheduled days, Sep 8 -> Oct 8 2026, floor 9 down to floor 1.
 // Source: spec §10 ("Schedule seed data (from Casey's calendar, Sept-Oct 2026)").
 // Pattern per floor: PACK, PACK, MOVEOUT, then the next floor down.
-const SCHEDULE = [
-  { date: '2026-09-08', work: 'PACK', floor: 9, unitCount: 4 },
-  { date: '2026-09-09', work: 'PACK', floor: 9, unitCount: 4 },
-  { date: '2026-09-10', work: 'MOVEOUT', floor: 9, unitCount: 4 },
-  { date: '2026-09-11', work: 'PACK', floor: 8, unitCount: 6 },
-  { date: '2026-09-12', work: 'PACK', floor: 8, unitCount: 6 },
-  { date: '2026-09-14', work: 'MOVEOUT', floor: 8, unitCount: 6 },
-  { date: '2026-09-15', work: 'PACK', floor: 7, unitCount: 6 },
-  { date: '2026-09-16', work: 'PACK', floor: 7, unitCount: 6 },
-  { date: '2026-09-17', work: 'MOVEOUT', floor: 7, unitCount: 6 },
-  { date: '2026-09-18', work: 'PACK', floor: 6, unitCount: 6 },
-  { date: '2026-09-19', work: 'PACK', floor: 6, unitCount: 6 },
-  { date: '2026-09-21', work: 'MOVEOUT', floor: 6, unitCount: 6 },
-  { date: '2026-09-22', work: 'PACK', floor: 5, unitCount: 6 },
-  { date: '2026-09-23', work: 'PACK', floor: 5, unitCount: 6 },
-  { date: '2026-09-24', work: 'MOVEOUT', floor: 5, unitCount: 6 },
-  { date: '2026-09-25', work: 'PACK', floor: 4, unitCount: 5 },
-  { date: '2026-09-26', work: 'PACK', floor: 4, unitCount: 5 },
-  { date: '2026-09-28', work: 'MOVEOUT', floor: 4, unitCount: 5 },
-  { date: '2026-09-29', work: 'PACK', floor: 3, unitCount: 6 },
-  { date: '2026-09-30', work: 'PACK', floor: 3, unitCount: 6 },
-  { date: '2026-10-01', work: 'MOVEOUT', floor: 3, unitCount: 6 },
-  { date: '2026-10-02', work: 'PACK', floor: 2, unitCount: 6 },
-  { date: '2026-10-03', work: 'PACK', floor: 2, unitCount: 6 },
-  { date: '2026-10-05', work: 'MOVEOUT', floor: 2, unitCount: 6 },
-  { date: '2026-10-06', work: 'PACK', floor: 1, unitCount: 4 },
-  { date: '2026-10-07', work: 'PACK', floor: 1, unitCount: 4 },
-  { date: '2026-10-08', work: 'MOVEOUT', floor: 1, unitCount: 4 },
-]
+// Canonical copy now lives in src/lib/schedule.js (DEFAULT_SCHEDULE) so the
+// in-app admin "Load the plan" action and this key-based fallback script
+// can never drift apart.
 
 function parseArgs(argv) {
   const out = {}
