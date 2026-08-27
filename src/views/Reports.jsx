@@ -20,6 +20,8 @@ const SORTS = [
   ['totalActions', 'Total actions'],
   ['unitsPackedCount', 'Units packed'],
   ['unitsLoadedCount', 'Units loaded'],
+  ['unitsUnpackedCount', 'Units unpacked (return)'],
+  ['unitsUnloadedCount', 'Units unloaded (return)'],
   ['piecesHandled', 'Pieces handled'],
   ['packTimeMs', 'Packing time'],
   ['mediaSubmitted', 'Photos & video'],
@@ -132,6 +134,12 @@ export default function Reports({ openUnit, openContainer }) {
             <div className="card kpi"><Stat n={summary.totalActions.toLocaleString()} l="Total actions" /></div>
             <div className="card kpi"><Stat n={summary.piecesHandled.toLocaleString()} l="Pieces handled" /></div>
             <div className="card kpi"><Stat n={summary.mediaSubmitted.toLocaleString()} l="Photos & video" /></div>
+            {(summary.unitsUnpackedCount > 0 || summary.unitsUnloadedCount > 0) && (
+              <>
+                <div className="card kpi"><Stat n={summary.unitsUnloadedCount} l="Units unloaded (return)" /></div>
+                <div className="card kpi"><Stat n={summary.unitsUnpackedCount} l="Units unpacked (return)" /></div>
+              </>
+            )}
           </div>
 
           <div className="row" style={{ marginBottom: 12, gap: 10 }}>
@@ -165,6 +173,12 @@ export default function Reports({ openUnit, openContainer }) {
                     <div className="grow" style={{ display: 'flex', flexWrap: 'wrap', gap: 22, justifyContent: 'flex-end' }}>
                       <Stat compact n={r.unitsPackedCount} l="Units packed" />
                       <Stat compact n={r.unitsLoadedCount} l="Units loaded" />
+                      {(r.unitsUnpackedCount > 0 || r.unitsUnloadedCount > 0) && (
+                        <>
+                          <Stat compact n={r.unitsUnloadedCount} l="Units unloaded (return)" />
+                          <Stat compact n={r.unitsUnpackedCount} l="Units unpacked (return)" />
+                        </>
+                      )}
                       <Stat compact n={r.piecesHandled.toLocaleString()} l="Pieces handled" />
                       <Stat compact n={r.mediaSubmitted} l="Photos & video" />
                       <Stat compact n={fmtDuration(r.packTimeMs)} l="Packing time" />

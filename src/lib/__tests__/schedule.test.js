@@ -119,6 +119,27 @@ describe('DEFAULT_RETURN_SCHEDULE', () => {
       expect(d.unitCount).toBeGreaterThan(0)
     }
   })
+
+  // #5 (docs/superpowers/specs/2026-08-27-return-leg-correctness-fixes.md):
+  // each floor's return unitCount must match the real MOVEOUT count for that
+  // floor, not the building's full per-floor capacity, or return progress
+  // can never reach 100% since only the units that actually moved out ever
+  // come back.
+  it('each floor\'s unitCount matches the real outbound MOVEOUT count for that floor', () => {
+    const moveoutByFloor = Object.fromEntries(
+      DEFAULT_SCHEDULE.filter((d) => d.work === 'MOVEOUT').map((d) => [d.floor, d.unitCount])
+    )
+    for (const d of DEFAULT_RETURN_SCHEDULE) {
+      expect(d.unitCount).toBe(moveoutByFloor[d.floor])
+    }
+  })
+
+  it('return progress can reach 100% when every unit on the floor is back', () => {
+    for (const d of DEFAULT_RETURN_SCHEDULE) {
+      const units = Array.from({ length: d.unitCount }, () => ({ floor: d.floor, stage: 'unpacked' }))
+      expect(progressForDay(d, units)).toEqual({ done: d.unitCount, planned: d.unitCount })
+    }
+  })
 })
 
 describe('scheduleDocId', () => {

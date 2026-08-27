@@ -2,7 +2,7 @@
 // progress helpers shared by the store (dispatch actions), the Dashboard
 // today banner, and the Schedule view. No React/Firebase imports here so
 // this stays trivially testable and importable from the Node seed script.
-import { stageOf, FLOOR_UNITS } from '../seed.js'
+import { stageOf } from '../seed.js'
 
 // 27 scheduled days, Sep 8 -> Oct 8 2026, floor 9 down to floor 1.
 // Source: spec §10 ("Schedule seed data (from Casey's calendar, Sept-Oct 2026)").
@@ -39,6 +39,17 @@ export const DEFAULT_SCHEDULE = [
   { date: '2026-10-08', work: 'MOVEOUT', floor: 1, unitCount: 4 },
 ]
 
+// Per-floor unit count actually scheduled to move OUT (the MOVEOUT day's
+// unitCount for that floor), derived from DEFAULT_SCHEDULE itself so there is
+// exactly one source of truth. Only ~49 units ever really move (not the
+// FLOOR_UNITS building-massing figures, 8-12/floor, 100 total, this used to
+// be built from), so this is what the return leg needs to mirror for its
+// progress to ever reach 100%
+// (docs/superpowers/specs/2026-08-27-return-leg-correctness-fixes.md #5).
+const MOVEOUT_UNIT_COUNT_BY_FLOOR = Object.fromEntries(
+  DEFAULT_SCHEDULE.filter((d) => d.work === 'MOVEOUT').map((d) => [d.floor, d.unitCount])
+)
+
 // Return-phase template (docs/superpowers/specs/2026-08-26-return-phase-design.md
 // §7). Return runs on its own October timeline, floors coming back in reverse
 // of the outbound order (floor 1, the last one moved out, comes back first;
@@ -48,18 +59,20 @@ export const DEFAULT_SCHEDULE = [
 // leave room for the building work, and are meant to be edited by the admin
 // once real dates are known. Each floor gets a single RETURN work day
 // (deliver + unload + unpack all happen on-site the same visit; there is no
-// return equivalent of the two-day outbound PACK prep). unitCount mirrors
-// FLOOR_UNITS, the same source of truth the outbound seed data was built from.
+// return equivalent of the two-day outbound PACK prep). unitCount matches the
+// real MOVEOUT count for that floor (MOVEOUT_UNIT_COUNT_BY_FLOOR above), not
+// the building's full per-floor capacity, so return progress can actually
+// reach 100%.
 export const DEFAULT_RETURN_SCHEDULE = [
-  { date: '2026-10-12', work: 'RETURN', floor: 1, unitCount: FLOOR_UNITS[1] },
-  { date: '2026-10-13', work: 'RETURN', floor: 2, unitCount: FLOOR_UNITS[2] },
-  { date: '2026-10-14', work: 'RETURN', floor: 3, unitCount: FLOOR_UNITS[3] },
-  { date: '2026-10-15', work: 'RETURN', floor: 4, unitCount: FLOOR_UNITS[4] },
-  { date: '2026-10-16', work: 'RETURN', floor: 5, unitCount: FLOOR_UNITS[5] },
-  { date: '2026-10-19', work: 'RETURN', floor: 6, unitCount: FLOOR_UNITS[6] },
-  { date: '2026-10-20', work: 'RETURN', floor: 7, unitCount: FLOOR_UNITS[7] },
-  { date: '2026-10-21', work: 'RETURN', floor: 8, unitCount: FLOOR_UNITS[8] },
-  { date: '2026-10-22', work: 'RETURN', floor: 9, unitCount: FLOOR_UNITS[9] },
+  { date: '2026-10-12', work: 'RETURN', floor: 1, unitCount: MOVEOUT_UNIT_COUNT_BY_FLOOR[1] },
+  { date: '2026-10-13', work: 'RETURN', floor: 2, unitCount: MOVEOUT_UNIT_COUNT_BY_FLOOR[2] },
+  { date: '2026-10-14', work: 'RETURN', floor: 3, unitCount: MOVEOUT_UNIT_COUNT_BY_FLOOR[3] },
+  { date: '2026-10-15', work: 'RETURN', floor: 4, unitCount: MOVEOUT_UNIT_COUNT_BY_FLOOR[4] },
+  { date: '2026-10-16', work: 'RETURN', floor: 5, unitCount: MOVEOUT_UNIT_COUNT_BY_FLOOR[5] },
+  { date: '2026-10-19', work: 'RETURN', floor: 6, unitCount: MOVEOUT_UNIT_COUNT_BY_FLOOR[6] },
+  { date: '2026-10-20', work: 'RETURN', floor: 7, unitCount: MOVEOUT_UNIT_COUNT_BY_FLOOR[7] },
+  { date: '2026-10-21', work: 'RETURN', floor: 8, unitCount: MOVEOUT_UNIT_COUNT_BY_FLOOR[8] },
+  { date: '2026-10-22', work: 'RETURN', floor: 9, unitCount: MOVEOUT_UNIT_COUNT_BY_FLOOR[9] },
 ]
 
 // A schedule day's Firestore doc id is normally just its date (outbound,

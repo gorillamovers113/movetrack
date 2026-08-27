@@ -44,6 +44,13 @@ service cloud.firestore {
 
     // units: not_started -> packing -> packed -> loaded -> picked_up -> at_warehouse
     //   -> return_loaded -> return_transit -> back_on_site -> unloaded -> unpacked
+    //
+    // ENTRY vs CONTINUATION (docs/superpowers/specs/2026-08-27-return-leg-correctness-fixes.md #2):
+    // only the transition FROM at_warehouse INTO the return leg
+    // (at_warehouse -> return_loaded, loadForReturn) requires returnPhaseOn().
+    // Every later return hop is a continuation of a round trip already in
+    // progress and is allowed regardless of returnPhase (still role+stage
+    // gated), so toggling the phase off never strands a unit mid-return.
     function unitTransitionOK(role, before, after) {
       return (role == 'packer'
               && ((before == 'not_started' && after == 'packing')   // startPacking
@@ -53,12 +60,12 @@ service cloud.firestore {
                   || (before == 'loaded' && after == 'picked_up'))) // bigboxSwap (units in a full container)
           || (role == 'warehouse'
               && before == 'picked_up' && after == 'at_warehouse')  // warehouseReceive
-          || (returnPhaseOn() && unitReturnTransitionOK(role, before, after));
+          || unitReturnTransitionOK(role, before, after);
     }
     function unitReturnTransitionOK(role, before, after) {
       return (role == 'warehouse'
-              && ((before == 'at_warehouse' && after == 'return_loaded')     // loadForReturn
-                  || (before == 'return_loaded' && after == 'return_transit'))) // dispatchReturn (its units)
+              && ((before == 'at_warehouse' && after == 'return_loaded' && returnPhaseOn())  // loadForReturn (entry)
+                  || (before == 'return_loaded' && after == 'return_transit')))               // dispatchReturn (its units)
           || (role == 'mover'
               && ((before == 'return_transit' && after == 'back_on_site')    // deliverReturn (its units)
                   || (before == 'back_on_site' && after == 'unloaded')))     // unloadReturn
@@ -72,6 +79,12 @@ service cloud.firestore {
     // empty or already filling (a second load is filling -> filling, no
     // status change) — both must be allowed for the mover. Same story on the
     // return leg for return_filling -> return_filling.
+    // Same entry-vs-continuation split as unitTransitionOK above: only the
+    // at_warehouse -> return_filling entry hop (loadForReturn's first unit
+    // into this container) requires returnPhaseOn(). The return_filling ->
+    // return_filling self-loop (a second/third loadForReturn onto a
+    // container already on the return leg) and every later return hop are
+    // continuations, allowed regardless of returnPhase.
     function containerTransitionOK(role, before, after) {
       return (role == 'mover'
               && (((before == 'empty' || before == 'filling') && after == 'filling') // loadUnit
@@ -79,11 +92,12 @@ service cloud.firestore {
                   || (before == 'full' && after == 'picked_up')))                    // bigboxSwap
           || (role == 'warehouse'
               && before == 'picked_up' && after == 'at_warehouse')                   // warehouseReceive
-          || (returnPhaseOn() && containerReturnTransitionOK(role, before, after));
+          || containerReturnTransitionOK(role, before, after);
     }
     function containerReturnTransitionOK(role, before, after) {
       return (role == 'warehouse'
-              && (((before == 'at_warehouse' || before == 'return_filling') && after == 'return_filling') // loadForReturn
+              && ((before == 'at_warehouse' && after == 'return_filling' && returnPhaseOn()) // loadForReturn (entry)
+                  || (before == 'return_filling' && after == 'return_filling')       // loadForReturn (2nd+ unit, continuation)
                   || (before == 'return_filling' && after == 'return_full')          // markReturnFull
                   || (before == 'return_full' && after == 'return_transit')))        // dispatchReturn
           || (role == 'mover'
@@ -95,18 +109,21 @@ service cloud.firestore {
     //   -> rt_transit -> returned
     // (packers only *create* overflow, they never update it, except on the
     // return leg where returnOverflow may be done by a mover or a packer.)
+    // Same entry-vs-continuation split: only the at_warehouse -> rt_transit
+    // entry hop (transportOverflowBack) requires returnPhaseOn(). rt_transit
+    // -> returned (returnOverflow) is a continuation, allowed regardless.
     function overflowTransitionOK(role, before, after) {
       return (role == 'mover'
               && ((before == 'identified' && after == 'prepped')      // prepOverflow
                   || (before == 'prepped' && after == 'in_transit'))) // transportOverflow
           || (role == 'warehouse'
               && before == 'in_transit' && after == 'at_warehouse')   // receiveOverflow
-          || (returnPhaseOn() && overflowReturnTransitionOK(role, before, after));
+          || overflowReturnTransitionOK(role, before, after);
     }
     function overflowReturnTransitionOK(role, before, after) {
       return (role == 'mover'
-              && ((before == 'at_warehouse' && after == 'rt_transit')  // transportOverflowBack
-                  || (before == 'rt_transit' && after == 'returned'))) // returnOverflow
+              && ((before == 'at_warehouse' && after == 'rt_transit' && returnPhaseOn())  // transportOverflowBack (entry)
+                  || (before == 'rt_transit' && after == 'returned')))                     // returnOverflow
           || (role == 'packer'
               && before == 'rt_transit' && after == 'returned');       // returnOverflow
     }
@@ -126,13 +143,20 @@ service cloud.firestore {
     }
 
     // ---- custody attribution guard (non-admin update only) ----
-    // receivedBy/handoffBy/prepBy/transportBy/returnedBy each record who
-    // physically handled a custody handoff (warehouseReceive/deliverReturn,
-    // bigboxSwap/dispatchReturn, prepOverflow, transportOverflow/
-    // transportOverflowBack, returnOverflow). Every real dispatch sets these
-    // to currentUser.uid; a non-admin write may only set/change one of them
-    // to its own uid, mirroring the events.uid guard below so custody can't
-    // be misattributed to someone else.
+    // receivedBy/handoffBy/prepBy/transportBy/returnedBy, and their
+    // RETURN-prefixed counterparts returnReceivedBy/returnHandoffBy/
+    // returnTransportBy, each record who physically handled a custody
+    // handoff (warehouseReceive/deliverReturn, bigboxSwap/dispatchReturn,
+    // prepOverflow, transportOverflow/transportOverflowBack, returnOverflow).
+    // The return-prefixed fields exist so a return-leg handoff (dispatchReturn/
+    // deliverReturn/transportOverflowBack) records its own custody witness
+    // instead of overwriting the outbound field already on the same doc
+    // (docs/superpowers/specs/2026-08-27-return-leg-correctness-fixes.md #3);
+    // they need the exact same uid-pin as the originals so they can't be
+    // forged either. Every real dispatch sets these to currentUser.uid; a
+    // non-admin write may only set/change one of them to its own uid,
+    // mirroring the events.uid guard below so custody can't be misattributed
+    // to someone else.
     //
     // request.resource.data is the full post-write document, so a field
     // stamped by an earlier stage (e.g. handoffBy from bigboxSwap) is still
@@ -151,7 +175,10 @@ service cloud.firestore {
           && custodyFieldOK('handoffBy')
           && custodyFieldOK('prepBy')
           && custodyFieldOK('transportBy')
-          && custodyFieldOK('returnedBy');
+          && custodyFieldOK('returnedBy')
+          && custodyFieldOK('returnReceivedBy')
+          && custodyFieldOK('returnHandoffBy')
+          && custodyFieldOK('returnTransportBy');
     }
 
     // ---- identity-field guards (non-admin update only) ----
