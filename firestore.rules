@@ -18,11 +18,73 @@ service cloud.firestore {
     function isAdmin() {
       return hasRole('admin');
     }
-    // packer/mover/driver/warehouse may write units/containers/events; the
-    // client enforces which specific stage transition each role is allowed
-    // to perform.
+    // packer/mover/driver/warehouse may write units/containers/overflow/events,
+    // scoped to the specific stage transition their role owns (see the
+    // transition helpers below). Admin is exempt from all of these checks.
     function isCrew() {
       return isActive() && me().role in ['packer', 'mover', 'driver', 'warehouse'];
+    }
+
+    // ---- stage-transition helpers ----
+    // Each one encodes the exact (role, before -> after) pairs a non-admin
+    // may perform, taken line-by-line from the dispatch() switch in
+    // src/store.jsx. A doc that has moved past a role's stage no longer
+    // matches any pair for that role, so it locks to that role once the
+    // stage advances.
+
+    // units: not_started -> packing -> packed -> loaded -> picked_up -> at_warehouse
+    function unitTransitionOK(role, before, after) {
+      return (role == 'packer'
+              && ((before == 'not_started' && after == 'packing')   // startPacking
+                  || (before == 'packing' && after == 'packed')))   // finishPacking
+          || (role == 'mover'
+              && ((before == 'packed' && after == 'loaded')         // loadUnit
+                  || (before == 'loaded' && after == 'picked_up'))) // bigboxSwap (units in a full container)
+          || (role == 'warehouse'
+              && before == 'picked_up' && after == 'at_warehouse'); // warehouseReceive
+    }
+
+    // containers: empty -> filling -> full -> picked_up -> at_warehouse
+    // Note: loading a unit sets status to 'filling' whether the container was
+    // empty or already filling (a second load is filling -> filling, no
+    // status change) — both must be allowed for the mover.
+    function containerTransitionOK(role, before, after) {
+      return (role == 'mover'
+              && (((before == 'empty' || before == 'filling') && after == 'filling') // loadUnit
+                  || (before == 'filling' && after == 'full')                        // markContainerFull
+                  || (before == 'full' && after == 'picked_up')))                    // bigboxSwap
+          || (role == 'warehouse'
+              && before == 'picked_up' && after == 'at_warehouse');                  // warehouseReceive
+    }
+
+    // overflow: identified -> prepped -> in_transit -> at_warehouse
+    // (packers only *create* overflow, they never update it.)
+    function overflowTransitionOK(role, before, after) {
+      return (role == 'mover'
+              && ((before == 'identified' && after == 'prepped')      // prepOverflow
+                  || (before == 'prepped' && after == 'in_transit'))) // transportOverflow
+          || (role == 'warehouse'
+              && before == 'in_transit' && after == 'at_warehouse');  // receiveOverflow
+    }
+
+    // ---- identity-field guards (non-admin update only) ----
+    // "modify only your own current part" — a stage-advancing write may not
+    // also rename/re-floor/re-number the doc it's advancing.
+    function unitIdentityUnchanged() {
+      return request.resource.data.number == resource.data.number
+          && request.resource.data.tenant == resource.data.tenant
+          && request.resource.data.floor == resource.data.floor
+          && request.resource.data.createdAt == resource.data.createdAt;
+    }
+    function containerIdentityUnchanged() {
+      return request.resource.data.number == resource.data.number
+          && request.resource.data.deliveredAt == resource.data.deliveredAt;
+    }
+    function overflowIdentityUnchanged() {
+      return request.resource.data.unitId == resource.data.unitId
+          && request.resource.data.unitNumber == resource.data.unitNumber
+          && request.resource.data.createdBy == resource.data.createdBy
+          && request.resource.data.createdAt == resource.data.createdAt;
     }
 
     // ---- users ----
@@ -44,26 +106,66 @@ service cloud.firestore {
     // ---- operational collections ----
     match /units/{unitId} {
       allow read: if isActive();
-      allow write: if isAdmin() || isCrew();
+
+      // createUnit: admin, or packer starting a fresh unit at not_started.
+      allow create: if (isAdmin() || hasRole('packer'))
+        && request.resource.data.stage == 'not_started';
+
+      // admin may edit/fix/adjust anything; a crew member may only advance
+      // the doc through the one transition their role owns, and may not
+      // touch the unit's identity fields while doing so.
+      allow update: if isAdmin()
+        || (isCrew()
+            && unitTransitionOK(me().role, resource.data.stage, request.resource.data.stage)
+            && unitIdentityUnchanged());
+
+      allow delete: if isAdmin();
     }
 
     match /containers/{containerId} {
       allow read: if isActive();
-      allow write: if isAdmin() || isCrew();
+
+      // logEmpties / bigboxSwap new-empties: admin, or mover dropping a
+      // fresh empty container.
+      allow create: if (isAdmin() || hasRole('mover'))
+        && request.resource.data.status == 'empty'
+        && request.resource.data.unitIds == [];
+
+      allow update: if isAdmin()
+        || (isCrew()
+            && containerTransitionOK(me().role, resource.data.status, request.resource.data.status)
+            && containerIdentityUnchanged());
+
+      allow delete: if isAdmin();
     }
 
     // Overflow items (Gorilla-transported, too big for a BigBox container):
-    // same crew set as containers may write (packer identifies, mover preps
-    // & transports, warehouse receives); the client enforces which specific
-    // stage transition each role is allowed to perform.
+    // packer identifies (create only), mover preps & transports, warehouse
+    // receives; admin can always edit/fix/adjust.
     match /overflow/{overflowId} {
       allow read: if isActive();
-      allow write: if isAdmin() || isCrew();
+
+      // createOverflow: admin, packer, or mover, always starting at identified.
+      allow create: if (isAdmin() || hasRole('packer') || hasRole('mover'))
+        && request.resource.data.stage == 'identified';
+
+      allow update: if isAdmin()
+        || (isCrew()
+            && overflowTransitionOK(me().role, resource.data.stage, request.resource.data.stage)
+            && overflowIdentityUnchanged());
+
+      allow delete: if isAdmin();
     }
 
+    // Append-only accountability log: any active crew member (or admin) may
+    // log an event, but only as themselves — never forging another user's
+    // action. Once written, an event may not be edited or removed except by
+    // an admin.
     match /events/{eventId} {
       allow read: if isActive();
-      allow write: if isAdmin() || isCrew();
+      allow create: if (isAdmin() || isCrew())
+        && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if isAdmin();
     }
 
     match /schedule/{scheduleId} {
