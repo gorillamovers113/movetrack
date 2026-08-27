@@ -136,4 +136,12 @@ describe('matchContainerByNumber', () => {
   it('handles a missing containers array without crashing', () => {
     expect(matchContainerByNumber(undefined, 'BB-1001', 'return_transit')).toBe(null)
   })
+  it('works for the outbound warehouse-receive reuse (expectedStatus picked_up)', () => {
+    const outbound = [
+      { id: 'o1', number: 'BB-2001', status: 'picked_up' },
+      { id: 'o2', number: 'BB-2002', status: 'at_warehouse' },
+    ]
+    expect(matchContainerByNumber(outbound, 'bb-2001', 'picked_up')).toEqual(outbound[0])
+    expect(matchContainerByNumber(outbound, 'BB-2002', 'picked_up')).toBe(null)
+  })
 })
