@@ -71,8 +71,8 @@ export default function ReceiveContainerButton({ toast }) {
   const submit = async () => {
     if (!matched) return
     const n = parseInt(verify)
-    if (!bay.trim()) return alert('Assign a warehouse bay.')
-    if (verify === '' || isNaN(n) || n < 0) return alert('Enter the pieces counted at receiving.')
+    if (!bay.trim()) return toast?.('Assign a warehouse bay.')
+    if (verify === '' || isNaN(n) || n < 0) return toast?.('Enter the pieces counted at receiving.')
     setBusy(true)
     try {
       const media = photoUrl ? [{ id: `recv-${Date.now()}`, kind: 'photo', url: photoUrl, label: `Container ${matched.number} received` }] : []

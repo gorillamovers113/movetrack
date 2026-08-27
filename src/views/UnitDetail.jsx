@@ -90,26 +90,26 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
     const media = pending
     const needsPhoto = ['loadUnit', 'loadForReturn', 'unloadReturn', 'unpackUnit'].includes(action.key)
     if (needsPhoto && !media.some((m) => m.kind === 'photo')) {
-      return alert('At least one photo is required to complete this step, the photo record is the whole point.')
+      return toast('At least one photo is required to complete this step, the photo record is the whole point.')
     }
     // Client-side validation up front, same as before: nothing here talks to
     // Firestore, so it stays outside the busy/try below.
     const n = parseInt(form.pieces)
     if (action.key === 'finishPacking') {
-      if (!n || n < 1) return alert('Enter the total pieces packed.')
-      if (invUploading) return alert('Still uploading the inventory sheet photo, wait a moment and try again.')
-      if (!invUrl) return alert('Take a photo of the paper inventory sheet to finish packing.')
+      if (!n || n < 1) return toast('Enter the total pieces packed.')
+      if (invUploading) return toast('Still uploading the inventory sheet photo, wait a moment and try again.')
+      if (!invUrl) return toast('Take a photo of the paper inventory sheet to finish packing.')
     }
     if (action.key === 'loadUnit') {
-      if (!form.containerId) return alert('Pick a container to load into.')
-      if (!n || n < 1) return alert('Enter the piece count you verified while loading.')
+      if (!form.containerId) return toast('Pick a container to load into.')
+      if (!n || n < 1) return toast('Enter the piece count you verified while loading.')
     }
     if (action.key === 'loadForReturn') {
-      if (!form.containerId) return alert('Pick a return container to load into.')
-      if (!n || n < 1) return alert('Enter the piece count you verified while loading.')
+      if (!form.containerId) return toast('Pick a return container to load into.')
+      if (!n || n < 1) return toast('Enter the piece count you verified while loading.')
     }
     if (action.key === 'unloadReturn') {
-      if (!n || n < 1) return alert('Enter the piece count you verified while unloading.')
+      if (!n || n < 1) return toast('Enter the piece count you verified while unloading.')
     }
 
     setBusy(true)

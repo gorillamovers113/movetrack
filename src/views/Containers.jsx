@@ -100,8 +100,8 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
   }
 
   const submitDispatchReturn = async () => {
-    if (!driverName.trim()) return alert('Enter the driver name.')
-    if (!drUrl) return alert('Add a photo of the container being dispatched for return.')
+    if (!driverName.trim()) return toast('Enter the driver name.')
+    if (!drUrl) return toast('Add a photo of the container being dispatched for return.')
     setBusy(true)
     try {
       const media = drUrl ? [{ id: `dispatch-${Date.now()}`, kind: 'photo', url: drUrl, label: `Container ${open.number} dispatched for return` }] : []

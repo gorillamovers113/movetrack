@@ -751,7 +751,7 @@ export async function filesToMedia(fileList, labelPrefix = '') {
   const out = []
   for (const f of files) {
     if (f.type.startsWith('video')) {
-      if (f.size > 12 * 1024 * 1024) { alert(`${f.name} is over 12 MB, video skipped (demo build keeps uploads small).`); continue }
+      if (f.size > 12 * 1024 * 1024) { alert(`${f.name} is over 12 MB, so it was skipped. Photos and shorter clips upload fine.`); continue }
       out.push({ id: `up-${Date.now()}-${out.length}`, kind: 'video', label: labelPrefix || f.name, url: await readAsDataURL(f) })
     } else if (f.type.startsWith('image')) {
       out.push({ id: `up-${Date.now()}-${out.length}`, kind: 'photo', label: labelPrefix || f.name, url: await resizeImage(f) })

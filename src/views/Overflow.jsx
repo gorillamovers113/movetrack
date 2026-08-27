@@ -123,8 +123,8 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
   }
 
   const submitPrep = async () => {
-    if (pUploading) return alert('Still uploading the prep photo, wait a moment and try again.')
-    if (!pUrl) return alert('A photo of the padded, wrapped & labeled item is required.')
+    if (pUploading) return toast('Still uploading the prep photo, wait a moment and try again.')
+    if (!pUrl) return toast('A photo of the padded, wrapped & labeled item is required.')
     setBusy(true)
     try {
       const media = [{ id: `prep-${Date.now()}`, kind: 'photo', url: pUrl, label: 'Padded, wrapped & labeled' }]
@@ -139,7 +139,7 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
   }
 
   const submitReceive = async () => {
-    if (!location.trim()) return alert('Assign a warehouse location (e.g. Bay C, shelf 3).')
+    if (!location.trim()) return toast('Assign a warehouse location (e.g. Bay C, shelf 3).')
     setBusy(true)
     try {
       const media = rUrl ? [{ id: `recv-${Date.now()}`, kind: 'photo', url: rUrl, label: 'Received condition' }] : []
@@ -168,8 +168,8 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
   }
 
   const submitReturnOverflow = async () => {
-    if (pUploading) return alert('Still uploading the photo, wait a moment and try again.')
-    if (!pUrl) return alert('A photo of the unwrapped item back in place is required.')
+    if (pUploading) return toast('Still uploading the photo, wait a moment and try again.')
+    if (!pUrl) return toast('A photo of the unwrapped item back in place is required.')
     setBusy(true)
     try {
       const media = [{ id: `return-${Date.now()}`, kind: 'photo', url: pUrl, label: 'Unwrapped & placed back' }]
