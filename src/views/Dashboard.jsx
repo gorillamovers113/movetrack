@@ -1,9 +1,10 @@
 import React, { useMemo, useState } from 'react'
 import { STAGES, stageOf } from '../seed.js'
 import { useStore } from '../store.jsx'
-import { todayKey, findScheduleDay, nextScheduleDay, fmtScheduleDate, progressForDay } from '../lib/schedule.js'
+import { todayKey, findScheduleDay, nextScheduleDay, fmtScheduleDate, progressForDay, scheduleForPhase, targetStageForWork } from '../lib/schedule.js'
 import BuildingView from './BuildingView.jsx'
 import NewUnitButton from '../components/NewUnitModal.jsx'
+import ReturnPhaseToggle from '../components/ReturnPhaseToggle.jsx'
 
 // Compact "today" banner: floor + work type + progress vs plan, or a
 // sensible off-day / empty-schedule fallback. Never crashes on an empty
@@ -12,41 +13,56 @@ function TodayBanner({ toast }) {
   const { state, currentUser, dispatch } = useStore()
   const [busy, setBusy] = useState(false)
   const isAdmin = currentUser?.role === 'admin'
+  // Once the return phase is on, the "what's happening today" banner should
+  // track the return plan instead of the (by then finished) outbound one, so
+  // it stays useful through the whole project instead of going stale after
+  // the last outbound day.
+  const phase = state.project?.returnPhase ? 'return' : 'out'
+  const phaseSchedule = useMemo(() => scheduleForPhase(state.schedule, phase), [state.schedule, phase])
 
-  if (state.schedule.length === 0) {
+  if (phaseSchedule.length === 0) {
     return (
       <div className="card" style={{ padding: '16px 20px', marginBottom: 14 }}>
         {isAdmin ? (
           <div className="row" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
             <div className="grow">
-              <b>Schedule not loaded yet.</b>
-              <div className="muted" style={{ marginTop: 2 }}>Load the 27-day floor plan (Sep 8, Floor 9 through Oct 8, Floor 1).</div>
+              <b>{phase === 'return' ? 'Return schedule not loaded yet.' : 'Schedule not loaded yet.'}</b>
+              <div className="muted" style={{ marginTop: 2 }}>
+                {phase === 'return'
+                  ? 'Load the return floor plan (floor 1 through floor 9, dates to be edited once known).'
+                  : 'Load the 27-day floor plan (Sep 8, Floor 9 through Oct 8, Floor 1).'}
+              </div>
             </div>
             <button className="btn btn-primary" disabled={busy} onClick={async () => {
               setBusy(true)
               try {
-                await dispatch({ type: 'seedSchedule', p: {} })
-                toast?.('Schedule loaded: 27 days, Sep 8 to Oct 8 ✓')
+                if (phase === 'return') {
+                  await dispatch({ type: 'seedReturnSchedule', p: {} })
+                  toast?.('Return schedule loaded ✓')
+                } else {
+                  await dispatch({ type: 'seedSchedule', p: {} })
+                  toast?.('Schedule loaded: 27 days, Sep 8 to Oct 8 ✓')
+                }
               } finally {
                 setBusy(false)
               }
-            }}>{busy ? 'Loading…' : 'Load the Sept 8 to Oct 8 plan'}</button>
+            }}>{busy ? 'Loading…' : phase === 'return' ? 'Load the return plan' : 'Load the Sept 8 to Oct 8 plan'}</button>
           </div>
         ) : (
-          <div className="muted">Schedule not loaded yet.</div>
+          <div className="muted">{phase === 'return' ? 'Return schedule not loaded yet.' : 'Schedule not loaded yet.'}</div>
         )}
       </div>
     )
   }
 
   const key = todayKey()
-  const day = findScheduleDay(state.schedule, key)
-  const shown = day || nextScheduleDay(state.schedule, key)
+  const day = findScheduleDay(phaseSchedule, key)
+  const shown = day || nextScheduleDay(phaseSchedule, key)
 
   if (!shown) {
     return (
       <div className="card" style={{ padding: '16px 20px', marginBottom: 14 }}>
-        <div className="muted">No more scheduled work. The plan ran through {fmtScheduleDate([...state.schedule].sort((a, b) => a.date.localeCompare(b.date)).at(-1)?.date)}.</div>
+        <div className="muted">No more scheduled {phase === 'return' ? 'return ' : ''}work. The plan ran through {fmtScheduleDate([...phaseSchedule].sort((a, b) => a.date.localeCompare(b.date)).at(-1)?.date)}.</div>
       </div>
     )
   }
@@ -54,8 +70,8 @@ function TodayBanner({ toast }) {
   const isToday = !!day
   const { done, planned } = progressForDay(shown, state.units)
   const pct = planned > 0 ? Math.min(100, Math.round((done / planned) * 100)) : 0
-  const workLabel = shown.work === 'MOVEOUT' ? 'MOVE-OUT' : 'PACK'
-  const doneLabel = shown.work === 'MOVEOUT' ? 'loaded' : 'packed'
+  const workLabel = shown.work === 'MOVEOUT' ? 'MOVE-OUT' : shown.work === 'RETURN' ? 'RETURN' : 'PACK'
+  const doneLabel = targetStageForWork(shown.work)
 
   return (
     <div className="card" style={{ padding: '16px 20px', marginBottom: 14 }}>
@@ -120,6 +136,7 @@ export default function Dashboard({ openUnit, toast }) {
         <div className="row">
           <input className="search" placeholder="Search unit, tenant, container…" value={q} onChange={(e) => setQ(e.target.value)} />
           <NewUnitButton toast={toast} />
+          <ReturnPhaseToggle toast={toast} />
         </div>
       </div>
 
@@ -137,6 +154,9 @@ export default function Dashboard({ openUnit, toast }) {
         <div className="card kpi"><div className="n"><span className="dot" style={{ background: stageOf('at_warehouse').color }} />{counts.at_warehouse}</div><div className="l">In warehouse</div></div>
         <div className="card kpi"><div className="n">{piecesTracked.toLocaleString()}</div><div className="l">Pieces tracked</div></div>
         <div className={`card kpi ${openFlags ? 'alert' : ''}`}><div className="n">{openFlags}</div><div className="l">Open flags</div></div>
+        {state.project?.returnPhase && (
+          <div className="card kpi"><div className="n"><span className="dot" style={{ background: stageOf('unpacked').color }} />{counts.unpacked}</div><div className="l">Back home, unpacked</div></div>
+        )}
       </div>
 
       <div className="dash-cols">

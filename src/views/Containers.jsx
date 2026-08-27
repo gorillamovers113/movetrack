@@ -1,13 +1,18 @@
 import React, { useMemo, useState } from 'react'
-import { useStore, CONT_STATUS } from '../store.jsx'
+import { useStore, CONT_STATUS, containerAction } from '../store.jsx'
 import { Modal, Lightbox, EventRow, StagePill } from '../ui.jsx'
 import { uploadImage } from '../lib/upload.js'
 import EmptiesInButton from '../components/EmptiesInButton.jsx'
 import BigBoxSwapButton from '../components/BigBoxSwapButton.jsx'
+import DeliverReturnButton from '../components/DeliverReturnButton.jsx'
 
 // Lifecycle order the pool view groups by — matches CONT_STATUS in store.jsx:
-// empty (on site) → filling → full/ready → picked_up (in transit) → at_warehouse.
-const STATUS_ORDER = ['empty', 'filling', 'full', 'picked_up', 'at_warehouse']
+// empty (on site) → filling → full/ready → picked_up (in transit) → at_warehouse,
+// then the return leg's mirror: return_filling → return_full → return_transit
+// → back_on_site → returned_empty. The return statuses only ever have
+// containers in them once the return phase has actually been used, so
+// including them here up front is a no-op (nothing to render) until then.
+const STATUS_ORDER = ['empty', 'filling', 'full', 'picked_up', 'at_warehouse', 'return_filling', 'return_full', 'return_transit', 'back_on_site', 'returned_empty']
 
 export default function Containers({ openUnit, focusId, clearFocus, toast }) {
   const { state, dispatch, currentUser } = useStore()
@@ -25,6 +30,15 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
   const [rUrl, setRUrl] = useState(null)
   const [rError, setRError] = useState(null)
 
+  // Return-leg "dispatch for return" (driver name + optional photo), the
+  // mirror of the outbound BigBox swap but one container at a time instead
+  // of a batch (docs/superpowers/specs/2026-08-26-return-phase-design.md §3).
+  const [driverName, setDriverName] = useState('')
+  const [drPreview, setDrPreview] = useState(null)
+  const [drUploading, setDrUploading] = useState(false)
+  const [drUrl, setDrUrl] = useState(null)
+  const [drError, setDrError] = useState(null)
+
   const isMover = currentUser?.role === 'admin' || currentUser?.role === 'mover'
   const isWarehouse = currentUser?.role === 'admin' || currentUser?.role === 'warehouse'
 
@@ -39,6 +53,8 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
   const close = () => {
     setOpenId(null); setResolveNote(''); setBay(''); setVerify('')
     setRPreview(null); setRUploading(false); setRUrl(null); setRError(null)
+    setDriverName('')
+    setDrPreview(null); setDrUploading(false); setDrUrl(null); setDrError(null)
     clearFocus && clearFocus()
   }
 
@@ -54,9 +70,39 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
     }
   }
 
+  const captureDispatchPhoto = async (file) => {
+    setDrError(null); setDrPreview(URL.createObjectURL(file)); setDrUrl(null); setDrUploading(true)
+    try {
+      const url = await uploadImage(file, `containers/${open.id}/dispatch-return/${Date.now()}-${currentUser.uid}.jpg`)
+      setDrUrl(url)
+    } catch (err) {
+      setDrError(err.message || 'Upload failed, try again.')
+    } finally {
+      setDrUploading(false)
+    }
+  }
+
   const markFull = (c) => {
     dispatch({ type: 'markContainerFull', p: { containerId: c.id } })
     toast(`${c.number}: marked full — ready for pickup ✓`)
+  }
+
+  const markReturnFull = (c) => {
+    dispatch({ type: 'markReturnFull', p: { containerId: c.id } })
+    toast(`${c.number}: marked full for return, ready for dispatch ✓`)
+  }
+
+  const submitDispatchReturn = async () => {
+    if (!driverName.trim()) return alert('Enter the driver name.')
+    setBusy(true)
+    try {
+      const media = drUrl ? [{ id: `dispatch-${Date.now()}`, kind: 'photo', url: drUrl, label: `Container ${open.number} dispatched for return` }] : []
+      await dispatch({ type: 'dispatchReturn', p: { containerId: open.id, driverName: driverName.trim(), media } })
+      toast(`${open.number}: dispatched for return with ${driverName.trim()} ✓`)
+      close()
+    } finally {
+      setBusy(false)
+    }
   }
 
   const submitReceive = async () => {
@@ -88,6 +134,7 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
           <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
             <EmptiesInButton toast={toast} />
             <BigBoxSwapButton toast={toast} />
+            <DeliverReturnButton toast={toast} />
           </div>
         )}
       </div>
@@ -105,6 +152,10 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
           <div className="cont-grid" style={{ marginBottom: 18 }}>
             {groups[status].map((c) => {
               const units = c.unitIds.map((id) => state.units.find((u) => u.id === id)).filter(Boolean)
+              // Covers both the outbound filling → full quick tap and its
+              // return-leg mirror (return_filling → return_full); returns
+              // null everywhere else, same as containerAction always has.
+              const quickAction = containerAction(currentUser, c, state.project?.returnPhase)
               return (
                 <div key={c.id} className="card cont-card" onClick={() => setOpenId(c.id)}>
                   <div className="row">
@@ -118,17 +169,23 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
                       ? units.map((u) => `Unit ${u.number} — ${u.tenant || '—'}`).join(' · ')
                       : (status === 'empty' ? 'Empty — nothing loaded yet' : '—')}
                   </div>
-                  {status === 'filling' && isMover && (
+                  {quickAction && (
                     <button
                       className="btn btn-primary btn-sm" style={{ marginTop: 10, width: '100%' }}
-                      onClick={(e) => { e.stopPropagation(); markFull(c) }}
-                    >Full — ready for pickup</button>
+                      onClick={(e) => { e.stopPropagation(); if (quickAction.key === 'markReturnFull') markReturnFull(c); else markFull(c) }}
+                    >{quickAction.label}</button>
                   )}
                   {status === 'picked_up' && isWarehouse && (
                     <button
                       className="btn btn-dark btn-sm" style={{ marginTop: 10, width: '100%' }}
                       onClick={(e) => { e.stopPropagation(); setOpenId(c.id) }}
                     >Receive →</button>
+                  )}
+                  {status === 'return_full' && isWarehouse && (
+                    <button
+                      className="btn btn-dark btn-sm" style={{ marginTop: 10, width: '100%' }}
+                      onClick={(e) => { e.stopPropagation(); setOpenId(c.id) }}
+                    >Dispatch for return →</button>
                   )}
                 </div>
               )
@@ -176,6 +233,40 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
           {open.status === 'filling' && isMover && (
             <div style={{ marginTop: 16 }}>
               <button className="btn btn-primary btn-lg" style={{ width: '100%' }} onClick={() => { markFull(open); close() }}>Full — ready for pickup</button>
+            </div>
+          )}
+
+          {open.status === 'return_filling' && isWarehouse && (
+            <div style={{ marginTop: 16 }}>
+              <button className="btn btn-primary btn-lg" style={{ width: '100%' }} onClick={() => { markReturnFull(open); close() }}>Mark full, ready for dispatch</button>
+            </div>
+          )}
+
+          {open.status === 'return_full' && isWarehouse && (
+            <div style={{ marginTop: 16 }}>
+              <div className="section-title" style={{ marginTop: 0 }}>Dispatch for return</div>
+              <div className="field"><label>Driver name / truck #</label>
+                <input className="input" autoFocus placeholder="e.g. Mike, Truck 12" value={driverName} onChange={(e) => setDriverName(e.target.value)} /></div>
+              <div className="field">
+                <label>Photo <span className="muted">(optional)</span></label>
+                <label className="dropzone camera-capture" style={{ display: 'block' }}>
+                  <input
+                    type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
+                    onChange={(e) => { const f = e.target.files[0]; if (f) captureDispatchPhoto(f); e.target.value = '' }}
+                  />
+                  {drPreview ? (
+                    <div className="inv-preview">
+                      <img src={drPreview} alt="Container ready for return dispatch" className="inv-thumb" />
+                      <div className="muted" style={{ marginTop: 8 }}>
+                        {drUploading ? 'Uploading…' : drUrl ? '✓ Uploaded, tap to retake' : drError || 'Tap to retake'}
+                      </div>
+                    </div>
+                  ) : <>📷 Tap to add a photo</>}
+                </label>
+              </div>
+              <button className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={busy || drUploading || !driverName.trim()} onClick={submitDispatchReturn}>
+                {busy ? 'Logging…' : 'Confirm dispatch for return'}
+              </button>
             </div>
           )}
 
