@@ -52,6 +52,15 @@ service cloud.firestore {
       allow write: if isAdmin() || isCrew();
     }
 
+    // Overflow items (Gorilla-transported, too big for a BigBox container):
+    // same crew set as containers may write (packer identifies, mover preps
+    // & transports, warehouse receives); the client enforces which specific
+    // stage transition each role is allowed to perform.
+    match /overflow/{overflowId} {
+      allow read: if isActive();
+      allow write: if isAdmin() || isCrew();
+    }
+
     match /events/{eventId} {
       allow read: if isActive();
       allow write: if isAdmin() || isCrew();
