@@ -1,8 +1,9 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, signOut, updateProfile } from 'firebase/auth'
-import { doc, setDoc, updateDoc, addDoc, arrayUnion, onSnapshot, collection, query, orderBy, serverTimestamp } from 'firebase/firestore'
+import { doc, setDoc, updateDoc, deleteDoc, addDoc, arrayUnion, onSnapshot, collection, query, orderBy, serverTimestamp } from 'firebase/firestore'
 import { auth, db } from './firebase.js'
 import { makeEvent, boxMismatch } from './lib/mutations.js'
+import { DEFAULT_SCHEDULE } from './lib/schedule.js'
 
 const Ctx = createContext(null)
 
@@ -68,6 +69,7 @@ export function StoreProvider({ children }) {
     const over0 = p.overflowId ? state.overflow.find((o) => o.id === p.overflowId) : null
     const targetUser = p.userId ? state.users.find((u) => u.id === p.userId) : null
     const name = targetUser ? targetUser.name : 'user'
+    const day0 = p.dateId ? state.schedule.find((d) => d.id === p.dateId) : null
 
     switch (type) {
       case 'startPacking': {
@@ -242,6 +244,27 @@ export function StoreProvider({ children }) {
       case 'denyUser': {
         await updateDoc(doc(db, 'users', p.userId), { status: 'removed' })
         return ev('system', `Denied ${name}'s request`)
+      }
+      case 'seedSchedule': {
+        // Doc id = date, so this is an idempotent upsert (setDoc + merge),
+        // never a duplicate, whether it's the first load or an admin's
+        // "Reset to default plan". Admin-only server-side (Firestore rules).
+        await Promise.all(DEFAULT_SCHEDULE.map((day) => setDoc(doc(db, 'schedule', day.date), day, { merge: true })))
+        return ev('system', `Loaded the floor plan: ${DEFAULT_SCHEDULE.length} days, Sep 8 to Oct 8`)
+      }
+      case 'editScheduleDay': {
+        // Doc id is the date itself, so a date change means the old doc id
+        // has to go and a new one gets written, not just an updateDoc.
+        const next = {
+          date: p.patch.date ?? day0.date,
+          work: p.patch.work ?? day0.work,
+          floor: p.patch.floor ?? day0.floor,
+          unitCount: p.patch.unitCount ?? day0.unitCount,
+        }
+        if (next.date !== p.dateId) await deleteDoc(doc(db, 'schedule', p.dateId))
+        await setDoc(doc(db, 'schedule', next.date), next, { merge: true })
+        const moved = next.date !== p.dateId ? ` (moved to ${next.date})` : ''
+        return ev('system', `Admin edited schedule day ${p.dateId}${moved}: Floor ${next.floor}, ${next.work}, ${next.unitCount} units`)
       }
       default:
         console.warn(`dispatch: unhandled action "${type}" (not part of the Phase-1 action set)`)
