@@ -25,14 +25,25 @@ service cloud.firestore {
       return isActive() && me().role in ['packer', 'mover', 'driver', 'warehouse'];
     }
 
+    // meta/project.returnPhase gate for the return leg (see the return
+    // transition helpers below). Only ever evaluated on the right-hand side
+    // of a short-circuited `||`, after the outbound check has already come
+    // back false, so this get() is never spent on an outbound write.
+    function returnPhaseOn() {
+      return get(/databases/$(database)/documents/meta/project).data.returnPhase == true;
+    }
+
     // ---- stage-transition helpers ----
     // Each one encodes the exact (role, before -> after) pairs a non-admin
     // may perform, taken line-by-line from the dispatch() switch in
     // src/store.jsx. A doc that has moved past a role's stage no longer
     // matches any pair for that role, so it locks to that role once the
-    // stage advances.
+    // stage advances. Outbound pairs are always allowed; return-leg pairs
+    // (docs/superpowers/specs/2026-08-26-return-phase-design.md §6) are the
+    // exact reverse and only fire when returnPhase is on.
 
     // units: not_started -> packing -> packed -> loaded -> picked_up -> at_warehouse
+    //   -> return_loaded -> return_transit -> back_on_site -> unloaded -> unpacked
     function unitTransitionOK(role, before, after) {
       return (role == 'packer'
               && ((before == 'not_started' && after == 'packing')   // startPacking
@@ -41,30 +52,63 @@ service cloud.firestore {
               && ((before == 'packed' && after == 'loaded')         // loadUnit
                   || (before == 'loaded' && after == 'picked_up'))) // bigboxSwap (units in a full container)
           || (role == 'warehouse'
-              && before == 'picked_up' && after == 'at_warehouse'); // warehouseReceive
+              && before == 'picked_up' && after == 'at_warehouse')  // warehouseReceive
+          || (returnPhaseOn() && unitReturnTransitionOK(role, before, after));
+    }
+    function unitReturnTransitionOK(role, before, after) {
+      return (role == 'warehouse'
+              && ((before == 'at_warehouse' && after == 'return_loaded')     // loadForReturn
+                  || (before == 'return_loaded' && after == 'return_transit'))) // dispatchReturn (its units)
+          || (role == 'mover'
+              && ((before == 'return_transit' && after == 'back_on_site')    // deliverReturn (its units)
+                  || (before == 'back_on_site' && after == 'unloaded')))     // unloadReturn
+          || (role == 'packer'
+              && before == 'unloaded' && after == 'unpacked');               // unpackUnit, terminal
     }
 
     // containers: empty -> filling -> full -> picked_up -> at_warehouse
+    //   -> return_filling -> return_full -> return_transit -> back_on_site -> returned_empty
     // Note: loading a unit sets status to 'filling' whether the container was
     // empty or already filling (a second load is filling -> filling, no
-    // status change) — both must be allowed for the mover.
+    // status change) — both must be allowed for the mover. Same story on the
+    // return leg for return_filling -> return_filling.
     function containerTransitionOK(role, before, after) {
       return (role == 'mover'
               && (((before == 'empty' || before == 'filling') && after == 'filling') // loadUnit
                   || (before == 'filling' && after == 'full')                        // markContainerFull
                   || (before == 'full' && after == 'picked_up')))                    // bigboxSwap
           || (role == 'warehouse'
-              && before == 'picked_up' && after == 'at_warehouse');                  // warehouseReceive
+              && before == 'picked_up' && after == 'at_warehouse')                   // warehouseReceive
+          || (returnPhaseOn() && containerReturnTransitionOK(role, before, after));
+    }
+    function containerReturnTransitionOK(role, before, after) {
+      return (role == 'warehouse'
+              && (((before == 'at_warehouse' || before == 'return_filling') && after == 'return_filling') // loadForReturn
+                  || (before == 'return_filling' && after == 'return_full')          // markReturnFull
+                  || (before == 'return_full' && after == 'return_transit')))        // dispatchReturn
+          || (role == 'mover'
+              && ((before == 'return_transit' && after == 'back_on_site')            // deliverReturn
+                  || (before == 'back_on_site' && after == 'returned_empty')));      // unloadReturn (last unit out)
     }
 
     // overflow: identified -> prepped -> in_transit -> at_warehouse
-    // (packers only *create* overflow, they never update it.)
+    //   -> rt_transit -> returned
+    // (packers only *create* overflow, they never update it, except on the
+    // return leg where returnOverflow may be done by a mover or a packer.)
     function overflowTransitionOK(role, before, after) {
       return (role == 'mover'
               && ((before == 'identified' && after == 'prepped')      // prepOverflow
                   || (before == 'prepped' && after == 'in_transit'))) // transportOverflow
           || (role == 'warehouse'
-              && before == 'in_transit' && after == 'at_warehouse');  // receiveOverflow
+              && before == 'in_transit' && after == 'at_warehouse')   // receiveOverflow
+          || (returnPhaseOn() && overflowReturnTransitionOK(role, before, after));
+    }
+    function overflowReturnTransitionOK(role, before, after) {
+      return (role == 'mover'
+              && ((before == 'at_warehouse' && after == 'rt_transit')  // transportOverflowBack
+                  || (before == 'rt_transit' && after == 'returned'))) // returnOverflow
+          || (role == 'packer'
+              && before == 'rt_transit' && after == 'returned');       // returnOverflow
     }
 
     // ---- identity-field guards (non-admin update only) ----
@@ -169,6 +213,14 @@ service cloud.firestore {
     }
 
     match /schedule/{scheduleId} {
+      allow read: if isActive();
+      allow write: if isAdmin();
+    }
+
+    // Project-level singleton: the return-phase switch (setReturnPhase) plus
+    // name/address. Any active user may read it (the board needs to know
+    // whether the return leg is on); only an admin may flip it.
+    match /meta/project {
       allow read: if isActive();
       allow write: if isAdmin();
     }
