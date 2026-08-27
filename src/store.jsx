@@ -13,6 +13,12 @@ const DEFAULT_PROJECT = { returnPhase: false, name: 'Trinity Manor', address: '3
 
 const Ctx = createContext(null)
 
+// Module-scoped (not per-render state): true for the whole span of a
+// signup() call, from just before the Auth account is created through the
+// end of its own setDoc attempt. Guards against a race with the self-heal
+// below, see signup() and the onAuthStateChanged handler for the full story.
+let signupInProgress = false
+
 export function StoreProvider({ children }) {
   const [units, setUnits] = useState([])
   const [containers, setContainers] = useState([])
@@ -67,7 +73,22 @@ export function StoreProvider({ children }) {
         // this shape (status 'pending', role null), so no rules change is
         // needed here; once the doc exists this branch won't fire again for
         // this uid, snap.exists() takes the branch above.
-        if (!healing.has(user.uid)) {
+        //
+        // signupInProgress skip: onAuthStateChanged fires as soon as
+        // createUserWithEmailAndPassword resolves, before signup()'s own
+        // setDoc has landed, so this branch would otherwise see "doc doesn't
+        // exist yet" during every normal signup and race it: both writes
+        // target a brand-new doc, whichever setDoc reaches the server first
+        // is a create (allowed by the rules), the second is now an update on
+        // an existing doc, denied by the admin-only users-update rule, and
+        // the self-heal copy could win with name = email since
+        // updateProfile hasn't set displayName yet. Skipping self-heal for
+        // the duration of an in-flight signup leaves that doc-create solely
+        // to signup() (correct typed name, no permission-denied). If
+        // signup's setDoc genuinely fails, signupInProgress is back to false
+        // by the time this fires again (its finally already ran), so the
+        // orphan still self-heals, just on the next load, not mid-race.
+        if (!signupInProgress && !healing.has(user.uid)) {
           healing.add(user.uid)
           setDoc(doc(db, 'users', user.uid), {
             uid: user.uid,
@@ -524,14 +545,28 @@ export function StoreProvider({ children }) {
   }
 
   const signup = async ({ name, email, password }) => {
-    const cred = await createUserWithEmailAndPassword(auth, email, password)
-    await updateProfile(cred.user, { displayName: name })
-    // Deliberately not caught here: if this setDoc fails, the error
-    // propagates up to Login's doRegister, which surfaces it and resets busy
-    // so the person can retry. The onAuthStateChanged self-heal above is the
-    // backstop for the case where they don't retry (or the tab closes) and
-    // the Auth account is left with no matching pending doc.
-    await setDoc(doc(db, 'users', cred.user.uid), { uid: cred.user.uid, name, email, role: null, status: 'pending', createdAt: serverTimestamp() })
+    // signupInProgress is set for this whole span (start through the setDoc
+    // attempt below, success or fail) so the self-heal in the
+    // onAuthStateChanged handler above sits out while this call owns the
+    // doc-create, see the long comment up there for why: onAuthStateChanged
+    // fires as soon as createUserWithEmailAndPassword resolves, before our
+    // own setDoc below has landed, and without this guard both writes would
+    // race to create the same brand-new doc.
+    signupInProgress = true
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, email, password)
+      await updateProfile(cred.user, { displayName: name })
+      // Deliberately not caught here: if this setDoc fails, the error
+      // propagates up to Login's doRegister, which surfaces it and resets
+      // busy so the person can retry. The onAuthStateChanged self-heal above
+      // is the backstop for the case where they don't retry (or the tab
+      // closes) and the Auth account is left with no matching pending doc,
+      // it picks the orphan up on the next load, once signupInProgress is
+      // back to false.
+      await setDoc(doc(db, 'users', cred.user.uid), { uid: cred.user.uid, name, email, role: null, status: 'pending', createdAt: serverTimestamp() })
+    } finally {
+      signupInProgress = false
+    }
   }
   const login = (email, password) => signInWithEmailAndPassword(auth, email, password)
   const resetPassword = (email) => sendPasswordResetEmail(auth, email)
