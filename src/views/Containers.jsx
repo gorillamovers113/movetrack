@@ -5,6 +5,7 @@ import { uploadImage } from '../lib/upload.js'
 import EmptiesInButton from '../components/EmptiesInButton.jsx'
 import BigBoxSwapButton from '../components/BigBoxSwapButton.jsx'
 import DeliverReturnButton from '../components/DeliverReturnButton.jsx'
+import ReceiveContainerButton from '../components/ReceiveContainerButton.jsx'
 
 // Lifecycle order the pool view groups by — matches CONT_STATUS in store.jsx:
 // empty (on site) → filling → full/ready → picked_up (in transit) → at_warehouse,
@@ -19,16 +20,7 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
   const [openId, setOpenId] = useState(focusId || null)
   const [lightbox, setLightbox] = useState(null)
   const [resolveNote, setResolveNote] = useState('')
-  const [bay, setBay] = useState('')
-  const [verify, setVerify] = useState('')
   const [busy, setBusy] = useState(false)
-
-  // Warehouse-receive photo capture (optional) — same upload-as-you-go
-  // pattern as the packing inventory photo in UnitDetail.
-  const [rPreview, setRPreview] = useState(null)
-  const [rUploading, setRUploading] = useState(false)
-  const [rUrl, setRUrl] = useState(null)
-  const [rError, setRError] = useState(null)
 
   // Return-leg "dispatch for return" (driver name + optional photo), the
   // mirror of the outbound BigBox swap but one container at a time instead
@@ -51,23 +43,10 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
   const open = openId ? state.containers.find((c) => c.id === openId) : null
 
   const close = () => {
-    setOpenId(null); setResolveNote(''); setBay(''); setVerify('')
-    setRPreview(null); setRUploading(false); setRUrl(null); setRError(null)
+    setOpenId(null); setResolveNote('')
     setDriverName('')
     setDrPreview(null); setDrUploading(false); setDrUrl(null); setDrError(null)
     clearFocus && clearFocus()
-  }
-
-  const captureReceivePhoto = async (file) => {
-    setRError(null); setRPreview(URL.createObjectURL(file)); setRUrl(null); setRUploading(true)
-    try {
-      const url = await uploadImage(file, `containers/${open.id}/receive/${Date.now()}-${currentUser.uid}.jpg`)
-      setRUrl(url)
-    } catch (err) {
-      setRError(err.message || 'Upload failed — try again.')
-    } finally {
-      setRUploading(false)
-    }
   }
 
   const captureDispatchPhoto = async (file) => {
@@ -106,22 +85,6 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
     }
   }
 
-  const submitReceive = async () => {
-    const n = parseInt(verify)
-    if (!bay.trim()) return alert('Assign a warehouse bay.')
-    if (verify === '' || isNaN(n) || n < 0) return alert('Enter the pieces counted at receiving.')
-    setBusy(true)
-    try {
-      const media = rUrl ? [{ id: `recv-${Date.now()}`, kind: 'photo', url: rUrl, label: `Container ${open.number} received` }] : []
-      await dispatch({ type: 'warehouseReceive', p: { containerId: open.id, verifiedPieces: n, bay: bay.trim(), media } })
-      const expected = open.unitIds.reduce((sum, id) => sum + (state.units.find((u) => u.id === id)?.pieces || 0), 0)
-      toast(expected && n !== expected ? `⚑ Mismatch flagged (${n} vs ${expected})` : `${open.number}: received at ${bay.trim()} ✓`)
-      close()
-    } finally {
-      setBusy(false)
-    }
-  }
-
   const totalCount = state.containers.length
 
   return (
@@ -131,11 +94,16 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
           <h1>Containers</h1>
           <p>{totalCount} on the board — chain of custody for every BigBox container</p>
         </div>
-        {isMover && (
+        {(isMover || isWarehouse) && (
           <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
-            <EmptiesInButton toast={toast} />
-            <BigBoxSwapButton toast={toast} />
-            <DeliverReturnButton toast={toast} />
+            {isMover && (
+              <>
+                <EmptiesInButton toast={toast} />
+                <BigBoxSwapButton toast={toast} />
+                <DeliverReturnButton toast={toast} />
+              </>
+            )}
+            {isWarehouse && <ReceiveContainerButton toast={toast} />}
           </div>
         )}
       </div>
@@ -175,12 +143,6 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
                       className="btn btn-primary btn-sm" style={{ marginTop: 10, width: '100%' }}
                       onClick={(e) => { e.stopPropagation(); if (quickAction.key === 'markReturnFull') markReturnFull(c); else markFull(c) }}
                     >{quickAction.label}</button>
-                  )}
-                  {status === 'picked_up' && isWarehouse && (
-                    <button
-                      className="btn btn-dark btn-sm" style={{ marginTop: 10, width: '100%' }}
-                      onClick={(e) => { e.stopPropagation(); setOpenId(c.id) }}
-                    >Receive →</button>
                   )}
                   {status === 'return_full' && isWarehouse && (
                     <button
@@ -271,38 +233,9 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
             </div>
           )}
 
-          {open.status === 'picked_up' && isWarehouse && (
-            <div style={{ marginTop: 16 }}>
-              <div className="section-title" style={{ marginTop: 0 }}>Receive at warehouse</div>
-              <div className="field">
-                <label>Pieces counted{(() => {
-                  const expected = open.unitIds.reduce((sum, id) => sum + (state.units.find((u) => u.id === id)?.pieces || 0), 0)
-                  return expected > 0 ? <span className="muted"> ({expected} on record)</span> : null
-                })()}</label>
-                <input className="input" type="number" min="0" inputMode="numeric" placeholder="count" value={verify} onChange={(e) => setVerify(e.target.value)} />
-              </div>
-              <div className="field"><label>Warehouse bay</label>
-                <input className="input" placeholder="e.g. Bay 4" value={bay} onChange={(e) => setBay(e.target.value)} /></div>
-              <div className="field">
-                <label>Photo <span className="muted">(optional)</span></label>
-                <label className="dropzone camera-capture" style={{ display: 'block' }}>
-                  <input
-                    type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
-                    onChange={(e) => { const f = e.target.files[0]; if (f) captureReceivePhoto(f); e.target.value = '' }}
-                  />
-                  {rPreview ? (
-                    <div className="inv-preview">
-                      <img src={rPreview} alt="Received container" className="inv-thumb" />
-                      <div className="muted" style={{ marginTop: 8 }}>
-                        {rUploading ? 'Uploading…' : rUrl ? '✓ Uploaded — tap to retake' : rError || 'Tap to retake'}
-                      </div>
-                    </div>
-                  ) : <>📷 Tap to add a photo</>}
-                </label>
-              </div>
-              <button className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={busy || rUploading} onClick={submitReceive}>
-                {busy ? 'Logging…' : 'Confirm receipt'}
-              </button>
+          {open.status === 'picked_up' && (
+            <div className="muted" style={{ marginTop: 16 }}>
+              In transit to the warehouse. Use "Receive incoming BigBox" above to check it in (the number is confirmed blind, so it isn't shown here).
             </div>
           )}
 
