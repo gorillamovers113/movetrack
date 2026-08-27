@@ -50,12 +50,14 @@ export function Modal({ title, sub, onClose, children }) {
 
 export function Lightbox({ media, onClose }) {
   if (!media) return null
+  const who = media.userName || 'Unknown'
+  const when = media.ts ? fmtTime(media.ts) : '—'
   return (
     <div className="lightbox" onClick={onClose}>
       {media.kind === 'video'
         ? <video src={media.url} controls autoPlay onClick={(e) => e.stopPropagation()} />
         : <img src={media.url} alt={media.label} />}
-      <div className="cap">{media.label}</div>
+      <div className="cap">{media.label} · {who} · {when}</div>
     </div>
   )
 }
@@ -69,6 +71,30 @@ export function MediaRow({ media, onOpen }) {
           ? <div key={m.id} className="media-video" onClick={() => onOpen(m)} title={m.label}>▶</div>
           : <img key={m.id} className="media-thumb" src={m.url} alt={m.label} onClick={() => onOpen(m)} />
       )}
+    </div>
+  )
+}
+
+// Thumbnail (or ▶ tile for video) with, directly beneath each one, who
+// submitted it and when. Used everywhere stored media renders (Activity
+// feed, unit timeline, My queue, Containers, Overflow) so per-photo
+// attribution shows even when a photo's submitter differs from the event's
+// row-level actor. Old media saved before attribution was added lack these
+// fields, so fall back gracefully rather than ever crashing.
+export function AttributedMedia({ media, onOpen }) {
+  if (!media || !media.length) return null
+  return (
+    <div className="media-row" style={{ flexWrap: 'wrap' }}>
+      {media.map((m) => (
+        <div key={m.id} style={{ textAlign: 'center', width: 92 }}>
+          {m.kind === 'video'
+            ? <div className="media-video" onClick={() => onOpen(m)} title={m.label}>▶</div>
+            : <img className="media-thumb" src={m.url} alt={m.label} onClick={() => onOpen(m)} />}
+          <div className="muted" style={{ fontSize: 11, marginTop: 3, lineHeight: 1.3 }}>
+            {m.userName || 'Unknown'}<br />{m.ts ? fmtTime(m.ts) : '—'}
+          </div>
+        </div>
+      ))}
     </div>
   )
 }
@@ -105,7 +131,7 @@ export function EventRow({ e, onOpenMedia, linkUnit, linkContainer, showTarget =
           {showTarget && e.unitId && linkUnit && <> · <span className="linkish" onClick={() => linkUnit(e.unitId)}>unit</span></>}
           {showTarget && e.containerId && linkContainer && <> · <span className="linkish" onClick={() => linkContainer(e.containerId)}>container</span></>}
         </div>
-        <MediaRow media={e.media} onOpen={onOpenMedia} />
+        <AttributedMedia media={e.media} onOpen={onOpenMedia} />
       </div>
     </div>
   )
