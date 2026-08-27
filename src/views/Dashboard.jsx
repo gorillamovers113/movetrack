@@ -43,6 +43,8 @@ function TodayBanner({ toast }) {
                   await dispatch({ type: 'seedSchedule', p: {} })
                   toast?.('Schedule loaded: 27 days, Sep 8 to Oct 8 ✓')
                 }
+              } catch (err) {
+                toast?.(err?.message || "Couldn't load the plan. Check your signal and try again.")
               } finally {
                 setBusy(false)
               }
