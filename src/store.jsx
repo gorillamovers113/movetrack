@@ -173,18 +173,27 @@ export function StoreProvider({ children }) {
       case 'loadForReturn': {
         // Mirror of loadUnit: warehouse loads a unit back into a return
         // container, piece-verifies against what it left with.
-        p.media = attributeMedia(p.media)
         const cont = state.containers.find((c) => c.id === p.containerId)
+        // Abort BEFORE any write if the container can't accept this load:
+        // gone, or already past return_filling (return_full/return_transit/
+        // back_on_site/returned_empty). Checking first (instead of omitting
+        // status on the later container write) avoids a partial write where
+        // the unit gets promoted to return_loaded but the container update
+        // then self-loops (e.g. return_full -> return_full) and the return
+        // rules reject it as a no-op transition, leaving the unit orphaned.
+        if (!cont || (cont.status !== 'at_warehouse' && cont.status !== 'return_filling')) {
+          throw new Error('That BigBox is no longer accepting items for return. Refresh and pick another container.')
+        }
+        p.media = attributeMedia(p.media)
         const mismatch = boxMismatch(unit.pieces, p.pieces)
         const patch = { stage: 'return_loaded', containerIds: arrayUnion(p.containerId) }
         if (mismatch) patch.flag = { message: `Piece count mismatch at return load: ${p.pieces} loaded vs ${unit.pieces} packed. Recount pending.`, ts: Date.now(), by: currentUser.name, open: true }
         await updateDoc(doc(db, 'units', p.unitId), patch)
-        // Don't regress a container that's already further along the return
-        // leg (e.g. return_full): only stamp return_filling when it's still
-        // at_warehouse or already return_filling.
-        const contPatch = { unitIds: arrayUnion(p.unitId) }
-        if (cont.status === 'at_warehouse' || cont.status === 'return_filling') contPatch.status = 'return_filling'
-        await updateDoc(doc(db, 'containers', p.containerId), contPatch)
+        // Status is always written explicitly here (never omitted), same as
+        // outbound loadUnit: both at_warehouse->return_filling and
+        // return_filling->return_filling are allowed by the rules, so this
+        // can't self-loop into a deny the way omitting status could.
+        await updateDoc(doc(db, 'containers', p.containerId), { status: 'return_filling', unitIds: arrayUnion(p.unitId) })
         await ev('stage', `Loaded unit ${unit.number} for return into container ${cont.number}: ${p.pieces} of ${unit.pieces ?? p.pieces} pieces verified`, { unitId: unit.id, containerId: p.containerId, from: unit.stage, to: 'return_loaded', media: p.media })
         if (mismatch) await ev('flag', `FLAG raised on unit ${unit.number}: piece count mismatch on return load (${p.pieces}/${unit.pieces})`, { unitId: unit.id })
         return
