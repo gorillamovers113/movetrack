@@ -314,6 +314,14 @@ textarea.input { min-height: 0; }
 .cont-num { font-family: var(--display); font-weight: 700; font-size: 17px; letter-spacing: -0.2px; }
 .cont-units { font-size: 12.5px; color: var(--ink-2); margin-top: 6px; line-height: 1.6; }
 
+/* ---------- Return phase ---------- */
+.return-banner {
+  background: linear-gradient(90deg, #0891b2, #22c55e);
+  color: #fff; font-weight: 700; font-size: 13px; letter-spacing: 0.3px;
+  border-radius: 12px; padding: 10px 16px; margin-bottom: 16px;
+  display: flex; align-items: center; gap: 8px;
+}
+
 /* ---------- Misc ---------- */
 .empty { text-align: center; color: var(--ink-3); padding: 44px 20px; font-size: 14px; line-height: 1.5; }
 .empty .big {
