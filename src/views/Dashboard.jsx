@@ -46,7 +46,7 @@ function TodayBanner({ toast }) {
   if (!shown) {
     return (
       <div className="card" style={{ padding: '16px 20px', marginBottom: 14 }}>
-        <div className="muted">No more scheduled work. The plan ran through {fmtScheduleDate(state.schedule.at(-1)?.date)}.</div>
+        <div className="muted">No more scheduled work. The plan ran through {fmtScheduleDate([...state.schedule].sort((a, b) => a.date.localeCompare(b.date)).at(-1)?.date)}.</div>
       </div>
     )
   }
