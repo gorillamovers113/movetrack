@@ -1,8 +1,79 @@
 import React, { useMemo, useState } from 'react'
 import { STAGES, stageOf } from '../seed.js'
 import { useStore } from '../store.jsx'
+import { todayKey, findScheduleDay, nextScheduleDay, fmtScheduleDate, progressForDay } from '../lib/schedule.js'
 import BuildingView from './BuildingView.jsx'
 import NewUnitButton from '../components/NewUnitModal.jsx'
+
+// Compact "today" banner: floor + work type + progress vs plan, or a
+// sensible off-day / empty-schedule fallback. Never crashes on an empty
+// schedule (day 1, before anyone has tapped "Load the plan").
+function TodayBanner({ toast }) {
+  const { state, currentUser, dispatch } = useStore()
+  const [busy, setBusy] = useState(false)
+  const isAdmin = currentUser?.role === 'admin'
+
+  if (state.schedule.length === 0) {
+    return (
+      <div className="card" style={{ padding: '16px 20px', marginBottom: 14 }}>
+        {isAdmin ? (
+          <div className="row" style={{ alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+            <div className="grow">
+              <b>Schedule not loaded yet.</b>
+              <div className="muted" style={{ marginTop: 2 }}>Load the 27-day floor plan (Sep 8, Floor 9 through Oct 8, Floor 1).</div>
+            </div>
+            <button className="btn btn-primary" disabled={busy} onClick={async () => {
+              setBusy(true)
+              try {
+                await dispatch({ type: 'seedSchedule', p: {} })
+                toast?.('Schedule loaded: 27 days, Sep 8 to Oct 8 ✓')
+              } finally {
+                setBusy(false)
+              }
+            }}>{busy ? 'Loading…' : 'Load the Sept 8 to Oct 8 plan'}</button>
+          </div>
+        ) : (
+          <div className="muted">Schedule not loaded yet.</div>
+        )}
+      </div>
+    )
+  }
+
+  const key = todayKey()
+  const day = findScheduleDay(state.schedule, key)
+  const shown = day || nextScheduleDay(state.schedule, key)
+
+  if (!shown) {
+    return (
+      <div className="card" style={{ padding: '16px 20px', marginBottom: 14 }}>
+        <div className="muted">No more scheduled work. The plan ran through {fmtScheduleDate(state.schedule.at(-1)?.date)}.</div>
+      </div>
+    )
+  }
+
+  const isToday = !!day
+  const { done, planned } = progressForDay(shown, state.units)
+  const pct = planned > 0 ? Math.min(100, Math.round((done / planned) * 100)) : 0
+  const workLabel = shown.work === 'MOVEOUT' ? 'MOVE-OUT' : 'PACK'
+  const doneLabel = shown.work === 'MOVEOUT' ? 'loaded' : 'packed'
+
+  return (
+    <div className="card" style={{ padding: '16px 20px', marginBottom: 14 }}>
+      {isToday ? (
+        <b>Today: Floor {shown.floor}. {workLabel} · {planned} unit{planned === 1 ? '' : 's'} planned · {fmtScheduleDate(shown.date)}</b>
+      ) : (
+        <>
+          <div className="muted">No scheduled work today.</div>
+          <b>Next: Floor {shown.floor}, {workLabel}, {fmtScheduleDate(shown.date)}</b>
+        </>
+      )}
+      <div className="progress-band" style={{ background: 'var(--line)' }}>
+        <div style={{ width: `${pct}%`, background: stageOf(doneLabel).color }} />
+      </div>
+      <div className="muted">{done} of {planned} units {doneLabel}</div>
+    </div>
+  )
+}
 
 export default function Dashboard({ openUnit, toast }) {
   const { state } = useStore()
@@ -51,6 +122,8 @@ export default function Dashboard({ openUnit, toast }) {
           <NewUnitButton toast={toast} />
         </div>
       </div>
+
+      <TodayBanner toast={toast} />
 
       <div className="kpis">
         {/* I6 fix: denominator/count come from live state.units, not a hardcoded 100 */}
