@@ -69,45 +69,47 @@ export default function Team({ toast }) {
 
       <div className="section-title">Active roster · {active.length}</div>
       <div className="card">
-        <table className="tbl">
-          <thead><tr><th>Member</th><th>Role</th><th>Actions logged</th><th>Email</th>{isAdmin && <th></th>}</tr></thead>
-          <tbody>
-            {active.map((u) => (
-              <tr key={u.id}>
-                <td><div className="row"><Avatar name={u.name} size="sm" /><div><b>{u.name}</b>{u.title && <div className="muted">{u.title}</div>}</div></div></td>
-                <td>
-                  {isAdmin && u.id !== currentUser.uid ? (
-                    <select className="input" style={{ width: 'auto', padding: '5px 9px', fontSize: 13 }} value={u.role} disabled={busyIds.has(u.id)}
-                      onChange={(e) => { const nextRole = e.target.value; withUserBusy(u.id, async () => {
-                        await dispatch({ type: 'changeRole', p: { userId: u.id, role: nextRole, byId: currentUser.uid } })
-                        toast(`${u.name} → ${ROLES[nextRole].label}`)
-                      }) }}>
-                      {ASSIGNABLE.map(([k, r]) => <option key={k} value={k}>{r.label}</option>)}
-                    </select>
-                  ) : (
-                    <span className="badge" style={{ background: (ROLES[u.role]?.color || '#8a93a2') + '22', color: ROLES[u.role]?.color || '#8a93a2' }}>{ROLES[u.role]?.label || u.role}</span>
-                  )}
-                </td>
-                <td><b>{actionCount(u.id)}</b></td>
-                <td className="muted">{u.email}</td>
-                {isAdmin && (
+        <div className="table-scroll">
+          <table className="tbl">
+            <thead><tr><th>Member</th><th>Role</th><th>Actions logged</th><th>Email</th>{isAdmin && <th></th>}</tr></thead>
+            <tbody>
+              {active.map((u) => (
+                <tr key={u.id}>
+                  <td><div className="row"><Avatar name={u.name} size="sm" /><div><b>{u.name}</b>{u.title && <div className="muted">{u.title}</div>}</div></div></td>
                   <td>
-                    {u.id !== currentUser.uid && (
-                      <button className="btn btn-danger btn-sm" disabled={busyIds.has(u.id)} onClick={() => {
-                        if (confirm(`Remove ${u.name}'s access? They'll lose access to the board on next load.`)) {
-                          withUserBusy(u.id, async () => {
-                            await dispatch({ type: 'removeUser', p: { userId: u.id, byId: currentUser.uid } })
-                            toast(`${u.name} removed`)
-                          })
-                        }
-                      }}>{busyIds.has(u.id) ? 'Working…' : 'Remove'}</button>
+                    {isAdmin && u.id !== currentUser.uid ? (
+                      <select className="input" style={{ width: 'auto', padding: '5px 9px', fontSize: 13 }} value={u.role} disabled={busyIds.has(u.id)}
+                        onChange={(e) => { const nextRole = e.target.value; withUserBusy(u.id, async () => {
+                          await dispatch({ type: 'changeRole', p: { userId: u.id, role: nextRole, byId: currentUser.uid } })
+                          toast(`${u.name} → ${ROLES[nextRole].label}`)
+                        }) }}>
+                        {ASSIGNABLE.map(([k, r]) => <option key={k} value={k}>{r.label}</option>)}
+                      </select>
+                    ) : (
+                      <span className="badge" style={{ background: (ROLES[u.role]?.color || '#8a93a2') + '22', color: ROLES[u.role]?.color || '#8a93a2' }}>{ROLES[u.role]?.label || u.role}</span>
                     )}
                   </td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                  <td><b>{actionCount(u.id)}</b></td>
+                  <td className="muted">{u.email}</td>
+                  {isAdmin && (
+                    <td>
+                      {u.id !== currentUser.uid && (
+                        <button className="btn btn-danger btn-sm" disabled={busyIds.has(u.id)} onClick={() => {
+                          if (confirm(`Remove ${u.name}'s access? They'll lose access to the board on next load.`)) {
+                            withUserBusy(u.id, async () => {
+                              await dispatch({ type: 'removeUser', p: { userId: u.id, byId: currentUser.uid } })
+                              toast(`${u.name} removed`)
+                            })
+                          }
+                        }}>{busyIds.has(u.id) ? 'Working…' : 'Remove'}</button>
+                      )}
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {approving && (

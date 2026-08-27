@@ -216,6 +216,8 @@ img { display: block; max-width: 100%; }
 .media-video { width: 92px; height: 69px; border-radius: 9px; background: var(--dark); color: #fff; display: grid; place-items: center; font-size: 22px; cursor: pointer; }
 
 /* ---------- Tables ---------- */
+/* Scrolls the table itself on narrow phones instead of the whole page. */
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .tbl { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .tbl th { text-align: left; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.7px; color: var(--ink-3); font-weight: 700; padding: 10px 14px; border-bottom: 1px solid var(--line); }
 .tbl td { padding: 11px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
