@@ -106,7 +106,7 @@ export default function Dashboard({ openUnit, toast }) {
   }, [state.units])
 
   const piecesTracked = state.units.reduce((n, u) => n + (u.pieces || 0), 0)
-  const openFlags = state.units.filter((u) => u.flag?.open).length + state.containers.filter((c) => c.flag?.open).length
+  const openFlags = state.units.filter((u) => u.flag?.open).length + state.containers.filter((c) => c.flag?.open).length + state.overflow.filter((o) => o.flag?.open).length
 
   const match = (u) => {
     if (stageFilter && u.stage !== stageFilter) return false
