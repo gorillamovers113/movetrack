@@ -462,8 +462,17 @@ export function StoreProvider({ children }) {
           phase,
         }
         const nextId = scheduleDocId(next.date, phase)
-        if (nextId !== p.dateId) await deleteDoc(doc(db, 'schedule', p.dateId))
+        if (nextId !== p.dateId) {
+          // Collision guard: if the target id already belongs to a different
+          // scheduled day, refuse instead of silently clobbering it.
+          const collision = state.schedule.find((d) => d.id === nextId && d.id !== p.dateId)
+          if (collision) throw new Error('Another day is already scheduled for that date. Pick a different date.')
+        }
+        // Write the new doc first, then remove the old one only once the
+        // new one is confirmed on the server: if setDoc fails, the old day
+        // stays intact instead of the day being lost.
         await setDoc(doc(db, 'schedule', nextId), next, { merge: true })
+        if (nextId !== p.dateId) await deleteDoc(doc(db, 'schedule', p.dateId))
         const moved = nextId !== p.dateId ? ` (moved to ${next.date})` : ''
         return ev('system', `Admin edited schedule day ${p.dateId}${moved}: Floor ${next.floor}, ${next.work}, ${next.unitCount} units`)
       }
