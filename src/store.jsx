@@ -405,7 +405,12 @@ export function StoreProvider({ children }) {
         return ev('media', `Added ${n} ${kinds}${p.note ? ' — ' + p.note : ''} (unit ${unit.number})`, { unitId: unit.id, media: p.media })
       }
       case 'addNote': {
-        const extra = p.unitId ? { unitId: p.unitId } : { containerId: p.containerId }
+        // Only attach containerId/unitId when truthy so a discrepancy note
+        // with no real container/unit ref (e.g. a blind-check mismatch)
+        // doesn't get polluted with an empty-string field.
+        const extra = {}
+        if (p.unitId) extra.unitId = p.unitId
+        if (p.containerId) extra.containerId = p.containerId
         return ev('note', p.text, extra)
       }
       case 'resolveFlag': {
