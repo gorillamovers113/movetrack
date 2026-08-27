@@ -45,11 +45,39 @@ export function StoreProvider({ children }) {
   // role/status changes (e.g. admin approval) show up live without a re-login.
   useEffect(() => {
     let unsubProfile = null
+    // Tracks uids a self-heal write is already in flight for, so a doc that
+    // stays missing across a couple of quick snapshot events (reconnect,
+    // cache replay) doesn't fire setDoc more than once concurrently.
+    const healing = new Set()
     const unsubAuth = onAuthStateChanged(auth, (user) => {
       if (unsubProfile) { unsubProfile(); unsubProfile = null }
       if (!user) { setCurrentUser(null); return }
       unsubProfile = onSnapshot(doc(db, 'users', user.uid), (snap) => {
-        setCurrentUser(snap.exists() ? snap.data() : null)
+        if (snap.exists()) { setCurrentUser(snap.data()); return }
+        setCurrentUser(null)
+        // Self-heal: an authenticated Auth user with no users/{uid} doc means
+        // a signup that created the Auth account but failed before its
+        // Firestore pending doc was written (see signup() below). Without
+        // this, they could sign in forever, land here with currentUser null,
+        // and Gate would bounce them to a blank Login with no explanation,
+        // invisible in the admin's pending queue. Recreate the same pending,
+        // roleless doc signup() would have written, so they land in the
+        // approval queue on their next load. The users create rule already
+        // allows a signed-in user to create only their own doc in exactly
+        // this shape (status 'pending', role null), so no rules change is
+        // needed here; once the doc exists this branch won't fire again for
+        // this uid, snap.exists() takes the branch above.
+        if (!healing.has(user.uid)) {
+          healing.add(user.uid)
+          setDoc(doc(db, 'users', user.uid), {
+            uid: user.uid,
+            name: user.displayName || user.email,
+            email: user.email,
+            role: null,
+            status: 'pending',
+            createdAt: serverTimestamp(),
+          }).catch(() => { healing.delete(user.uid) })
+        }
       })
     })
     return () => { unsubAuth(); if (unsubProfile) unsubProfile() }
@@ -498,6 +526,11 @@ export function StoreProvider({ children }) {
   const signup = async ({ name, email, password }) => {
     const cred = await createUserWithEmailAndPassword(auth, email, password)
     await updateProfile(cred.user, { displayName: name })
+    // Deliberately not caught here: if this setDoc fails, the error
+    // propagates up to Login's doRegister, which surfaces it and resets busy
+    // so the person can retry. The onAuthStateChanged self-heal above is the
+    // backstop for the case where they don't retry (or the tab closes) and
+    // the Auth account is left with no matching pending doc.
     await setDoc(doc(db, 'users', cred.user.uid), { uid: cred.user.uid, name, email, role: null, status: 'pending', createdAt: serverTimestamp() })
   }
   const login = (email, password) => signInWithEmailAndPassword(auth, email, password)
