@@ -3,7 +3,7 @@ import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndP
 import { doc, setDoc, updateDoc, deleteDoc, addDoc, arrayUnion, onSnapshot, collection, query, orderBy, serverTimestamp } from 'firebase/firestore'
 import { auth, db } from './firebase.js'
 import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction } from './lib/mutations.js'
-import { DEFAULT_SCHEDULE } from './lib/schedule.js'
+import { DEFAULT_SCHEDULE, DEFAULT_RETURN_SCHEDULE, scheduleDocId } from './lib/schedule.js'
 import { stageOf } from './seed.js'
 
 // meta/project doc default, used whenever the doc is absent (brand-new
@@ -364,21 +364,35 @@ export function StoreProvider({ children }) {
         // Doc id = date, so this is an idempotent upsert (setDoc + merge),
         // never a duplicate, whether it's the first load or an admin's
         // "Reset to default plan". Admin-only server-side (Firestore rules).
-        await Promise.all(DEFAULT_SCHEDULE.map((day) => setDoc(doc(db, 'schedule', day.date), day, { merge: true })))
+        // Explicitly tags phase: 'out' on every write, which also backfills
+        // the field onto any pre-existing days seeded before phase existed.
+        await Promise.all(DEFAULT_SCHEDULE.map((day) => setDoc(doc(db, 'schedule', day.date), { ...day, phase: 'out' }, { merge: true })))
         return ev('system', `Loaded the floor plan: ${DEFAULT_SCHEDULE.length} days, Sep 8 to Oct 8`)
       }
+      case 'seedReturnSchedule': {
+        // Same idempotent upsert as seedSchedule, but return days live at a
+        // prefixed doc id (scheduleDocId) so an admin re-dating a return day
+        // can never collide with an outbound day on the same calendar date.
+        await Promise.all(DEFAULT_RETURN_SCHEDULE.map((day) => setDoc(doc(db, 'schedule', scheduleDocId(day.date, 'return')), { ...day, phase: 'return' }, { merge: true })))
+        return ev('system', `Loaded the return floor plan: ${DEFAULT_RETURN_SCHEDULE.length} days`)
+      }
       case 'editScheduleDay': {
-        // Doc id is the date itself, so a date change means the old doc id
-        // has to go and a new one gets written, not just an updateDoc.
+        // Doc id is normally the date itself, so a date change means the old
+        // doc id has to go and a new one gets written, not just an
+        // updateDoc. Return days keep their phase (and its doc-id prefix)
+        // across an edit, since they don't carry it in p.patch.
+        const phase = day0?.phase || 'out'
         const next = {
           date: p.patch.date ?? day0.date,
           work: p.patch.work ?? day0.work,
           floor: p.patch.floor ?? day0.floor,
           unitCount: p.patch.unitCount ?? day0.unitCount,
+          phase,
         }
-        if (next.date !== p.dateId) await deleteDoc(doc(db, 'schedule', p.dateId))
-        await setDoc(doc(db, 'schedule', next.date), next, { merge: true })
-        const moved = next.date !== p.dateId ? ` (moved to ${next.date})` : ''
+        const nextId = scheduleDocId(next.date, phase)
+        if (nextId !== p.dateId) await deleteDoc(doc(db, 'schedule', p.dateId))
+        await setDoc(doc(db, 'schedule', nextId), next, { merge: true })
+        const moved = nextId !== p.dateId ? ` (moved to ${next.date})` : ''
         return ev('system', `Admin edited schedule day ${p.dateId}${moved}: Floor ${next.floor}, ${next.work}, ${next.unitCount} units`)
       }
       default:

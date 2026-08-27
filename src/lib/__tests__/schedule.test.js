@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
-  DEFAULT_SCHEDULE, todayKey, parseDateKey, fmtScheduleDate,
+  DEFAULT_SCHEDULE, DEFAULT_RETURN_SCHEDULE, todayKey, parseDateKey, fmtScheduleDate,
   findScheduleDay, nextScheduleDay, targetStageForWork, atOrPastStage, progressForDay,
+  scheduleDocId, scheduleForPhase,
 } from '../schedule.js'
 
 describe('DEFAULT_SCHEDULE', () => {
@@ -61,9 +62,10 @@ describe('nextScheduleDay', () => {
 })
 
 describe('targetStageForWork / atOrPastStage', () => {
-  it('PACK targets packed, MOVEOUT targets loaded', () => {
+  it('PACK targets packed, MOVEOUT targets loaded, RETURN targets unpacked', () => {
     expect(targetStageForWork('PACK')).toBe('packed')
     expect(targetStageForWork('MOVEOUT')).toBe('loaded')
+    expect(targetStageForWork('RETURN')).toBe('unpacked')
   })
   it('at-or-past is inclusive and lifecycle-ordered', () => {
     expect(atOrPastStage('packed', 'packed')).toBe(true)
@@ -90,5 +92,59 @@ describe('progressForDay', () => {
   })
   it('never crashes with no matching day', () => {
     expect(progressForDay(null, units)).toEqual({ done: 0, planned: 0 })
+  })
+  it('counts unpacked-or-later units on a RETURN day', () => {
+    const day = { date: '2026-10-12', work: 'RETURN', floor: 1, unitCount: 3 }
+    const returnUnits = [
+      { floor: 1, stage: 'unpacked' },
+      { floor: 1, stage: 'unloaded' },
+      { floor: 1, stage: 'back_on_site' },
+      { floor: 2, stage: 'unpacked' },
+    ]
+    expect(progressForDay(day, returnUnits)).toEqual({ done: 1, planned: 3 })
+  })
+})
+
+describe('DEFAULT_RETURN_SCHEDULE', () => {
+  it('has one day per floor, 1 through 9', () => {
+    expect(DEFAULT_RETURN_SCHEDULE).toHaveLength(9)
+    expect(DEFAULT_RETURN_SCHEDULE.map((d) => d.floor)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9])
+  })
+  it('starts after the outbound plan ends (Oct 8)', () => {
+    expect(DEFAULT_RETURN_SCHEDULE[0].date > '2026-10-08').toBe(true)
+  })
+  it('every day is RETURN work with a positive unitCount', () => {
+    for (const d of DEFAULT_RETURN_SCHEDULE) {
+      expect(d.work).toBe('RETURN')
+      expect(d.unitCount).toBeGreaterThan(0)
+    }
+  })
+})
+
+describe('scheduleDocId', () => {
+  it('uses the plain date for the outbound phase (default)', () => {
+    expect(scheduleDocId('2026-09-08')).toBe('2026-09-08')
+    expect(scheduleDocId('2026-09-08', 'out')).toBe('2026-09-08')
+  })
+  it('prefixes the date for the return phase, so it cannot collide with an outbound day', () => {
+    expect(scheduleDocId('2026-10-12', 'return')).toBe('return-2026-10-12')
+  })
+})
+
+describe('scheduleForPhase', () => {
+  const mixed = [
+    { date: '2026-09-08', phase: 'out' },
+    { date: '2026-09-09' }, // legacy doc, no phase field: counts as 'out'
+    { date: '2026-10-12', phase: 'return' },
+  ]
+  it('defaults missing phase to out', () => {
+    expect(scheduleForPhase(mixed, 'out')).toHaveLength(2)
+  })
+  it('filters to return days', () => {
+    expect(scheduleForPhase(mixed, 'return')).toEqual([{ date: '2026-10-12', phase: 'return' }])
+  })
+  it('never crashes on a missing/empty schedule', () => {
+    expect(scheduleForPhase(undefined, 'out')).toEqual([])
+    expect(scheduleForPhase([], 'return')).toEqual([])
   })
 })
