@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react'
-import { useStore, OVERFLOW_STATUS, overflowAction, fmtTime } from '../store.jsx'
-import { Modal, Lightbox, EventRow } from '../ui.jsx'
+import { useStore, OVERFLOW_STATUS, overflowAction } from '../store.jsx'
+import { Modal, Lightbox, EventRow, AttributedMedia } from '../ui.jsx'
 import { uploadImage } from '../lib/upload.js'
 import ReportOverflowButton from '../components/ReportOverflowButton.jsx'
 
@@ -8,27 +8,6 @@ import ReportOverflowButton from '../components/ReportOverflowButton.jsx'
 // store.jsx: identified (needs prep) → prepped (ready to transport) →
 // in_transit → at_warehouse.
 const STAGE_ORDER = ['identified', 'prepped', 'in_transit', 'at_warehouse']
-
-// Photo thumbnails with a submitter-name + date/time caption underneath.
-// Overflow photos need visible attribution per the spec (each item is
-// padded/wrapped/labeled by a specific crew member and that has to show).
-function AttributedMedia({ media, onOpen }) {
-  if (!media || !media.length) return null
-  return (
-    <div className="media-row" style={{ flexWrap: 'wrap' }}>
-      {media.map((m) => (
-        <div key={m.id} style={{ textAlign: 'center', width: 92 }}>
-          {m.kind === 'video'
-            ? <div className="media-video" onClick={() => onOpen(m)} title={m.label}>▶</div>
-            : <img className="media-thumb" src={m.url} alt={m.label} onClick={() => onOpen(m)} />}
-          <div className="muted" style={{ fontSize: 11, marginTop: 3, lineHeight: 1.3 }}>
-            {m.userName || 'Unknown'}<br />{m.ts ? fmtTime(m.ts) : '—'}
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-}
 
 export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
   const { state, dispatch, currentUser } = useStore()
@@ -103,7 +82,7 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
     if (!pUrl) return alert('A photo of the padded, wrapped & labeled item is required.')
     setBusy(true)
     try {
-      const media = [{ id: `prep-${Date.now()}`, kind: 'photo', url: pUrl, label: 'Padded, wrapped & labeled', uid: currentUser.uid, userName: currentUser.name, ts: Date.now() }]
+      const media = [{ id: `prep-${Date.now()}`, kind: 'photo', url: pUrl, label: 'Padded, wrapped & labeled' }]
       await dispatch({ type: 'prepOverflow', p: { overflowId: open.id, media } })
       toast(`Unit ${open.unitNumber} overflow item: prepped ✓`)
       close()
@@ -116,7 +95,7 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
     if (!location.trim()) return alert('Assign a warehouse location (e.g. Bay C, shelf 3).')
     setBusy(true)
     try {
-      const media = rUrl ? [{ id: `recv-${Date.now()}`, kind: 'photo', url: rUrl, label: 'Received condition', uid: currentUser.uid, userName: currentUser.name, ts: Date.now() }] : []
+      const media = rUrl ? [{ id: `recv-${Date.now()}`, kind: 'photo', url: rUrl, label: 'Received condition' }] : []
       await dispatch({ type: 'receiveOverflow', p: { overflowId: open.id, warehouseLocation: location.trim(), media } })
       toast(`Unit ${open.unitNumber} overflow item: received at ${location.trim()} ✓`)
       close()
