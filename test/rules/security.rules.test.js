@@ -270,6 +270,21 @@ describe('containers — second load regression guard', () => {
       })
     )
   })
+
+  // Continuation (the container already entered the return leg to reach
+  // return_filling in the first place): a second load stays allowed even if
+  // an admin has since toggled returnPhase off
+  // (docs/superpowers/specs/2026-08-27-return-leg-correctness-fixes.md #2).
+  it('warehouse loading a second unit into a return_filling container, returnPhase OFF: still allowed', async () => {
+    await setReturnPhase(false)
+    await seed('containers', 'c1', baseContainer({ status: 'return_filling', unitIds: ['u1'] }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(WAREHOUSE), 'containers', 'c1'), {
+        status: 'return_filling',
+        unitIds: arrayUnion('u2'),
+      })
+    )
+  })
 })
 
 // =====================================================================
@@ -619,27 +634,52 @@ describe('custody attribution fields locked to the actor', () => {
     )
   })
 
-  it('deliverReturn: receivedBy forged as another user denied', async () => {
+  it('deliverReturn: returnReceivedBy forged as another user denied', async () => {
     await setReturnPhase(true)
     await seed('containers', 'c1', baseContainer({ status: 'return_transit', unitIds: ['u1'] }))
     await assertFails(
       updateDoc(doc(dbAs(MOVER), 'containers', 'c1'), {
         status: 'back_on_site',
-        receivedBy: WAREHOUSE,
-        backOnSiteAt: 1,
+        returnReceivedBy: WAREHOUSE,
+        returnDeliveredAt: 1,
       })
     )
   })
 
-  it('dispatchReturn: handoffBy forged as another user denied', async () => {
+  it('deliverReturn: returnReceivedBy == own uid allowed', async () => {
+    await setReturnPhase(true)
+    await seed('containers', 'c1', baseContainer({ status: 'return_transit', unitIds: ['u1'] }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(MOVER), 'containers', 'c1'), {
+        status: 'back_on_site',
+        returnReceivedBy: MOVER,
+        returnDeliveredAt: 1,
+      })
+    )
+  })
+
+  it('dispatchReturn: returnHandoffBy forged as another user denied', async () => {
     await setReturnPhase(true)
     await seed('containers', 'c1', baseContainer({ status: 'return_full', unitIds: ['u1'] }))
     await assertFails(
       updateDoc(doc(dbAs(WAREHOUSE), 'containers', 'c1'), {
         status: 'return_transit',
-        driverName: 'Dave',
-        dispatchedAt: 1,
-        handoffBy: MOVER,
+        returnDriverName: 'Dave',
+        returnDispatchedAt: 1,
+        returnHandoffBy: MOVER,
+      })
+    )
+  })
+
+  it('dispatchReturn: returnHandoffBy == own uid allowed', async () => {
+    await setReturnPhase(true)
+    await seed('containers', 'c1', baseContainer({ status: 'return_full', unitIds: ['u1'] }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(WAREHOUSE), 'containers', 'c1'), {
+        status: 'return_transit',
+        returnDriverName: 'Dave',
+        returnDispatchedAt: 1,
+        returnHandoffBy: WAREHOUSE,
       })
     )
   })
@@ -684,11 +724,19 @@ describe('custody attribution fields locked to the actor', () => {
     )
   })
 
-  it('transportOverflowBack: transportBy forged as another user denied', async () => {
+  it('transportOverflowBack: returnTransportBy forged as another user denied', async () => {
     await setReturnPhase(true)
     await seed('overflow', 'o1', baseOverflow({ stage: 'at_warehouse' }))
     await assertFails(
-      updateDoc(doc(dbAs(MOVER), 'overflow', 'o1'), { stage: 'rt_transit', rtTransitAt: 1, transportBy: OTHER_PACKER })
+      updateDoc(doc(dbAs(MOVER), 'overflow', 'o1'), { stage: 'rt_transit', rtTransitAt: 1, returnTransportBy: OTHER_PACKER })
+    )
+  })
+
+  it('transportOverflowBack: returnTransportBy == own uid allowed', async () => {
+    await setReturnPhase(true)
+    await seed('overflow', 'o1', baseOverflow({ stage: 'at_warehouse' }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(MOVER), 'overflow', 'o1'), { stage: 'rt_transit', rtTransitAt: 1, returnTransportBy: MOVER })
     )
   })
 
@@ -740,14 +788,14 @@ describe('custody attribution fields locked to the actor', () => {
     )
   })
 
-  it('deliverReturn allowed even though the container already carries a different user\'s handoffBy from dispatchReturn', async () => {
+  it('deliverReturn allowed even though the container already carries a different user\'s returnHandoffBy from dispatchReturn', async () => {
     await setReturnPhase(true)
-    await seed('containers', 'c1', baseContainer({ status: 'return_transit', unitIds: ['u1'], handoffBy: WAREHOUSE, driverName: 'Dave', dispatchedAt: 1 }))
+    await seed('containers', 'c1', baseContainer({ status: 'return_transit', unitIds: ['u1'], returnHandoffBy: WAREHOUSE, returnDriverName: 'Dave', returnDispatchedAt: 1 }))
     await assertSucceeds(
       updateDoc(doc(dbAs(MOVER), 'containers', 'c1'), {
         status: 'back_on_site',
-        receivedBy: MOVER,
-        backOnSiteAt: 1,
+        returnReceivedBy: MOVER,
+        returnDeliveredAt: 1,
       })
     )
   })
@@ -932,6 +980,21 @@ describe('return phase — loadForReturn (warehouse: unit at_warehouse -> return
     await seed('units', 'u1', baseUnit({ stage: 'packed', pieces: 12 }))
     await assertFails(updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), { stage: 'return_loaded' }))
   })
+
+  // returnContainerId (docs/superpowers/specs/2026-08-27-return-leg-correctness-fixes.md
+  // #1) is not a rules-guarded identity field, so loadForReturn's write
+  // setting it still passes the transition + identity rules unchanged.
+  it('warehouse, returnPhase on: setting returnContainerId alongside the transition allowed', async () => {
+    await setReturnPhase(true)
+    await seed('units', 'u1', baseUnit({ stage: 'at_warehouse', pieces: 12 }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), {
+        stage: 'return_loaded',
+        containerIds: arrayUnion('c1'),
+        returnContainerId: 'c1',
+      })
+    )
+  })
 })
 
 describe('return phase — loadForReturn (warehouse: container at_warehouse|return_filling -> return_filling)', () => {
@@ -983,10 +1046,14 @@ describe('return phase — markReturnFull (warehouse: container return_filling -
     await assertSucceeds(updateDoc(doc(dbAs(WAREHOUSE), 'containers', 'c1'), { status: 'return_full' }))
   })
 
-  it('warehouse, returnPhase OFF: denied', async () => {
+  // Continuation transition (the container already entered the return leg
+  // to reach return_filling in the first place): allowed regardless of
+  // returnPhase, so toggling the phase off can't strand it here
+  // (docs/superpowers/specs/2026-08-27-return-leg-correctness-fixes.md #2).
+  it('warehouse, returnPhase OFF: still allowed (continuation, not entry)', async () => {
     await setReturnPhase(false)
     await seed('containers', 'c1', baseContainer({ status: 'return_filling', unitIds: ['u1'] }))
-    await assertFails(updateDoc(doc(dbAs(WAREHOUSE), 'containers', 'c1'), { status: 'return_full' }))
+    await assertSucceeds(updateDoc(doc(dbAs(WAREHOUSE), 'containers', 'c1'), { status: 'return_full' }))
   })
 
   it('wrong role (mover), returnPhase on: denied', async () => {
@@ -1009,9 +1076,9 @@ describe('return phase — dispatchReturn (warehouse: container return_full -> r
     await assertSucceeds(
       updateDoc(doc(dbAs(WAREHOUSE), 'containers', 'c1'), {
         status: 'return_transit',
-        driverName: 'Dave',
-        dispatchedAt: 1,
-        handoffBy: WAREHOUSE,
+        returnDriverName: 'Dave',
+        returnDispatchedAt: 1,
+        returnHandoffBy: WAREHOUSE,
       })
     )
   })
@@ -1022,10 +1089,19 @@ describe('return phase — dispatchReturn (warehouse: container return_full -> r
     await assertSucceeds(updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), { stage: 'return_transit' }))
   })
 
-  it('warehouse, returnPhase OFF: denied (container)', async () => {
+  // Continuation transitions (return_loaded/return_full are only reachable
+  // by having already entered the return leg): allowed regardless of
+  // returnPhase, so toggling the phase off can't strand them mid-dispatch.
+  it('warehouse, returnPhase OFF: still allowed (continuation, container)', async () => {
     await setReturnPhase(false)
     await seed('containers', 'c1', baseContainer({ status: 'return_full', unitIds: ['u1'] }))
-    await assertFails(updateDoc(doc(dbAs(WAREHOUSE), 'containers', 'c1'), { status: 'return_transit' }))
+    await assertSucceeds(updateDoc(doc(dbAs(WAREHOUSE), 'containers', 'c1'), { status: 'return_transit' }))
+  })
+
+  it('warehouse, returnPhase OFF: still allowed (continuation, unit)', async () => {
+    await setReturnPhase(false)
+    await seed('units', 'u1', baseUnit({ stage: 'return_loaded' }))
+    await assertSucceeds(updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), { stage: 'return_transit' }))
   })
 
   it('wrong role (mover), returnPhase on: denied (container)', async () => {
@@ -1058,7 +1134,7 @@ describe('return phase — deliverReturn (mover: container return_transit -> bac
     await setReturnPhase(true)
     await seed('containers', 'c1', baseContainer({ status: 'return_transit', unitIds: ['u1'] }))
     await assertSucceeds(
-      updateDoc(doc(dbAs(MOVER), 'containers', 'c1'), { status: 'back_on_site', receivedBy: MOVER, backOnSiteAt: 1 })
+      updateDoc(doc(dbAs(MOVER), 'containers', 'c1'), { status: 'back_on_site', returnReceivedBy: MOVER, returnDeliveredAt: 1 })
     )
   })
 
@@ -1068,10 +1144,19 @@ describe('return phase — deliverReturn (mover: container return_transit -> bac
     await assertSucceeds(updateDoc(doc(dbAs(MOVER), 'units', 'u1'), { stage: 'back_on_site' }))
   })
 
-  it('mover, returnPhase OFF: denied (container)', async () => {
+  // Continuation transitions (return_transit is only reachable by having
+  // already entered the return leg): allowed regardless of returnPhase, so
+  // toggling the phase off mid-delivery can't strand the container/unit.
+  it('mover, returnPhase OFF: still allowed (continuation, container)', async () => {
     await setReturnPhase(false)
     await seed('containers', 'c1', baseContainer({ status: 'return_transit', unitIds: ['u1'] }))
-    await assertFails(updateDoc(doc(dbAs(MOVER), 'containers', 'c1'), { status: 'back_on_site' }))
+    await assertSucceeds(updateDoc(doc(dbAs(MOVER), 'containers', 'c1'), { status: 'back_on_site' }))
+  })
+
+  it('mover, returnPhase OFF: still allowed (continuation, unit)', async () => {
+    await setReturnPhase(false)
+    await seed('units', 'u1', baseUnit({ stage: 'return_transit' }))
+    await assertSucceeds(updateDoc(doc(dbAs(MOVER), 'units', 'u1'), { stage: 'back_on_site' }))
   })
 
   it('wrong role (warehouse), returnPhase on: denied (container)', async () => {
@@ -1114,16 +1199,19 @@ describe('return phase — unloadReturn (mover: unit back_on_site -> unloaded; c
     await assertSucceeds(updateDoc(doc(dbAs(MOVER), 'containers', 'c1'), { status: 'returned_empty' }))
   })
 
-  it('mover, returnPhase OFF: denied (unit)', async () => {
+  // Continuation transitions (back_on_site is only reachable by having
+  // already entered the return leg): allowed regardless of returnPhase, so
+  // toggling the phase off mid-unload can't strand the unit/container.
+  it('mover, returnPhase OFF: still allowed (continuation, unit)', async () => {
     await setReturnPhase(false)
     await seed('units', 'u1', baseUnit({ stage: 'back_on_site', pieces: 12 }))
-    await assertFails(updateDoc(doc(dbAs(MOVER), 'units', 'u1'), { stage: 'unloaded' }))
+    await assertSucceeds(updateDoc(doc(dbAs(MOVER), 'units', 'u1'), { stage: 'unloaded' }))
   })
 
-  it('mover, returnPhase OFF: denied (container)', async () => {
+  it('mover, returnPhase OFF: still allowed (continuation, container)', async () => {
     await setReturnPhase(false)
     await seed('containers', 'c1', baseContainer({ status: 'back_on_site', unitIds: ['u1'] }))
-    await assertFails(updateDoc(doc(dbAs(MOVER), 'containers', 'c1'), { status: 'returned_empty' }))
+    await assertSucceeds(updateDoc(doc(dbAs(MOVER), 'containers', 'c1'), { status: 'returned_empty' }))
   })
 
   it('wrong role (warehouse), returnPhase on: denied (unit)', async () => {
@@ -1158,10 +1246,13 @@ describe('return phase — unpackUnit (packer: unit unloaded -> unpacked, termin
     )
   })
 
-  it('packer, returnPhase OFF: denied', async () => {
+  // Continuation transition (unloaded is only reachable by having already
+  // entered the return leg): allowed regardless of returnPhase, so toggling
+  // the phase off can't strand the unit one step before its terminal stage.
+  it('packer, returnPhase OFF: still allowed (continuation, terminal)', async () => {
     await setReturnPhase(false)
     await seed('units', 'u1', baseUnit({ stage: 'unloaded' }))
-    await assertFails(updateDoc(doc(dbAs(PACKER), 'units', 'u1'), { stage: 'unpacked' }))
+    await assertSucceeds(updateDoc(doc(dbAs(PACKER), 'units', 'u1'), { stage: 'unpacked' }))
   })
 
   it('wrong role (mover), returnPhase on: denied', async () => {
@@ -1182,7 +1273,7 @@ describe('return phase — transportOverflowBack (mover: overflow at_warehouse -
     await setReturnPhase(true)
     await seed('overflow', 'o1', baseOverflow({ stage: 'at_warehouse' }))
     await assertSucceeds(
-      updateDoc(doc(dbAs(MOVER), 'overflow', 'o1'), { stage: 'rt_transit', rtTransitAt: 1, transportBy: MOVER })
+      updateDoc(doc(dbAs(MOVER), 'overflow', 'o1'), { stage: 'rt_transit', rtTransitAt: 1, returnTransportBy: MOVER })
     )
   })
 
@@ -1232,10 +1323,12 @@ describe('return phase — returnOverflow (mover or packer: overflow rt_transit 
     )
   })
 
-  it('returnPhase OFF: denied', async () => {
+  // Continuation transition (rt_transit is only reachable by having already
+  // entered the return leg): allowed regardless of returnPhase.
+  it('returnPhase OFF: still allowed (continuation)', async () => {
     await setReturnPhase(false)
     await seed('overflow', 'o1', baseOverflow({ stage: 'rt_transit' }))
-    await assertFails(updateDoc(doc(dbAs(MOVER), 'overflow', 'o1'), { stage: 'returned' }))
+    await assertSucceeds(updateDoc(doc(dbAs(MOVER), 'overflow', 'o1'), { stage: 'returned' }))
   })
 
   it('wrong role (warehouse), returnPhase on: denied', async () => {
