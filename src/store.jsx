@@ -50,6 +50,18 @@ export function StoreProvider({ children }) {
   const actor = () => ({ uid: currentUser.uid, userName: currentUser.name, role: currentUser.role })
   const ev = (type, action, extra) => addDoc(collection(db, 'events'), makeEvent(actor(), type, action, extra))
 
+  // Stamps who-submitted-it + when onto every media object before it's
+  // persisted, so photo/video attribution is consistent everywhere (Activity
+  // feed, unit timeline, My queue, Overflow) instead of each capture site
+  // stamping (or forgetting to stamp) it separately. Idempotent: a value
+  // already on the object (e.g. media stamped upstream) is preserved.
+  const attributeMedia = (arr = []) => arr.map((m) => ({
+    ...m,
+    uid: m.uid || currentUser.uid,
+    userName: m.userName || currentUser.name,
+    ts: m.ts || Date.now(),
+  }))
+
   async function dispatch({ type, p }) {
     const unit = p.unitId ? state.units.find((u) => u.id === p.unitId) : null
     const cont0 = p.containerId ? state.containers.find((c) => c.id === p.containerId) : null
@@ -68,6 +80,7 @@ export function StoreProvider({ children }) {
         // loads mix beds, dressers, boxes, etc., so a single "box count"
         // never fit; p.media carries the inventory photo (arrayUnion'd onto
         // the unit's media so it shows in the unit's photo record).
+        p.media = attributeMedia(p.media)
         await updateDoc(doc(db, 'units', p.unitId), { stage: 'packed', pieces: p.pieces, 'times.packEnd': Date.now(), media: arrayUnion(...p.media) })
         return ev('stage', `Finished packing unit ${unit.number} — ${p.pieces} pieces inventoried (inventory photo attached)`, { unitId: unit.id, from: 'packing', to: 'packed', media: p.media })
       }
@@ -78,6 +91,7 @@ export function StoreProvider({ children }) {
         return ev('system', `${numbers.length} empty BigBox container${numbers.length === 1 ? '' : 's'} delivered: ${numbers.join(', ')}`)
       }
       case 'loadUnit': {
+        p.media = attributeMedia(p.media)
         const cont = state.containers.find((c) => c.id === p.containerId)
         const mismatch = boxMismatch(unit.pieces, p.pieces)
         const patch = { stage: 'loaded', containerIds: arrayUnion(p.containerId), 'crew.movers': arrayUnion(currentUser.uid) }
@@ -101,7 +115,7 @@ export function StoreProvider({ children }) {
         // and on the swap event so it shows in both the container's custody
         // log and the global activity feed.
         const fulls = p.fullIds.map((id) => state.containers.find((c) => c.id === id)).filter(Boolean)
-        const media = p.media || []
+        const media = attributeMedia(p.media || [])
         await Promise.all(fulls.map(async (c) => {
           const patch = { status: 'picked_up', driverName: p.driverName, pickedUpAt: Date.now(), handoffBy: currentUser.uid }
           if (media.length) patch.media = arrayUnion(...media)
@@ -120,7 +134,7 @@ export function StoreProvider({ children }) {
         const insideUnits = cont0.unitIds.map((id) => state.units.find((u) => u.id === id)).filter(Boolean)
         const expected = insideUnits.reduce((n, u) => n + (u.pieces || 0), 0)
         const mismatch = boxMismatch(expected, p.verifiedPieces)
-        const media = p.media || []
+        const media = attributeMedia(p.media || [])
         const patch = { status: 'at_warehouse', bay: p.bay, verifiedPieces: p.verifiedPieces, receivedBy: currentUser.uid, warehouseAt: Date.now() }
         if (media.length) patch.media = arrayUnion(...media)
         if (mismatch) patch.flag = { message: `Piece count mismatch at warehouse receive: ${p.verifiedPieces} verified vs ${expected} on record. Recount pending.`, ts: Date.now(), by: currentUser.name, open: true }
@@ -148,8 +162,9 @@ export function StoreProvider({ children }) {
       case 'prepOverflow': {
         // Padded, wrapped, labeled: the photo (required by the UI) is the
         // proof of prep and the label. p.media is already uploaded to
-        // Storage by the caller via uploadImage() and carries
-        // uid/userName/ts for per-photo attribution.
+        // Storage by the caller via uploadImage(); attribution is stamped
+        // here so every capture site (not just Overflow) stays consistent.
+        p.media = attributeMedia(p.media)
         await updateDoc(doc(db, 'overflow', p.overflowId), { stage: 'prepped', preppedAt: Date.now(), prepBy: currentUser.uid, media: arrayUnion(...p.media) })
         return ev('media', `Overflow item padded, wrapped & labeled, unit ${over0.unitNumber}: ${over0.description}`, { unitId: over0.unitId, overflowId: over0.id, media: p.media })
       }
@@ -161,7 +176,7 @@ export function StoreProvider({ children }) {
         // Warehouse closes the custody loop: assign a specific per-item
         // location. p.media (optional) is the received-condition photo,
         // already uploaded via uploadImage().
-        const media = p.media || []
+        const media = attributeMedia(p.media || [])
         const patch = { stage: 'at_warehouse', warehouseAt: Date.now(), receivedBy: currentUser.uid, warehouseLocation: p.warehouseLocation }
         if (media.length) patch.media = arrayUnion(...media)
         await updateDoc(doc(db, 'overflow', p.overflowId), patch)
@@ -195,6 +210,7 @@ export function StoreProvider({ children }) {
         return ev('system', `Admin edited unit ${unit.number} details (${changed.join(', ') || 'no changes'})`, { unitId: unit.id })
       }
       case 'addMedia': {
+        p.media = attributeMedia(p.media)
         const n = p.media.length
         const kinds = p.media.some((m) => m.kind === 'video') ? (p.media.every((m) => m.kind === 'video') ? 'video' + (n > 1 ? 's' : '') : 'photos & video') : 'photo' + (n > 1 ? 's' : '')
         return ev('media', `Added ${n} ${kinds}${p.note ? ' — ' + p.note : ''} (unit ${unit.number})`, { unitId: unit.id, media: p.media })
