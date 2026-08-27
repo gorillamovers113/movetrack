@@ -25,11 +25,24 @@ const SORTS = [
   ['mediaSubmitted', 'Photos & video'],
 ]
 
-function Stat({ n, l }) {
+// Two sizes: default matches the shared .kpi .n / .kpi .l look (28px number)
+// used everywhere else a KPI card appears (Dashboard's kpis, this page's own
+// summary row and the per-user detail row). `compact` is for the dense,
+// six-across inline row on each roster line where there's no .kpi ancestor
+// to inherit sizing from, so it keeps its own explicit smaller styles.
+function Stat({ n, l, compact = false }) {
+  if (compact) {
+    return (
+      <div>
+        <div className="n" style={{ fontFamily: 'var(--display)', fontSize: 22, fontWeight: 700, lineHeight: 1.1 }}>{n}</div>
+        <div className="l" style={{ fontSize: 11.5, color: 'var(--ink-3)', fontWeight: 500, marginTop: 2 }}>{l}</div>
+      </div>
+    )
+  }
   return (
     <div>
-      <div className="n" style={{ fontFamily: 'var(--display)', fontSize: 22, fontWeight: 700, lineHeight: 1.1 }}>{n}</div>
-      <div className="l" style={{ fontSize: 11.5, color: 'var(--ink-3)', fontWeight: 500, marginTop: 2 }}>{l}</div>
+      <div className="n">{n}</div>
+      <div className="l">{l}</div>
     </div>
   )
 }
@@ -150,12 +163,12 @@ export default function Reports({ openUnit, openContainer }) {
                       </div>
                     </div>
                     <div className="grow" style={{ display: 'flex', flexWrap: 'wrap', gap: 22, justifyContent: 'flex-end' }}>
-                      <Stat n={r.unitsPackedCount} l="Units packed" />
-                      <Stat n={r.unitsLoadedCount} l="Units loaded" />
-                      <Stat n={r.piecesHandled.toLocaleString()} l="Pieces handled" />
-                      <Stat n={r.mediaSubmitted} l="Photos & video" />
-                      <Stat n={fmtDuration(r.packTimeMs)} l="Packing time" />
-                      <Stat n={r.totalActions} l="Total actions" />
+                      <Stat compact n={r.unitsPackedCount} l="Units packed" />
+                      <Stat compact n={r.unitsLoadedCount} l="Units loaded" />
+                      <Stat compact n={r.piecesHandled.toLocaleString()} l="Pieces handled" />
+                      <Stat compact n={r.mediaSubmitted} l="Photos & video" />
+                      <Stat compact n={fmtDuration(r.packTimeMs)} l="Packing time" />
+                      <Stat compact n={r.totalActions} l="Total actions" />
                     </div>
                     <span className="muted" style={{ fontSize: 16 }}>{isOpen ? '▲' : '▼'}</span>
                   </div>
