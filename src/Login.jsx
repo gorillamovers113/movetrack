@@ -82,9 +82,11 @@ export default function Login() {
   return (
     <div className="login">
       <div className="login-hero">
-        <GorillaWordmark width={280} />
-        <div className="hero-kicker">MoveTrack &middot; project command center</div>
-        <div className="tagline">"When it comes to moving, we don't monkey around!"</div>
+        <div className="hero-brand">
+          <GorillaWordmark width={280} />
+          <div className="hero-kicker">MoveTrack &middot; project command center</div>
+          <div className="tagline">"When it comes to moving, we don't monkey around!"</div>
+        </div>
         <h1>Every unit.<br />Every box.<br /><em>On the record.</em></h1>
         <p>MoveTrack is our project command center for the Trinity Manor relocation — photos, videos, and notes at every handoff, timestamped under the name of the person who did the work.</p>
         <div className="trust-row">
@@ -99,7 +101,7 @@ export default function Login() {
             live board state the way Dashboard now does. */}
         <div className="hero-stats">
           <div><div className="n">100</div><div className="l">Units tracked</div></div>
-          <div><div className="n">40</div><div className="l">Storage containers</div></div>
+          <div><div className="n">200+</div><div className="l">Storage containers</div></div>
           <div><div className="n">100%</div><div className="l">Chain of custody</div></div>
         </div>
       </div>
