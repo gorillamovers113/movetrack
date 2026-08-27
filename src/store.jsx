@@ -434,7 +434,10 @@ export function StoreProvider({ children }) {
         return ev('system', `Removed ${name}'s access`)
       }
       case 'denyUser': {
-        await updateDoc(doc(db, 'users', p.userId), { status: 'removed' })
+        // Marked denied: true (in addition to status: 'removed') so the
+        // access-revoked screen can tell "never had access, request denied"
+        // apart from "had access, admin removed it" and word it accordingly.
+        await updateDoc(doc(db, 'users', p.userId), { status: 'removed', denied: true })
         return ev('system', `Denied ${name}'s request`)
       }
       case 'seedSchedule': {

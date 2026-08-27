@@ -42,13 +42,21 @@ function PendingScreen() {
 }
 
 function RemovedScreen() {
-  const { logout } = useStore()
+  const { currentUser, logout } = useStore()
+  // denyUser sets denied: true so a denied signup request sees copy that
+  // doesn't imply they ever had access, distinct from an admin actually
+  // pulling access with removeUser.
+  const denied = currentUser?.denied === true
   return (
     <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 20 }}>
       <div className="card" style={{ maxWidth: 430, padding: 32, textAlign: 'center' }}>
         <div style={{ fontSize: 40, marginBottom: 10 }}>🚫</div>
-        <h2 style={{ fontFamily: 'var(--display)', marginBottom: 8 }}>Your access has been removed</h2>
-        <p style={{ color: 'var(--ink-2)', marginBottom: 18 }}>An admin removed your access to this project. If you think this is a mistake, reach out to your admin directly.</p>
+        <h2 style={{ fontFamily: 'var(--display)', marginBottom: 8 }}>{denied ? 'Your access request was not approved' : 'Your access has been removed'}</h2>
+        <p style={{ color: 'var(--ink-2)', marginBottom: 18 }}>
+          {denied
+            ? "The admin didn't approve your request to join this project. If you think this is a mistake, reach out to your admin directly."
+            : 'An admin removed your access to this project. If you think this is a mistake, reach out to your admin directly.'}
+        </p>
         <button className="btn btn-ghost" onClick={logout}>← Back to sign in</button>
       </div>
     </div>
