@@ -71,7 +71,13 @@ function actionTypeBreakdown(userEvents) {
 function activeDaySet(userEvents) {
   const days = new Set()
   for (const e of userEvents) {
-    if (typeof e.ts === 'number') days.add(new Date(e.ts).toISOString().slice(0, 10))
+    if (typeof e.ts === 'number') {
+      // Local calendar day, not UTC: an evening (PT) action must not roll into
+      // the next day and overcount active days. Build YYYY-MM-DD from local parts.
+      const d = new Date(e.ts)
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      days.add(key)
+    }
   }
   return days
 }
