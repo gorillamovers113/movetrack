@@ -80,3 +80,21 @@ export function nextReturnOverflowAction(role, stage) {
     default: return null
   }
 }
+
+// Blind container-number check (docs/superpowers/specs/2026-08-26-return-phase-design.md,
+// "Blind container-number check on deliverReturn"). The mover reads the
+// number off the physical container, cold, and types it in; nothing in the
+// UI shows or pre-fills any container numbers, so a genuine misread gets
+// caught instead of silently rubber-stamped. Matches case-insensitively and
+// trims whitespace (a typed "bb-1007 " should still match "BB-1007"), and
+// only counts a hit if the container is also in the expected status, so a
+// container that already moved on (or one still mid-transit for a different
+// leg) can't be accidentally confirmed. Returns the single matching
+// container, or null when nothing qualifies. Pure and general on purpose:
+// this same helper is meant to be reused for the outbound warehouse-receive
+// blind check (a separate task), not just the return-leg deliver step.
+export function matchContainerByNumber(containers, typedNumber, expectedStatus) {
+  const typed = String(typedNumber ?? '').trim().toLowerCase()
+  if (!typed) return null
+  return (containers || []).find((c) => c.status === expectedStatus && String(c.number ?? '').trim().toLowerCase() === typed) || null
+}

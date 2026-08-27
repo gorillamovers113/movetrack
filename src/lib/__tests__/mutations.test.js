@@ -3,6 +3,7 @@ import {
   makeEvent, boxMismatch, nextStage, nextOverflowStage,
   nextReturnStage, nextReturnOverflowStage,
   nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction,
+  matchContainerByNumber,
 } from '../mutations.js'
 
 describe('boxMismatch', () => {
@@ -99,4 +100,40 @@ describe('nextReturnOverflowAction', () => {
     expect(nextReturnOverflowAction('warehouse', 'rt_transit')).toBe(null)
   })
   it('returned (terminal) yields null', () => expect(nextReturnOverflowAction('admin', 'returned')).toBe(null))
+})
+
+describe('matchContainerByNumber', () => {
+  const containers = [
+    { id: 'c1', number: 'BB-1001', status: 'return_transit' },
+    { id: 'c2', number: 'BB-1002', status: 'at_warehouse' },
+    { id: 'c3', number: 'bb-1003', status: 'return_transit' },
+  ]
+
+  it('finds an exact match in the expected status', () => {
+    expect(matchContainerByNumber(containers, 'BB-1001', 'return_transit')).toEqual(containers[0])
+  })
+  it('matches case-insensitively', () => {
+    expect(matchContainerByNumber(containers, 'bb-1001', 'return_transit')).toEqual(containers[0])
+    expect(matchContainerByNumber(containers, 'BB-1003', 'return_transit')).toEqual(containers[2])
+  })
+  it('trims whitespace off the typed number', () => {
+    expect(matchContainerByNumber(containers, '  BB-1001  ', 'return_transit')).toEqual(containers[0])
+  })
+  it('returns null when the number matches but the status does not', () => {
+    expect(matchContainerByNumber(containers, 'BB-1002', 'return_transit')).toBe(null)
+  })
+  it('returns null when no container has that number', () => {
+    expect(matchContainerByNumber(containers, 'BB-9999', 'return_transit')).toBe(null)
+  })
+  it('returns null for an empty or blank typed number', () => {
+    expect(matchContainerByNumber(containers, '', 'return_transit')).toBe(null)
+    expect(matchContainerByNumber(containers, '   ', 'return_transit')).toBe(null)
+    expect(matchContainerByNumber(containers, undefined, 'return_transit')).toBe(null)
+  })
+  it('handles an empty containers array without crashing', () => {
+    expect(matchContainerByNumber([], 'BB-1001', 'return_transit')).toBe(null)
+  })
+  it('handles a missing containers array without crashing', () => {
+    expect(matchContainerByNumber(undefined, 'BB-1001', 'return_transit')).toBe(null)
+  })
 })
