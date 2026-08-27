@@ -136,9 +136,9 @@ img { display: block; max-width: 100%; }
 
 .filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
 .chip {
-  border: 1px solid var(--line); background: var(--panel); border-radius: 99px; padding: 8px 14px;
+  border: 1px solid var(--line); background: var(--panel); border-radius: 99px; padding: 10px 14px;
   font-size: 13px; font-weight: 600; color: var(--ink-2); display: inline-flex; align-items: center; gap: 7px;
-  min-height: 38px; transition: all 0.13s;
+  min-height: 44px; transition: all 0.13s;
 }
 .chip i { width: 8px; height: 8px; border-radius: 99px; display: inline-block; font-style: normal; }
 .chip:hover { border-color: var(--ink-3); }
@@ -169,6 +169,11 @@ img { display: block; max-width: 100%; }
 .btn-danger:hover { background: #fecaca; }
 .btn-danger:active:not(:disabled) { transform: scale(0.98); }
 .btn-sm { padding: 6px 12px; font-size: 13px; border-radius: 8px; min-height: 34px; }
+/* Icon-only small buttons (modal close, row-remove ✕) - .btn-sm alone is
+   only 34px tall, fine for text buttons with side padding but not enough
+   hit area for a lone glyph. Pair with btn-sm on these specific controls;
+   keep the glyph itself small, just grow the tappable box around it. */
+.btn-icon-sm { min-height: 44px; min-width: 44px; padding: 6px 10px; }
 .btn-lg { padding: 13px 22px; font-size: 15px; border-radius: 12px; min-height: 48px; }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
@@ -381,7 +386,7 @@ a.linkish, .linkish { color: #b45309; font-weight: 600; cursor: pointer; text-de
     padding-top: calc(12px + env(safe-area-inset-top));
     position: sticky; top: 0; z-index: 30; box-shadow: 0 1px 0 var(--dark-line);
   }
-  .topbar-mobile button { min-height: 32px; padding: 6px 8px; }
+  .topbar-mobile button { min-height: 40px; padding: 8px 10px; }
   .bottom-nav {
     display: flex; position: fixed; bottom: 0; left: 0; right: 0; z-index: 40;
     background: var(--dark); border-top: 1px solid var(--dark-line);

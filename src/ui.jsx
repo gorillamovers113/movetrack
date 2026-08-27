@@ -39,7 +39,7 @@ export function Modal({ title, sub, onClose, children }) {
       <div className="modal">
         <div className="row" style={{ marginBottom: 4 }}>
           <h3 className="grow">{title}</h3>
-          <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
+          <button className="btn btn-ghost btn-sm btn-icon-sm" onClick={onClose} aria-label="Close">✕</button>
         </div>
         {sub && <p className="sub">{sub}</p>}
         {children}

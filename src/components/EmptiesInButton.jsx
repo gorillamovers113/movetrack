@@ -52,7 +52,7 @@ export default function EmptiesInButton({ toast }) {
                     onChange={(e) => setRow(i, e.target.value)}
                   />
                   {rows.length > 1 && (
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeRow(i)}>✕</button>
+                    <button type="button" className="btn btn-ghost btn-sm btn-icon-sm" onClick={() => removeRow(i)} aria-label="Remove row">✕</button>
                   )}
                 </div>
               ))}
