@@ -13,7 +13,10 @@ export default function Team({ toast }) {
   const [busyIds, setBusyIds] = useState(() => new Set())
   const SAVE_ERROR = "Couldn't save that. Check your signal and try again."
 
-  const ASSIGNABLE = Object.entries(ROLES).filter(([k]) => k !== 'admin')
+  // driver is a legacy role with no action anywhere in canAct/containerAction/
+  // overflowAction: filtered out here so admins can't newly assign a dead
+  // login. Existing driver users, if any, are left untouched.
+  const ASSIGNABLE = Object.entries(ROLES).filter(([k]) => k !== 'admin' && k !== 'driver')
   const pending = state.users.filter((u) => u.status === 'pending')
   const active = state.users.filter((u) => u.status === 'active')
   const actionCount = (uid) => state.events.filter((e) => e.uid === uid).length
