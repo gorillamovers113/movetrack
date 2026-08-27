@@ -267,7 +267,15 @@ export function StoreProvider({ children }) {
         }
         p.media = attributeMedia(p.media)
         const mismatch = boxMismatch(unit.pieces, p.pieces)
-        const patch = { stage: 'return_loaded', containerIds: arrayUnion(p.containerId) }
+        // returnContainerId tracks the unit's CURRENT return container,
+        // separate from containerIds (a permanent arrayUnion of every
+        // container the unit ever rode, outbound included). A unit can
+        // return in a different physical container than it left in, so
+        // dispatchReturn/deliverReturn/unloadReturn key off this field
+        // instead of the container's stale unitIds to decide which units to
+        // promote. Not a rules-guarded identity field, so this write still
+        // passes the transition + identity rules unchanged.
+        const patch = { stage: 'return_loaded', containerIds: arrayUnion(p.containerId), returnContainerId: p.containerId }
         // Same "don't clobber an open flag" guard as loadUnit: an unresolved
         // flag from earlier in the round trip stays intact; the mismatch
         // event is still logged unconditionally below.
@@ -293,14 +301,23 @@ export function StoreProvider({ children }) {
         // all-or-nothing writeBatch as bigboxSwap/warehouseReceive: container
         // + units + new empties + audit event commit together or not at all.
         const media = attributeMedia(p.media || [])
-        const patch = { status: 'return_transit', driverName: p.driverName, dispatchedAt: Date.now(), handoffBy: currentUser.uid }
+        // RETURN-prefixed custody fields (returnHandoffBy/returnDriverName/
+        // returnDispatchedAt) instead of the outbound handoffBy/driverName:
+        // bigboxSwap already wrote those on this same container doc, and
+        // reusing them here would erase the outbound worker's credit. The
+        // events log still keeps full history either way, but the container
+        // summary + Reports read the current field value.
+        const patch = { status: 'return_transit', returnDriverName: p.driverName, returnDispatchedAt: Date.now(), returnHandoffBy: currentUser.uid }
         if (media.length) patch.media = arrayUnion(...media)
         // cont0.unitIds is stale: it still holds every unit ever loaded onto
-        // this physical container, including its outbound trip. Only
-        // promote units actually loaded for THIS return trip (loadForReturn
-        // already flipped them to return_loaded) so a sibling that was
-        // never loaded for return (still at_warehouse) isn't force-promoted.
-        const toDispatch = (cont0.unitIds || []).map((uid) => state.units.find((u) => u.id === uid)).filter((u) => u && u.stage === 'return_loaded')
+        // this physical container, including its outbound trip, and (on the
+        // return leg) any unit currently sitting in a DIFFERENT return
+        // container than this one. Only promote units whose returnContainerId
+        // actually points at THIS container and are still at return_loaded
+        // (loadForReturn already flipped them there), so neither an outbound
+        // cargo-mate nor a unit riding a different return box gets
+        // force-promoted.
+        const toDispatch = state.units.filter((u) => u.returnContainerId === cont0.id && u.stage === 'return_loaded')
         const batch = writeBatch(db)
         batch.update(doc(db, 'containers', p.containerId), patch)
         for (const u of toDispatch) batch.update(doc(db, 'units', u.id), { stage: 'return_transit' })
@@ -320,12 +337,16 @@ export function StoreProvider({ children }) {
         // verification happens per-unit at unloadReturn, not here. Same
         // all-or-nothing writeBatch as the other three multi-doc actions.
         const media = attributeMedia(p.media || [])
-        const patch = { status: 'back_on_site', receivedBy: currentUser.uid, backOnSiteAt: Date.now() }
+        // RETURN-prefixed custody fields (returnReceivedBy/returnDeliveredAt)
+        // instead of the outbound receivedBy: warehouseReceive already wrote
+        // that on this same container doc, and reusing it here would erase
+        // the warehouse worker's outbound credit.
+        const patch = { status: 'back_on_site', returnReceivedBy: currentUser.uid, returnDeliveredAt: Date.now() }
         if (media.length) patch.media = arrayUnion(...media)
-        // Same staleness guard as dispatchReturn: only promote units that
-        // are actually in transit on this return trip (return_transit), not
-        // every unit ever associated with this container.
-        const toDeliver = (cont0.unitIds || []).map((uid) => state.units.find((u) => u.id === uid)).filter((u) => u && u.stage === 'return_transit')
+        // Same staleness guard as dispatchReturn: only promote units whose
+        // returnContainerId points at THIS container and are still at
+        // return_transit, not every unit ever associated with this container.
+        const toDeliver = state.units.filter((u) => u.returnContainerId === cont0.id && u.stage === 'return_transit')
         const batch = writeBatch(db)
         batch.update(doc(db, 'containers', p.containerId), patch)
         for (const u of toDeliver) batch.update(doc(db, 'units', u.id), { stage: 'back_on_site' })
@@ -341,19 +362,24 @@ export function StoreProvider({ children }) {
         // emptying out, the return-side end of its lifecycle).
         p.media = attributeMedia(p.media)
         const mismatch = boxMismatch(unit.pieces, p.pieces)
-        const patch = { stage: 'unloaded', 'crew.movers': arrayUnion(currentUser.uid) }
+        // Separate crew.unloaders array (not crew.movers, the outbound
+        // "loaded into a BigBox" credit) so Reports doesn't mislabel
+        // return-only work as outbound loading.
+        const patch = { stage: 'unloaded', 'crew.unloaders': arrayUnion(currentUser.uid) }
         // Same "don't clobber an open flag" guard as loadUnit/loadForReturn.
         if (mismatch && !unit.flag?.open) patch.flag = { message: `Piece count mismatch at return unload: ${p.pieces} unloaded vs ${unit.pieces} packed. Recount pending.`, ts: Date.now(), by: currentUser.name, open: true }
         await updateDoc(doc(db, 'units', p.unitId), patch)
-        const cont = state.containers.find((c) => c.status === 'back_on_site' && (c.unitIds || []).includes(p.unitId))
-        if (cont) {
-          // cont.unitIds is stale (still carries the container's outbound
-          // roster too), so "last unit unloaded" can't just mean every id in
-          // that list: a sibling that was never loaded for this return trip
-          // sits at at_warehouse forever and would block returned_empty from
-          // ever firing. Only count siblings that actually entered the
-          // return flow (anything past at_warehouse) toward "last one out".
-          const others = cont.unitIds.filter((id) => id !== p.unitId).map((id) => state.units.find((u) => u.id === id)).filter((u) => u && u.stage !== 'at_warehouse')
+        // cont.unitIds is stale (still carries the container's outbound
+        // roster, and possibly other return trips too), so "last unit
+        // unloaded" can't just mean every id in that list. unit.returnContainerId
+        // is the unit's own record of which return trip it's actually on, so
+        // find the container that way, and count only siblings whose
+        // returnContainerId also points at it toward "last one out": a
+        // former outbound cargo-mate riding a different return box can't
+        // block returned_empty from ever firing.
+        const cont = unit.returnContainerId ? state.containers.find((c) => c.id === unit.returnContainerId) : null
+        if (cont && cont.status === 'back_on_site') {
+          const others = state.units.filter((u) => u.id !== p.unitId && u.returnContainerId === cont.id)
           const allOthersUnloaded = others.every((u) => stageOf(u.stage).step >= stageOf('unloaded').step)
           if (allOthersUnloaded) await updateDoc(doc(db, 'containers', cont.id), { status: 'returned_empty' })
         }
@@ -365,14 +391,21 @@ export function StoreProvider({ children }) {
         // Mirror of finishPacking: unpack in the apartment, photo. Terminal:
         // the unit's full round trip is complete.
         p.media = attributeMedia(p.media)
-        await updateDoc(doc(db, 'units', p.unitId), { stage: 'unpacked', 'crew.packers': arrayUnion(currentUser.uid), media: arrayUnion(...p.media) })
+        // Separate crew.unpackers array (not crew.packers, the outbound
+        // "packed" credit) so Reports doesn't mislabel return-only work as
+        // outbound packing, and doesn't credit an unpacker with the
+        // outbound piece count.
+        await updateDoc(doc(db, 'units', p.unitId), { stage: 'unpacked', 'crew.unpackers': arrayUnion(currentUser.uid), media: arrayUnion(...p.media) })
         return ev('stage', `Unpacked unit ${unit.number}, move complete (photo attached)`, { unitId: unit.id, from: 'unloaded', to: 'unpacked', media: p.media })
       }
       case 'transportOverflowBack': {
         // Mirror of transportOverflow / receiveOverflow combined: Gorilla
         // drives the overflow item from the warehouse back to the building.
         const media = attributeMedia(p.media || [])
-        const patch = { stage: 'rt_transit', rtTransitAt: Date.now(), transportBy: currentUser.uid }
+        // returnTransportBy instead of the outbound transportOverflow's
+        // transportBy, which already recorded who transported this same
+        // item to the warehouse; reusing it here would erase that credit.
+        const patch = { stage: 'rt_transit', rtTransitAt: Date.now(), returnTransportBy: currentUser.uid }
         if (media.length) patch.media = arrayUnion(...media)
         await updateDoc(doc(db, 'overflow', p.overflowId), patch)
         return ev('stage', `Gorilla loaded overflow item for return transport to site, unit ${over0.unitNumber}: ${over0.description}`, { unitId: over0.unitId, overflowId: over0.id, from: 'at_warehouse', to: 'rt_transit', ...(media.length ? { media } : {}) })
@@ -604,15 +637,23 @@ export function fmtAgo(ts) {
 export function canAct(user, unit, returnPhase = false) {
   // Returns the action available to this user on this unit right now, or null.
   // Outbound one-way lifecycle: not_started → packing → packed → loaded → picked_up → at_warehouse.
-  // When returnPhase is on, at_warehouse/back_on_site/unloaded also try the
-  // return-leg mirror first (nextReturnUnitAction); a unit still mid-outbound
-  // (not yet at_warehouse) keeps getting its normal outbound action either
-  // way, so a project can have units on both legs at once. returnPhase
-  // defaults to false so every existing call site (canAct(user, unit)) keeps
-  // behaving exactly like before this feature.
+  // at_warehouse/back_on_site/unloaded also try the return-leg mirror first
+  // (nextReturnUnitAction); a unit still mid-outbound (not yet at_warehouse)
+  // keeps getting its normal outbound action either way, so a project can
+  // have units on both legs at once. returnPhase defaults to false so every
+  // existing call site (canAct(user, unit)) keeps behaving like before this
+  // feature.
+  //
+  // ENTRY vs CONTINUATION: only the transition FROM at_warehouse INTO the
+  // return leg (loadForReturn) requires returnPhase to be on. A unit already
+  // on a return stage (back_on_site, unloaded) is mid-round-trip and keeps
+  // getting its next return action regardless of returnPhase, so an admin
+  // can safely toggle the phase off without stranding in-progress work (see
+  // docs/superpowers/specs/2026-08-27-return-leg-correctness-fixes.md #2).
   if (!user) return null
   const role = user.role
-  if (returnPhase) {
+  const enteringReturnLeg = unit.stage === 'at_warehouse'
+  if (!enteringReturnLeg || returnPhase) {
     const ret = nextReturnUnitAction(role, unit.stage)
     if (ret) return ret
   }
@@ -625,20 +666,25 @@ export function canAct(user, unit, returnPhase = false) {
   }
 }
 
-export function containerAction(user, cont, returnPhase = false) {
+export function containerAction(user, cont, _returnPhase = false) {
   // Container status lifecycle: empty → filling → full → picked_up → at_warehouse.
   // The swap (full → picked_up) and warehouse receive (picked_up → at_warehouse)
   // are batch/dedicated screens, not a single-container quick action, so they
   // return null here rather than a one-tap action, this only covers the
   // simple in-place transition (filling → full). Same story on the return
   // leg: dispatchReturn/deliverReturn are dedicated screens, so only
-  // return_filling gets a quick action here. returnPhase defaults to false
-  // so existing call sites are unaffected.
+  // return_filling gets a quick action here.
+  //
+  // return_filling → return_full (markReturnFull) is a CONTINUATION: the
+  // container only reaches return_filling via loadForReturn, which is
+  // itself the entry point and already gated on returnPhase there (and in
+  // the rules). Once a container is on the return leg, markReturnFull stays
+  // available regardless of returnPhase so an admin toggling the phase off
+  // mid-return can't strand it. returnPhase is accepted for API symmetry
+  // with canAct/overflowAction but isn't needed to gate anything here.
   if (!user) return null
-  if (returnPhase) {
-    const ret = nextReturnContainerAction(user.role, cont.status)
-    if (ret) return ret
-  }
+  const ret = nextReturnContainerAction(user.role, cont.status)
+  if (ret) return ret
   const admin = user.role === 'admin'
   switch (cont.status) {
     case 'filling':
@@ -669,11 +715,15 @@ export function overflowAction(user, item, returnPhase = false) {
   // form): identify/prep/receive all need a bit of input (description,
   // required photo, warehouse location) so they get dedicated forms in
   // Overflow.jsx instead of a quick action here, matching how
-  // containerAction() only covers container's filling → full hop. Same
-  // return-leg mirror pattern as canAct/containerAction; returnPhase
-  // defaults to false so existing call sites are unaffected.
+  // containerAction() only covers container's filling → full hop.
+  //
+  // ENTRY vs CONTINUATION, same rule as canAct: only the transition FROM
+  // at_warehouse INTO the return leg (transportOverflowBack) requires
+  // returnPhase to be on. An item already at rt_transit is mid-round-trip
+  // and keeps getting returnOverflow regardless of returnPhase.
   if (!user) return null
-  if (returnPhase) {
+  const enteringReturnLeg = item.stage === 'at_warehouse'
+  if (!enteringReturnLeg || returnPhase) {
     const ret = nextReturnOverflowAction(user.role, item.stage)
     if (ret) return ret
   }

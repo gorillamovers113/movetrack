@@ -11,8 +11,13 @@ import { matchContainerByNumber } from '../lib/mutations.js'
 // number off the physical container, cold, and types it in here. Nothing
 // on this screen shows or pre-fills any container number, on purpose, so a
 // genuine misread gets caught instead of silently rubber-stamped. Self-gates
-// for mover/admin, and only shows once the return phase is on (return_transit
-// containers only exist then).
+// for mover/admin. deliverReturn (return_transit -> back_on_site) is a
+// CONTINUATION transition, not the entry into the return leg, so this button
+// is NOT gated on returnPhase: hiding it while returnPhase is off would
+// strand any container already dispatched for return
+// (docs/superpowers/specs/2026-08-27-return-leg-correctness-fixes.md #2).
+// With no container ever at return_transit, typing a number here just falls
+// through to the no-match/discrepancy path below, same as always.
 export default function DeliverReturnButton({ toast }) {
   const { state, currentUser, dispatch } = useStore()
   const [open, setOpen] = useState(false)
@@ -28,7 +33,6 @@ export default function DeliverReturnButton({ toast }) {
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview) }, [preview])
 
   if (!currentUser || !['admin', 'mover'].includes(currentUser.role)) return null
-  if (!state.project?.returnPhase) return null
 
   const openModal = () => {
     setTyped(''); setMismatch(false); setBusy(false)
