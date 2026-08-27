@@ -16,6 +16,12 @@
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage'
 import { storage } from '../firebase.js'
 
+// A weak-but-connected link (captive portal, elevator) can leave Firebase
+// Storage retrying internally for minutes before it rejects. Race the upload
+// against this budget so captureMedia falls back to the embedded data URL
+// fast instead of leaving a required-photo step stuck on "Saving...".
+const UPLOAD_TIMEOUT_MS = 8000
+
 const readAsDataURL = (file) => new Promise((resolve, reject) => {
   const r = new FileReader()
   r.onload = () => resolve(r.result)
@@ -92,8 +98,10 @@ export async function captureMedia(file, path) {
   try {
     const blob = await canvasToBlob(canvas)
     const objRef = ref(storage, path)
-    await uploadBytes(objRef, blob)
-    const url = await getDownloadURL(objRef)
+    const url = await Promise.race([
+      (async () => { await uploadBytes(objRef, blob); return getDownloadURL(objRef) })(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Storage upload timed out.')), UPLOAD_TIMEOUT_MS)),
+    ])
     return { url, storage: true }
   } catch {
     return { url: canvas.toDataURL('image/jpeg', 0.82), storage: false }
