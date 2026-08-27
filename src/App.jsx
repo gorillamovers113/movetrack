@@ -6,17 +6,22 @@ import Login from './Login.jsx'
 import Dashboard from './views/Dashboard.jsx'
 import UnitDetail from './views/UnitDetail.jsx'
 import Containers from './views/Containers.jsx'
+import Overflow from './views/Overflow.jsx'
 import Team from './views/Team.jsx'
 import Activity from './views/Activity.jsx'
 import MyWork from './views/MyWork.jsx'
 
+// Packers reach Overflow via the "＋ Report overflow item" button on a unit,
+// so it's left out of their nav to keep it lean (same reasoning as omitting
+// Containers from theirs). Everyone else who touches the overflow lifecycle
+// (or just needs to see it) gets it in the nav.
 const NAV = {
-  admin: [['dashboard', '▦', 'Dashboard'], ['containers', '📦', 'Containers'], ['team', '👥', 'Team'], ['activity', '🕘', 'Activity']],
+  admin: [['dashboard', '▦', 'Dashboard'], ['containers', '📦', 'Containers'], ['overflow', '🛋️', 'Overflow'], ['team', '👥', 'Team'], ['activity', '🕘', 'Activity']],
   packer: [['mywork', '✓', 'My queue'], ['dashboard', '▦', 'Dashboard'], ['activity', '🕘', 'Activity']],
-  mover: [['mywork', '✓', 'My queue'], ['dashboard', '▦', 'Dashboard'], ['containers', '📦', 'Containers'], ['activity', '🕘', 'Activity']],
+  mover: [['mywork', '✓', 'My queue'], ['dashboard', '▦', 'Dashboard'], ['containers', '📦', 'Containers'], ['overflow', '🛋️', 'Overflow'], ['activity', '🕘', 'Activity']],
   driver: [['mywork', '✓', 'My queue'], ['containers', '📦', 'Containers'], ['dashboard', '▦', 'Dashboard'], ['activity', '🕘', 'Activity']],
-  warehouse: [['containers', '📦', 'Containers'], ['dashboard', '▦', 'Dashboard'], ['activity', '🕘', 'Activity']],
-  viewer: [['dashboard', '▦', 'Dashboard'], ['containers', '📦', 'Containers'], ['activity', '🕘', 'Activity']],
+  warehouse: [['containers', '📦', 'Containers'], ['overflow', '🛋️', 'Overflow'], ['dashboard', '▦', 'Dashboard'], ['activity', '🕘', 'Activity']],
+  viewer: [['dashboard', '▦', 'Dashboard'], ['containers', '📦', 'Containers'], ['overflow', '🛋️', 'Overflow'], ['activity', '🕘', 'Activity']],
 }
 
 function PendingScreen() {
@@ -71,6 +76,7 @@ function Shell() {
       case 'dashboard': return <Dashboard openUnit={openUnit} toast={toast} />
       case 'unit': return <UnitDetail unitId={view.unitId} goBack={() => setView(view.back || { name: first })} openContainer={openContainer} toast={toast} />
       case 'containers': return <Containers openUnit={openUnit} focusId={view.focusId} clearFocus={() => setView((v) => ({ ...v, focusId: null }))} toast={toast} />
+      case 'overflow': return <Overflow openUnit={openUnit} focusId={view.focusId} clearFocus={() => setView((v) => ({ ...v, focusId: null }))} toast={toast} />
       case 'team': return <Team toast={toast} />
       case 'activity': return <Activity openUnit={openUnit} openContainer={openContainer} />
       case 'mywork': return <MyWork openUnit={openUnit} openContainer={openContainer} toast={toast} />

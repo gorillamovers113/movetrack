@@ -3,6 +3,7 @@ import { STAGES, stageOf } from '../seed.js'
 import { useStore, canAct, filesToMedia, fmtTime, CONT_STATUS } from '../store.jsx'
 import { Modal, Lightbox, Uploader, EventRow, Avatar, StagePill } from '../ui.jsx'
 import { uploadImage } from '../lib/upload.js'
+import ReportOverflowButton from '../components/ReportOverflowButton.jsx'
 
 const WAIT_HINTS = {
   loaded: 'Waiting on driver: container pickup from site.',
@@ -181,6 +182,9 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
                 if (media.length) { dispatch({ type: 'addMedia', p: { unitId, media } }); toast(`${media.length} file${media.length > 1 ? 's' : ''} added to unit ${unit.number} ✓`) }
               }} />
               <button className="btn btn-ghost" style={{ width: '100%', marginTop: 10 }} onClick={() => { setForm({}); setModal('note') }}>📝 Add a note</button>
+              <div style={{ marginTop: 10 }}>
+                <ReportOverflowButton unitId={unitId} toast={toast} fullWidth />
+              </div>
             </div>
           )}
         </div>
