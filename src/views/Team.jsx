@@ -40,7 +40,7 @@ export default function Team({ toast }) {
       <div className="page-head">
         <div>
           <h1>Team</h1>
-          <p>Everyone with access — every action is logged under their name. Records are permanent; only the admin can amend anything.</p>
+          <p>Everyone with access. Every action is logged under their name. Records are permanent; only the admin can amend anything.</p>
         </div>
       </div>
 
@@ -114,7 +114,7 @@ export default function Team({ toast }) {
       </div>
 
       {approving && (
-        <Modal title={`Approve ${approving.name}`} sub="Pick the role — it controls exactly what they can see and do." onClose={() => { if (!busy) setApproving(null) }}>
+        <Modal title={`Approve ${approving.name}`} sub="Pick the role: it controls exactly what they can see and do." onClose={() => { if (!busy) setApproving(null) }}>
           <div className="field">
             <label>Role</label>
             <select className="input" value={role} onChange={(e) => setRole(e.target.value)}>

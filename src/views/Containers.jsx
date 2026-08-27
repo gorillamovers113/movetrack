@@ -8,7 +8,7 @@ import BigBoxSwapButton from '../components/BigBoxSwapButton.jsx'
 import DeliverReturnButton from '../components/DeliverReturnButton.jsx'
 import ReceiveContainerButton from '../components/ReceiveContainerButton.jsx'
 
-// Lifecycle order the pool view groups by — matches CONT_STATUS in store.jsx:
+// Lifecycle order the pool view groups by, matches CONT_STATUS in store.jsx:
 // empty (on site) → filling → full/ready → picked_up (in transit) → at_warehouse,
 // then the return leg's mirror: return_filling → return_full → return_transit
 // → back_on_site → returned_empty. The return statuses only ever have
@@ -122,7 +122,7 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
       <div className="page-head">
         <div>
           <h1>Containers</h1>
-          <p>{totalCount} on the board — chain of custody for every BigBox container</p>
+          <p>{totalCount} on the board, chain of custody for every BigBox container</p>
         </div>
         {(isMover || isWarehouse) && (
           <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
@@ -165,8 +165,8 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
                   </div>
                   <div className="cont-units">
                     {units.length > 0
-                      ? units.map((u) => `Unit ${u.number} — ${u.tenant || '—'}`).join(' · ')
-                      : (status === 'empty' ? 'Empty — nothing loaded yet' : '—')}
+                      ? units.map((u) => `Unit ${u.number} · ${u.tenant || '-'}`).join(' · ')
+                      : (status === 'empty' ? 'Empty, nothing loaded yet' : '-')}
                   </div>
                   {quickAction && (
                     <button
@@ -202,7 +202,7 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
             return (
               <div className="row" key={id} style={{ padding: '7px 0', borderBottom: '1px solid var(--line)' }}>
                 <span className="linkish" onClick={() => { close(); openUnit(id) }}>Unit {u.number}</span>
-                <span className="muted grow">{u.tenant || '—'} · {u.pieces ?? '?'} pieces</span>
+                <span className="muted grow">{u.tenant || '-'} · {u.pieces ?? '?'} pieces</span>
                 <StagePill stage={u.stage} short />
               </div>
             )
@@ -210,7 +210,7 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
 
           {open.flag && (
             <div className={`flagbox ${open.flag.open ? '' : 'closed'}`}>
-              <b>{open.flag.open ? '⚑ Open flag' : '✓ Resolved flag'}</b> — {open.flag.message}
+              <b>{open.flag.open ? '⚑ Open flag' : '✓ Resolved flag'}</b>: {open.flag.message}
               {open.flag.open && currentUser?.role === 'admin' && (
                 <div style={{ marginTop: 10 }}>
                   <input className="input" placeholder="How was it resolved?" value={resolveNote} onChange={(e) => setResolveNote(e.target.value)} />
@@ -234,7 +234,7 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
           {open.status === 'filling' && isMover && (
             <div style={{ marginTop: 16 }}>
               <button className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={busyIds.has(open.id)} onClick={async () => { if (await markFull(open)) close() }}>
-                {busyIds.has(open.id) ? 'Saving…' : 'Full — ready for pickup'}
+                {busyIds.has(open.id) ? 'Saving…' : 'Full, ready for pickup'}
               </button>
             </div>
           )}

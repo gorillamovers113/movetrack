@@ -29,7 +29,7 @@ export default function BuildingView({ selected, onSelect }) {
   const floorsBottom = TOP + floors.length * FLOOR_H // 488
 
   return (
-    <svg viewBox="0 0 360 540" width="100%" role="img" aria-label="Trinity Manor — live progress by floor">
+    <svg viewBox="0 0 360 540" width="100%" role="img" aria-label="Trinity Manor: live progress by floor">
       <text x="200" y="66" textAnchor="middle" fontSize="9.5" letterSpacing="3.5" fill="#8a93a2" fontWeight="600">TRINITY MANOR</text>
 
       {/* terracotta stair tower */}
@@ -70,7 +70,7 @@ export default function BuildingView({ selected, onSelect }) {
                     rx="1.5"
                     fill={stageOf(u.stage).color}
                   >
-                    <title>{`Unit ${u.number} — ${u.tenant || 'no tenant on file'} — ${stageOf(u.stage).label}`}</title>
+                    <title>{`Unit ${u.number} · ${u.tenant || 'no tenant on file'} · ${stageOf(u.stage).label}`}</title>
                   </rect>
                 )
               }
@@ -92,7 +92,7 @@ export default function BuildingView({ selected, onSelect }) {
               style={{ cursor: 'pointer' }}
               onClick={() => onSelect(fl.f)}
             >
-              <title>{`Floor ${fl.f} — tap to focus`}</title>
+              <title>{`Floor ${fl.f}: tap to focus`}</title>
             </rect>
           </g>
         )

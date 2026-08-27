@@ -1,7 +1,7 @@
 {
   "name": "MoveTrack",
   "short_name": "MoveTrack",
-  "description": "Gorilla Movers relocation tracker — packing, loading, and pickup, live across the crew.",
+  "description": "Gorilla Movers relocation tracker: packing, loading, and pickup, live across the crew.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

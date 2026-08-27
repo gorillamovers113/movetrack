@@ -6,7 +6,7 @@ import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 const FLOORS = Array.from({ length: 9 }, (_, i) => i + 1)
 
 // Shared "＋ New unit" trigger + form, dropped into both the admin Dashboard
-// and the packer's My queue — the only two landing views for roles that can
+// and the packer's My queue, the only two landing views for roles that can
 // create units. Self-hides for any other role, so callers don't need to gate.
 export default function NewUnitButton({ toast }) {
   const { currentUser, dispatch } = useStore()
@@ -43,7 +43,7 @@ export default function NewUnitButton({ toast }) {
     <>
       <button className="btn btn-primary" onClick={openModal}>＋ New unit</button>
       {open && (
-        <Modal title="Add a new unit" sub="Starts at Not started — a packer or admin can begin packing right away." onClose={close}>
+        <Modal title="Add a new unit" sub="Starts at Not started, a packer or admin can begin packing right away." onClose={close}>
           <div className="field">
             <label>Unit number</label>
             <input className="input" autoFocus placeholder="e.g. 5B" value={form.number} onChange={(e) => setForm({ ...form, number: e.target.value })} />

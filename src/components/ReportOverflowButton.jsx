@@ -49,7 +49,7 @@ export default function ReportOverflowButton({ unitId, toast, fullWidth = false 
         >
           {unitId ? (
             <div className="field"><label>Unit</label>
-              <div className="muted">Unit {unit ? unit.number : '—'}{unit?.tenant ? ` · ${unit.tenant}` : ''}</div>
+              <div className="muted">Unit {unit ? unit.number : '-'}{unit?.tenant ? ` · ${unit.tenant}` : ''}</div>
             </div>
           ) : (
             <div className="field">
@@ -59,7 +59,7 @@ export default function ReportOverflowButton({ unitId, toast, fullWidth = false 
               ) : (
                 <select className="input" autoFocus value={pickUnitId} onChange={(e) => setPickUnitId(e.target.value)}>
                   <option value="">Select unit…</option>
-                  {state.units.map((u) => <option key={u.id} value={u.id}>Unit {u.number} · {u.tenant || '—'}</option>)}
+                  {state.units.map((u) => <option key={u.id} value={u.id}>Unit {u.number} · {u.tenant || '-'}</option>)}
                 </select>
               )}
             </div>

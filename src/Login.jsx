@@ -19,7 +19,7 @@ function friendlyError(code) {
     case 'auth/too-many-requests':
       return 'Too many attempts. Wait a bit and try again.'
     case 'auth/network-request-failed':
-      return 'Network error — check your connection and try again.'
+      return 'Network error, check your connection and try again.'
     default:
       return 'Something went wrong. Try again.'
   }
@@ -88,7 +88,7 @@ export default function Login() {
           <div className="tagline">"When it comes to moving, we don't monkey around!"</div>
         </div>
         <h1>Every unit.<br />Every box.<br /><em>On the record.</em></h1>
-        <p>MoveTrack is our project command center for the Trinity Manor relocation — photos, videos, and notes at every handoff, timestamped under the name of the person who did the work.</p>
+        <p>MoveTrack is our project command center for the Trinity Manor relocation: photos, videos, and notes at every handoff, timestamped under the name of the person who did the work.</p>
         <div className="trust-row">
           <span>✓ Licensed &amp; insured</span>
           <span>✓ BBB accredited</span>
@@ -96,7 +96,7 @@ export default function Login() {
           <span>✓ Full chain of custody</span>
         </div>
         {/* I6: these are static marketing facts about the Trinity Manor building
-            (its real unit/container counts), not a live KPI — Login renders
+            (its real unit/container counts), not a live KPI, Login renders
             pre-auth, before Firestore reads are allowed, so it can't reflect
             live board state the way Dashboard now does. */}
         <div className="hero-stats">

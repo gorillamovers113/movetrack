@@ -8,7 +8,7 @@ import ReportOverflowButton from '../components/ReportOverflowButton.jsx'
 
 const WAIT_HINTS = {
   loaded: 'Waiting on driver: container pickup from site.',
-  picked_up: 'On the truck — driver will check it into the warehouse.',
+  picked_up: 'On the truck, driver will check it into the warehouse.',
   at_warehouse: 'Safely stored in the warehouse. Full history preserved below.',
   return_loaded: 'Waiting on the warehouse to dispatch the return container back to site.',
   return_transit: 'On the truck, heading back to the building.',
@@ -69,7 +69,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
   const canContribute = currentUser && currentUser.role !== 'viewer'
   const stage = stageOf(unit.stage)
   const conts = (unit.containerIds || []).map((id) => state.containers.find((c) => c.id === id)).filter(Boolean)
-  // On-site containers still available to load into — mover picks from
+  // On-site containers still available to load into, mover picks from
   // this list instead of typing a container number.
   const loadableContainers = state.containers.filter((c) => c.status === 'empty' || c.status === 'filling')
   // Return-leg mirror: return containers still open to load a unit back into
@@ -90,14 +90,14 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
     const media = pending
     const needsPhoto = ['loadUnit', 'loadForReturn', 'unloadReturn', 'unpackUnit'].includes(action.key)
     if (needsPhoto && !media.some((m) => m.kind === 'photo')) {
-      return alert('At least one photo is required to complete this step — the photo record is the whole point.')
+      return alert('At least one photo is required to complete this step, the photo record is the whole point.')
     }
     // Client-side validation up front, same as before: nothing here talks to
     // Firestore, so it stays outside the busy/try below.
     const n = parseInt(form.pieces)
     if (action.key === 'finishPacking') {
       if (!n || n < 1) return alert('Enter the total pieces packed.')
-      if (invUploading) return alert('Still uploading the inventory sheet photo — wait a moment and try again.')
+      if (invUploading) return alert('Still uploading the inventory sheet photo, wait a moment and try again.')
       if (!invUrl) return alert('Take a photo of the paper inventory sheet to finish packing.')
     }
     if (action.key === 'loadUnit') {
@@ -172,7 +172,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
             <h1>Unit {unit.number}</h1>
             <StagePill stage={unit.stage} />
           </div>
-          <p>{unit.tenant || '—'} · Floor {unit.floor}{unit.pieces ? ` · ${unit.pieces} pieces` : ''}</p>
+          <p>{unit.tenant || '-'} · Floor {unit.floor}{unit.pieces ? ` · ${unit.pieces} pieces` : ''}</p>
         </div>
         <div className="row">
           {action && <button className="btn btn-primary btn-lg" onClick={openAction}>{action.label}</button>}
@@ -194,7 +194,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
       <div className="detail-grid">
         <div>
           <div className="card" style={{ padding: '6px 20px' }}>
-            <div className="section-title" style={{ marginTop: 14 }}>Activity — who, what, when</div>
+            <div className="section-title" style={{ marginTop: 14 }}>Activity: who, what, when</div>
             <div className="timeline">
               {events.length === 0 && <div className="empty"><div className="big">🗂️</div>No activity yet. It starts when a packer opens this unit.</div>}
               {events.map((e) => <EventRow key={e.id} e={e} onOpenMedia={setLightbox} showTarget={false} />)}
@@ -211,25 +211,25 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
               )}
             </div>
             <dl className="info-rows">
-              <dt>Tenant</dt><dd>{unit.tenant || '—'}</dd>
+              <dt>Tenant</dt><dd>{unit.tenant || '-'}</dd>
               <dt>Phone</dt><dd>{unit.phone}</dd>
               <dt>Floor</dt><dd>{unit.floor}</dd>
-              <dt>Pieces packed</dt><dd>{unit.pieces ?? '—'}</dd>
+              <dt>Pieces packed</dt><dd>{unit.pieces ?? '-'}</dd>
               <dt>Container</dt>
               <dd>
-                {conts.length === 0 && '—'}
+                {conts.length === 0 && '-'}
                 {conts.map((c) => (
                   <span key={c.id} className="linkish" onClick={() => openContainer(c.id)} style={{ marginRight: 10 }}>{c.number}{c.bay ? ` (${c.bay})` : ''}</span>
                 ))}
               </dd>
-              <dt>Packer</dt><dd>{crewNames(unit.crew?.packers) || '—'}</dd>
-              <dt>Mover</dt><dd>{crewNames(unit.crew?.movers) || '—'}</dd>
+              <dt>Packer</dt><dd>{crewNames(unit.crew?.packers) || '-'}</dd>
+              <dt>Mover</dt><dd>{crewNames(unit.crew?.movers) || '-'}</dd>
             </dl>
             {unit.note && <div style={{ marginTop: 10, fontSize: 13.5, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '9px 12px' }}>⚠️ {unit.note}</div>}
 
             {unit.flag && (
               <div className={`flagbox ${unit.flag.open ? '' : 'closed'}`}>
-                <b>{unit.flag.open ? '⚑ Open flag' : '✓ Resolved flag'}</b> — {unit.flag.message}
+                <b>{unit.flag.open ? '⚑ Open flag' : '✓ Resolved flag'}</b>: {unit.flag.message}
                 <div className="muted" style={{ marginTop: 4 }}>Raised by {unit.flag.by} · {fmtTime(unit.flag.ts)}</div>
                 {unit.flag.open && currentUser.role === 'admin' && (
                   <button className="btn btn-dark btn-sm" style={{ marginTop: 10 }} onClick={() => { setForm({}); setModal('resolve') }}>Resolve flag</button>
@@ -262,13 +262,13 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
       </div>
 
       {modal === 'action' && action && (
-        <Modal title={action.label} sub={`Unit ${unit.number} · ${unit.tenant} — logged as ${currentUser.name}, ${fmtTime(Date.now())}`} onClose={() => { if (!busy) closeActionModal() }}>
+        <Modal title={action.label} sub={`Unit ${unit.number} · ${unit.tenant}, logged as ${currentUser.name}, ${fmtTime(Date.now())}`} onClose={() => { if (!busy) closeActionModal() }}>
           {action.key === 'finishPacking' && (
             <>
               <div className="field"><label>Total pieces packed</label>
                 <input className="input" type="number" min="1" inputMode="numeric" autoFocus placeholder="e.g. 42" value={form.pieces || ''} onChange={(e) => setForm({ ...form, pieces: e.target.value })} /></div>
               <div className="field">
-                <label>Photo of the paper inventory sheet — required</label>
+                <label>Photo of the paper inventory sheet (required)</label>
                 <label className="dropzone camera-capture" style={{ display: 'block' }}>
                   <input
                     type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
@@ -292,7 +292,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
                 <label>Load into which container?</label>
                 {loadableContainers.length === 0 ? (
                   <div className="empty" style={{ padding: '22px 10px' }}>
-                    <div className="big">📦</div>No containers on site yet — log empties in from the Containers page first.
+                    <div className="big">📦</div>No containers on site yet, log empties in from the Containers page first.
                   </div>
                 ) : (
                   <div className="pick-list">
@@ -346,17 +346,17 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
           )}
           {action.key !== 'startPacking' && action.key !== 'finishPacking' && (
             <div className="field">
-              <label>Photos required — video encouraged</label>
+              <label>Photos required, video encouraged</label>
               <Uploader onFiles={async (files) => setPending([...pending, ...(await filesToMedia(files))])} />
               {pending.length > 0 && <div className="muted" style={{ marginTop: 6 }}>{pending.length} file{pending.length > 1 ? 's' : ''} attached</div>}
             </div>
           )}
-          <button className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={busy || (action.key === 'finishPacking' && invUploading)} onClick={submitAction}>{busy ? 'Saving…' : `Confirm — ${action.label}`}</button>
+          <button className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={busy || (action.key === 'finishPacking' && invUploading)} onClick={submitAction}>{busy ? 'Saving…' : `Confirm: ${action.label}`}</button>
         </Modal>
       )}
 
       {modal === 'note' && (
-        <Modal title="Add a note" sub={`Unit ${unit.number} — logged as ${currentUser.name} with date & time`} onClose={() => { if (!busy) setModal(null) }}>
+        <Modal title="Add a note" sub={`Unit ${unit.number}, logged as ${currentUser.name} with date & time`} onClose={() => { if (!busy) setModal(null) }}>
           <div className="field">
             <textarea className="input" rows="4" autoFocus placeholder="e.g. Tenant asked us to keep the bikes accessible…" value={form.text || ''} onChange={(e) => setForm({ ...form, text: e.target.value })} />
           </div>
@@ -375,13 +375,13 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
       )}
 
       {modal === 'edit' && (
-        <Modal title={`Edit unit ${unit.number}`} sub="Admin only — the change itself gets logged in the activity record." onClose={() => { if (!busy) setModal(null) }}>
+        <Modal title={`Edit unit ${unit.number}`} sub="Admin only, the change itself gets logged in the activity record." onClose={() => { if (!busy) setModal(null) }}>
           <div className="field"><label>Tenant name</label>
             <input className="input" value={form.tenant || ''} onChange={(e) => setForm({ ...form, tenant: e.target.value })} /></div>
           <div className="field"><label>Phone</label>
             <input className="input" value={form.phone || ''} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></div>
           <div className="field"><label>Special notes</label>
-            <textarea className="input" rows="2" value={form.note || ''} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="e.g. Piano — needs 4-person crew" /></div>
+            <textarea className="input" rows="2" value={form.note || ''} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="e.g. Piano, needs 4-person crew" /></div>
           <button className="btn btn-primary" style={{ width: '100%' }} disabled={busy || !(form.tenant || '').trim()} onClick={async () => {
             setBusy(true)
             try {
@@ -399,7 +399,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
       {modal === 'resolve' && (
         <Modal title="Resolve flag" sub={unit.flag?.message} onClose={() => { if (!busy) setModal(null) }}>
           <div className="field"><label>How was it resolved?</label>
-            <textarea className="input" rows="3" autoFocus value={form.text || ''} onChange={(e) => setForm({ ...form, text: e.target.value })} placeholder="e.g. Recounted at warehouse — all 18 pieces present." /></div>
+            <textarea className="input" rows="3" autoFocus value={form.text || ''} onChange={(e) => setForm({ ...form, text: e.target.value })} placeholder="e.g. Recounted at warehouse, all 18 pieces present." /></div>
           <button className="btn btn-primary" style={{ width: '100%' }} disabled={busy || !form.text?.trim()} onClick={async () => {
             setBusy(true)
             try {

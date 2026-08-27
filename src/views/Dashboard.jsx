@@ -120,7 +120,7 @@ export default function Dashboard({ openUnit, toast }) {
   }
 
   // C1 fix: skip floors with zero units (day 1, an empty board has all nine
-  // floors empty) — an empty array would otherwise crash the `units[0].floor`
+  // floors empty), an empty array would otherwise crash the `units[0].floor`
   // read below. Track the floor number alongside its units instead.
   const floors = []
   for (let f = 9; f >= 1; f--) {
@@ -134,7 +134,7 @@ export default function Dashboard({ openUnit, toast }) {
       <div className="page-head">
         <div>
           <h1>{state.project?.name || 'Trinity Manor'}</h1>
-          <p>{state.project?.address || '3940 Park Blvd'}{state.units.length > 0 ? ` — ${state.units.length}-unit relocation` : ''} — live status</p>
+          <p>{state.project?.address || '3940 Park Blvd'}{state.units.length > 0 ? ` · ${state.units.length}-unit relocation` : ''} · live status</p>
         </div>
         <div className="row">
           <input className="search" placeholder="Search unit, tenant, container…" value={q} onChange={(e) => setQ(e.target.value)} />
@@ -164,7 +164,7 @@ export default function Dashboard({ openUnit, toast }) {
 
       <div className="dash-cols">
         <div className="card" style={{ padding: '14px 14px 8px' }}>
-          <div className="section-title" style={{ margin: '2px 6px 0' }}>The building — tap a floor</div>
+          <div className="section-title" style={{ margin: '2px 6px 0' }}>The building: tap a floor</div>
           <BuildingView selected={floorSel} onSelect={(f) => setFloorSel(floorSel === f ? null : f)} />
         </div>
 
@@ -203,7 +203,7 @@ export default function Dashboard({ openUnit, toast }) {
                 <div className="unit-tiles">
                   {units.map((u) => {
                     const on = match(u)
-                    // C2 fix: unit.tenant is guarded — a hand-created unit doc
+                    // C2 fix: unit.tenant is guarded, a hand-created unit doc
                     // may not have it yet (see the field-naming note in seed.js).
                     const tenant = u.tenant || ''
                     return (
@@ -211,10 +211,10 @@ export default function Dashboard({ openUnit, toast }) {
                         key={u.id} className={`tile ${on ? '' : 'dim'}`}
                         style={{ background: stageOf(u.stage).color }}
                         onClick={() => openUnit(u.id)}
-                        title={`Unit ${u.number} — ${tenant || 'no tenant on file'} — ${stageOf(u.stage).label}`}
+                        title={`Unit ${u.number} · ${tenant || 'no tenant on file'} · ${stageOf(u.stage).label}`}
                       >
                         {u.number}
-                        <small>{tenant.split(' ')[1] || tenant || '—'}</small>
+                        <small>{tenant.split(' ')[1] || tenant || '-'}</small>
                         {u.flag?.open && <span className="flagdot" />}
                       </button>
                     )

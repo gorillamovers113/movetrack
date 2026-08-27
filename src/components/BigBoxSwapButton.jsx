@@ -4,11 +4,11 @@ import { Modal } from '../ui.jsx'
 import { captureMedia } from '../lib/upload.js'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 
-// "BigBox swap" — the driver hands off full containers and drops new empties,
+// "BigBox swap": the driver hands off full containers and drops new empties,
 // but never touches the app. The on-site mover is the custody witness: pick
 // which full containers are going out, record the driver's name/truck,
 // photograph the loaded containers, and log any new empties dropped in the
-// same trip. One screen, big tap targets — self-gates for mover/admin.
+// same trip. One screen, big tap targets, self-gates for mover/admin.
 export default function BigBoxSwapButton({ toast }) {
   const { state, currentUser, dispatch } = useStore()
   const [open, setOpen] = useState(false)
@@ -73,7 +73,7 @@ export default function BigBoxSwapButton({ toast }) {
     <>
       <button className="btn btn-primary btn-lg" onClick={openModal}>🔄 BigBox swap</button>
       {open && (
-        <Modal title="BigBox swap" sub="The driver never opens the app — you're the custody witness for this hand-off." onClose={close}>
+        <Modal title="BigBox swap" sub="The driver never opens the app, you're the custody witness for this hand-off." onClose={close}>
           <div className="field">
             <label>Full containers going out</label>
             {fulls.length === 0 ? (
@@ -98,7 +98,7 @@ export default function BigBoxSwapButton({ toast }) {
             <input className="input" autoFocus placeholder="e.g. Mike, Truck 12" value={driverName} onChange={(e) => setDriverName(e.target.value)} /></div>
 
           <div className="field">
-            <label>Photo of the loaded container(s) — required</label>
+            <label>Photo of the loaded container(s) (required)</label>
             <label className="dropzone camera-capture" style={{ display: 'block' }}>
               <input
                 type="file" accept="image/*" capture="environment" style={{ display: 'none' }}

@@ -24,7 +24,7 @@ export default function Activity({ openUnit, openContainer }) {
       <div className="page-head">
         <div>
           <h1>Activity log</h1>
-          <p>{state.events.length.toLocaleString()} actions on record — every one stamped with name, date & time</p>
+          <p>{state.events.length.toLocaleString()} actions on record, every one stamped with name, date & time</p>
         </div>
         <button className="btn btn-dark" onClick={() => exportActivityCSV(filtered, state.units, state.containers)}>⬇ Export CSV</button>
       </div>

@@ -52,7 +52,7 @@ export default function MyWork({ openUnit, openContainer, toast }) {
               <span className="cont-num grow">Unit {u.number}</span>
               <StagePill stage={u.stage} short />
             </div>
-            <div className="cont-units">{u.tenant || '—'} · Floor {u.floor}{u.pieces ? ` · ${u.pieces} pieces` : ''}</div>
+            <div className="cont-units">{u.tenant || '-'} · Floor {u.floor}{u.pieces ? ` · ${u.pieces} pieces` : ''}</div>
             {u.note && <div className="muted" style={{ marginTop: 4 }}>⚠️ {u.note}</div>}
             <button className="btn btn-primary btn-sm" style={{ marginTop: 10, width: '100%' }}>{canAct(currentUser, u, returnPhase).label} →</button>
           </div>
@@ -68,7 +68,7 @@ export default function MyWork({ openUnit, openContainer, toast }) {
         <NewUnitButton toast={toast} />
       </div>
       {mine.length === 0 && <div className="card empty"><div className="big">☕</div>Nothing waiting on you right now. Nice work.</div>}
-      <Section title="In progress — finish these" units={inProgress} />
+      <Section title="In progress: finish these" units={inProgress} />
       <Section title="Ready to start" units={ready} />
       {myRecent.length > 0 && (
         <>
@@ -76,7 +76,7 @@ export default function MyWork({ openUnit, openContainer, toast }) {
           <div className="card" style={{ padding: '10px 18px' }}>
             {myRecent.map((e) => (
               <div key={e.id} className="muted" style={{ padding: '6px 0', fontSize: 13.5 }}>
-                {e.action} — <b>{new Date(e.ts).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</b>
+                {e.action} · <b>{new Date(e.ts).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</b>
               </div>
             ))}
           </div>

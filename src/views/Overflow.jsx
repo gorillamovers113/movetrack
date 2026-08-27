@@ -217,7 +217,7 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
                     </span>
                   </div>
                   <div className="cont-units">
-                    {item.unitTenant || '—'} · Floor {item.floor}<br />{item.description}
+                    {item.unitTenant || '-'} · Floor {item.floor}<br />{item.description}
                     {stage === 'at_warehouse' && item.warehouseLocation ? <><br />📍 {item.warehouseLocation}</> : null}
                   </div>
                   {stage === 'identified' && isMover && (
@@ -255,7 +255,7 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
       {open && (
         <Modal
           title={`Overflow item · Unit ${open.unitNumber}`}
-          sub={`${OVERFLOW_STATUS[open.stage]?.label || open.stage} · ${open.unitTenant || '—'} · Floor ${open.floor}`}
+          sub={`${OVERFLOW_STATUS[open.stage]?.label || open.stage} · ${open.unitTenant || '-'} · Floor ${open.floor}`}
           onClose={() => { if (!busy) close() }}
         >
           <div className="field"><label>Description</label><div>{open.description}</div></div>
