@@ -1,20 +1,26 @@
 import React, { useMemo, useState } from 'react'
 import { useStore } from '../store.jsx'
 import { Modal } from '../ui.jsx'
-import { fmtScheduleDate, todayKey, progressForDay, targetStageForWork } from '../lib/schedule.js'
+import { fmtScheduleDate, todayKey, progressForDay, targetStageForWork, scheduleForPhase, DEFAULT_RETURN_SCHEDULE } from '../lib/schedule.js'
+import ReturnPhaseToggle from '../components/ReturnPhaseToggle.jsx'
 
 const FLOORS = Array.from({ length: 9 }, (_, i) => i + 1)
-const WORK_TYPES = ['PACK', 'MOVEOUT']
 
 function WorkPill({ work }) {
-  const isMoveout = work === 'MOVEOUT'
-  return <span className="stage-pill" style={{ background: isMoveout ? '#8b5cf6' : '#0d9488' }}>{isMoveout ? 'MOVE-OUT' : 'PACK'}</span>
+  const color = work === 'MOVEOUT' ? '#8b5cf6' : work === 'RETURN' ? '#0ea5e9' : '#0d9488'
+  const label = work === 'MOVEOUT' ? 'MOVE-OUT' : work === 'RETURN' ? 'RETURN' : 'PACK'
+  return <span className="stage-pill" style={{ background: color }}>{label}</span>
 }
 
 // Admin-only per-row editor. Doc id = date, so a date change is a move
-// (handled inside the editScheduleDay dispatch action, not here).
+// (handled inside the editScheduleDay dispatch action, not here). Return
+// days only ever edit within the RETURN work type (the return plan has no
+// separate pack/move-out split, see DEFAULT_RETURN_SCHEDULE's comment), so
+// the work-type dropdown is scoped to the day's own phase rather than
+// letting an admin accidentally set an outbound work type on a return day.
 function DayEditModal({ day, onClose, toast }) {
   const { dispatch } = useStore()
+  const workTypes = day.phase === 'return' ? ['RETURN'] : ['PACK', 'MOVEOUT']
   const [form, setForm] = useState({ date: day.date, work: day.work, floor: String(day.floor), unitCount: String(day.unitCount) })
   const [busy, setBusy] = useState(false)
 
@@ -45,7 +51,7 @@ function DayEditModal({ day, onClose, toast }) {
       <div className="field">
         <label>Work</label>
         <select className="input" value={form.work} onChange={(e) => setForm({ ...form, work: e.target.value })}>
-          {WORK_TYPES.map((w) => <option key={w} value={w}>{w === 'MOVEOUT' ? 'MOVE-OUT' : 'PACK'}</option>)}
+          {workTypes.map((w) => <option key={w} value={w}>{w === 'MOVEOUT' ? 'MOVE-OUT' : w}</option>)}
         </select>
       </div>
       <div className="field">
@@ -69,28 +75,40 @@ export default function Schedule({ toast }) {
   const { state, currentUser, dispatch } = useStore()
   const [editing, setEditing] = useState(null)
   const [busy, setBusy] = useState(false)
+  // Outbound / Return toggle (spec section 7). Defaults to whichever leg the
+  // project is actually on, so an admin landing here mid-return doesn't have
+  // to remember to flip the tab; still switchable either way regardless.
+  const [phase, setPhase] = useState(state.project?.returnPhase ? 'return' : 'out')
   const isAdmin = currentUser?.role === 'admin'
   const key = todayKey()
 
+  const phaseSchedule = useMemo(() => scheduleForPhase(state.schedule, phase), [state.schedule, phase])
+
   const byFloor = useMemo(() => {
     const groups = {}
-    for (const day of state.schedule) {
+    for (const day of phaseSchedule) {
       if (!groups[day.floor]) groups[day.floor] = []
       groups[day.floor].push(day)
     }
     for (const f of Object.keys(groups)) groups[f].sort((a, b) => a.date.localeCompare(b.date))
     return groups
-  }, [state.schedule])
+  }, [phaseSchedule])
 
-  // Floor 9 first, matching the top-down move order; skip floors with no
-  // rows (never guess at empty groups).
-  const floorsPresent = FLOORS.filter((f) => byFloor[f]?.length).sort((a, b) => b - a)
+  // Outbound: floor 9 first, matching the top-down move-out order. Return:
+  // floor 1 first, the reverse "rewind" reading (last floor moved out is the
+  // last floor to come back), per DEFAULT_RETURN_SCHEDULE's comment.
+  const floorsPresent = FLOORS.filter((f) => byFloor[f]?.length).sort((a, b) => (phase === 'return' ? a - b : b - a))
 
-  const loadPlan = async (successMsg) => {
+  const loadPlan = async () => {
     setBusy(true)
     try {
-      await dispatch({ type: 'seedSchedule', p: {} })
-      toast?.(successMsg)
+      if (phase === 'return') {
+        await dispatch({ type: 'seedReturnSchedule', p: {} })
+        toast?.(`Return floor plan loaded: ${DEFAULT_RETURN_SCHEDULE.length} days ✓`)
+      } else {
+        await dispatch({ type: 'seedSchedule', p: {} })
+        toast?.(phaseSchedule.length ? 'Reset to default plan ✓' : 'Schedule loaded: 27 days, Sep 8 to Oct 8 ✓')
+      }
     } finally {
       setBusy(false)
     }
@@ -101,26 +119,35 @@ export default function Schedule({ toast }) {
       <div className="page-head">
         <div>
           <h1>Schedule</h1>
-          <p>The floor-by-floor relocation plan, Sep 8 through Oct 8. Floor 9 first, matching the move-out order.</p>
+          <p>
+            {phase === 'return'
+              ? 'The return plan, floor by floor. Floor 1 first, the reverse of the move-out order.'
+              : 'The floor-by-floor relocation plan, Sep 8 through Oct 8. Floor 9 first, matching the move-out order.'}
+          </p>
         </div>
-        {isAdmin && (
-          <button
-            className="btn btn-ghost"
-            disabled={busy}
-            onClick={() => loadPlan(state.schedule.length ? 'Reset to default plan ✓' : 'Schedule loaded: 27 days, Sep 8 to Oct 8 ✓')}
-          >
-            {busy ? 'Working…' : state.schedule.length ? 'Reset to default plan' : 'Load default plan'}
-          </button>
-        )}
+        <div className="row" style={{ flexWrap: 'wrap', gap: 10 }}>
+          <div className="filters" style={{ margin: 0 }}>
+            <button className={`chip ${phase === 'out' ? 'on' : ''}`} onClick={() => setPhase('out')}>Outbound</button>
+            <button className={`chip ${phase === 'return' ? 'on' : ''}`} onClick={() => setPhase('return')}>Return</button>
+          </div>
+          {isAdmin && (
+            <button className="btn btn-ghost" disabled={busy} onClick={loadPlan}>
+              {busy ? 'Working…' : phaseSchedule.length ? `Reset ${phase === 'return' ? 'return ' : ''}plan` : phase === 'return' ? 'Load return template' : 'Load default plan'}
+            </button>
+          )}
+          <ReturnPhaseToggle toast={toast} />
+        </div>
       </div>
 
-      {state.schedule.length === 0 && (
+      {phaseSchedule.length === 0 && (
         <div className="card">
           <div className="empty">
             <div className="big">📅</div>
             {isAdmin
-              ? 'No schedule loaded yet. Tap "Load default plan" above to bring in all 27 days.'
-              : 'Schedule not loaded yet. Check back once the admin loads the plan.'}
+              ? phase === 'return'
+                ? 'No return schedule loaded yet. Tap "Load return template" above to bring in the floor-by-floor return days.'
+                : 'No schedule loaded yet. Tap "Load default plan" above to bring in all 27 days.'
+              : `${phase === 'return' ? 'Return schedule' : 'Schedule'} not loaded yet. Check back once the admin loads the plan.`}
           </div>
         </div>
       )}
@@ -134,7 +161,7 @@ export default function Schedule({ toast }) {
               const isPast = day.date < key
               const { done, planned } = progressForDay(day, state.units)
               const hitPlan = isPast && planned > 0 && done >= planned
-              const doneLabel = targetStageForWork(day.work) === 'loaded' ? 'loaded' : 'packed'
+              const doneLabel = targetStageForWork(day.work)
               return (
                 <div
                   key={day.id}

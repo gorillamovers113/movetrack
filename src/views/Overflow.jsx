@@ -6,8 +6,10 @@ import ReportOverflowButton from '../components/ReportOverflowButton.jsx'
 
 // Lifecycle order the pool view groups by, matches OVERFLOW_STATUS in
 // store.jsx: identified (needs prep) → prepped (ready to transport) →
-// in_transit → at_warehouse.
-const STAGE_ORDER = ['identified', 'prepped', 'in_transit', 'at_warehouse']
+// in_transit → at_warehouse, then the return leg's mirror: rt_transit
+// (heading back to site) → returned. The return stages only ever have items
+// in them once the return phase has actually been used.
+const STAGE_ORDER = ['identified', 'prepped', 'in_transit', 'at_warehouse', 'rt_transit', 'returned']
 
 export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
   const { state, dispatch, currentUser } = useStore()
@@ -18,7 +20,11 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
   const [busy, setBusy] = useState(false)
 
   // Prep photo (required) and receive photo (optional), same upload-as-you-go
-  // capture pattern as Containers' warehouse-receive photo.
+  // capture pattern as Containers' warehouse-receive photo. The prep photo
+  // slot is reused for the return-leg "unwrap & place back" photo (also
+  // required, docs/superpowers/specs/2026-08-26-return-phase-design.md §3),
+  // since an item is only ever at one of the two stages (identified or
+  // rt_transit) at a time, never both.
   const [pPreview, setPPreview] = useState(null)
   const [pUploading, setPUploading] = useState(false)
   const [pUrl, setPUrl] = useState(null)
@@ -28,6 +34,13 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
   const [rUploading, setRUploading] = useState(false)
   const [rUrl, setRUrl] = useState(null)
   const [rError, setRError] = useState(null)
+
+  // Return-leg "load & transport back to site" photo (optional), the mirror
+  // of the outbound transportOverflow one-tap step.
+  const [bPreview, setBPreview] = useState(null)
+  const [bUploading, setBUploading] = useState(false)
+  const [bUrl, setBUrl] = useState(null)
+  const [bError, setBError] = useState(null)
 
   const isMover = currentUser?.role === 'admin' || currentUser?.role === 'mover'
   const isWarehouse = currentUser?.role === 'admin' || currentUser?.role === 'warehouse'
@@ -40,11 +53,13 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
   }, [state.overflow])
 
   const open = openId ? state.overflow.find((o) => o.id === openId) : null
+  const modalAct = open ? overflowAction(currentUser, open, state.project?.returnPhase) : null
 
   const close = () => {
     setOpenId(null); setResolveNote(''); setLocation(''); setBusy(false)
     setPPreview(null); setPUploading(false); setPUrl(null); setPError(null)
     setRPreview(null); setRUploading(false); setRUrl(null); setRError(null)
+    setBPreview(null); setBUploading(false); setBUrl(null); setBError(null)
     clearFocus && clearFocus()
   }
 
@@ -69,6 +84,18 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
       setRError(err.message || 'Upload failed, try again.')
     } finally {
       setRUploading(false)
+    }
+  }
+
+  const captureTransportBackPhoto = async (file) => {
+    setBError(null); setBPreview(URL.createObjectURL(file)); setBUrl(null); setBUploading(true)
+    try {
+      const url = await uploadImage(file, `overflow/${open.id}/transport-back/${Date.now()}-${currentUser.uid}.jpg`)
+      setBUrl(url)
+    } catch (err) {
+      setBError(err.message || 'Upload failed, try again.')
+    } finally {
+      setBUploading(false)
     }
   }
 
@@ -104,6 +131,32 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
     }
   }
 
+  const submitTransportBack = async () => {
+    setBusy(true)
+    try {
+      const media = bUrl ? [{ id: `back-${Date.now()}`, kind: 'photo', url: bUrl, label: 'Loaded for return transport' }] : []
+      await dispatch({ type: 'transportOverflowBack', p: { overflowId: open.id, media } })
+      toast(`Unit ${open.unitNumber} overflow item: loaded for return transport ✓`)
+      close()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const submitReturnOverflow = async () => {
+    if (pUploading) return alert('Still uploading the photo, wait a moment and try again.')
+    if (!pUrl) return alert('A photo of the unwrapped item back in place is required.')
+    setBusy(true)
+    try {
+      const media = [{ id: `return-${Date.now()}`, kind: 'photo', url: pUrl, label: 'Unwrapped & placed back' }]
+      await dispatch({ type: 'returnOverflow', p: { overflowId: open.id, media } })
+      toast(`Unit ${open.unitNumber} overflow item: back in place ✓`)
+      close()
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const totalCount = state.overflow.length
 
   return (
@@ -128,7 +181,7 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
           <div className="section-title">{OVERFLOW_STATUS[stage].label} · {groups[stage].length}</div>
           <div className="cont-grid" style={{ marginBottom: 18 }}>
             {groups[stage].map((item) => {
-              const act = overflowAction(currentUser, item)
+              const act = overflowAction(currentUser, item, state.project?.returnPhase)
               return (
                 <div key={item.id} className="card cont-card" onClick={() => setOpenId(item.id)}>
                   <div className="row">
@@ -147,11 +200,17 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
                       onClick={(e) => { e.stopPropagation(); setOpenId(item.id) }}
                     >Pad, wrap & label →</button>
                   )}
-                  {act && (
+                  {act && act.key === 'transportOverflow' && (
                     <button
                       className="btn btn-primary btn-sm" style={{ marginTop: 10, width: '100%' }}
                       onClick={(e) => { e.stopPropagation(); transport(item) }}
                     >{act.label}</button>
+                  )}
+                  {act && (act.key === 'transportOverflowBack' || act.key === 'returnOverflow') && (
+                    <button
+                      className="btn btn-primary btn-sm" style={{ marginTop: 10, width: '100%' }}
+                      onClick={(e) => { e.stopPropagation(); setOpenId(item.id) }}
+                    >{act.label} →</button>
                   )}
                   {stage === 'in_transit' && isWarehouse && (
                     <button
@@ -257,6 +316,58 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
               </div>
               <button className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={busy || rUploading} onClick={submitReceive}>
                 {busy ? 'Logging…' : 'Confirm receipt'}
+              </button>
+            </div>
+          )}
+
+          {open.stage === 'at_warehouse' && modalAct?.key === 'transportOverflowBack' && (
+            <div style={{ marginTop: 16 }}>
+              <div className="section-title" style={{ marginTop: 0 }}>Load & transport back to site</div>
+              <div className="field">
+                <label>Photo <span className="muted">(optional)</span></label>
+                <label className="dropzone camera-capture" style={{ display: 'block' }}>
+                  <input
+                    type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
+                    onChange={(e) => { const f = e.target.files[0]; if (f) captureTransportBackPhoto(f); e.target.value = '' }}
+                  />
+                  {bPreview ? (
+                    <div className="inv-preview">
+                      <img src={bPreview} alt="Loaded for return transport" className="inv-thumb" />
+                      <div className="muted" style={{ marginTop: 8 }}>
+                        {bUploading ? 'Uploading…' : bUrl ? '✓ Uploaded, tap to retake' : bError || 'Tap to retake'}
+                      </div>
+                    </div>
+                  ) : <>📷 Tap to add a photo</>}
+                </label>
+              </div>
+              <button className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={busy || bUploading} onClick={submitTransportBack}>
+                {busy ? 'Logging…' : 'Confirm loaded for return'}
+              </button>
+            </div>
+          )}
+
+          {open.stage === 'rt_transit' && modalAct?.key === 'returnOverflow' && (
+            <div style={{ marginTop: 16 }}>
+              <div className="section-title" style={{ marginTop: 0 }}>Unwrap & place back</div>
+              <div className="field">
+                <label>Photo, required (proof it is back in place)</label>
+                <label className="dropzone camera-capture" style={{ display: 'block' }}>
+                  <input
+                    type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
+                    onChange={(e) => { const f = e.target.files[0]; if (f) capturePrepPhoto(f); e.target.value = '' }}
+                  />
+                  {pPreview ? (
+                    <div className="inv-preview">
+                      <img src={pPreview} alt="Unwrapped and placed back" className="inv-thumb" />
+                      <div className="muted" style={{ marginTop: 8 }}>
+                        {pUploading ? 'Uploading…' : pUrl ? '✓ Uploaded, tap to retake' : pError || 'Tap to retake'}
+                      </div>
+                    </div>
+                  ) : <>📷 Tap to photograph the item unwrapped and back in place</>}
+                </label>
+              </div>
+              <button className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={busy || pUploading} onClick={submitReturnOverflow}>
+                {busy ? 'Logging…' : 'Confirm placed back'}
               </button>
             </div>
           )}

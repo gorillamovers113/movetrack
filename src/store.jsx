@@ -2,8 +2,14 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
 import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, signOut, updateProfile } from 'firebase/auth'
 import { doc, setDoc, updateDoc, deleteDoc, addDoc, arrayUnion, onSnapshot, collection, query, orderBy, serverTimestamp } from 'firebase/firestore'
 import { auth, db } from './firebase.js'
-import { makeEvent, boxMismatch } from './lib/mutations.js'
-import { DEFAULT_SCHEDULE } from './lib/schedule.js'
+import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction } from './lib/mutations.js'
+import { DEFAULT_SCHEDULE, DEFAULT_RETURN_SCHEDULE, scheduleDocId } from './lib/schedule.js'
+import { stageOf } from './seed.js'
+
+// meta/project doc default, used whenever the doc is absent (brand-new
+// project, or before an admin has touched return phase). Keeps name/address
+// consistent with the hardcoded fallback App.jsx used before this doc existed.
+const DEFAULT_PROJECT = { returnPhase: false, name: 'Trinity Manor', address: '3940 Park Blvd' }
 
 const Ctx = createContext(null)
 
@@ -14,10 +20,12 @@ export function StoreProvider({ children }) {
   const [events, setEvents] = useState([])
   const [users, setUsers] = useState([])
   const [schedule, setSchedule] = useState([])
+  const [project, setProject] = useState(null)
   const [currentUser, setCurrentUser] = useState(null)
 
-  // Live Firestore state: six collection subscriptions replace the old
-  // localStorage-backed reducer state. Each array holds `{ id, ...data }` docs.
+  // Live Firestore state: collection (+ one singleton doc) subscriptions
+  // replace the old localStorage-backed reducer state. Each array holds
+  // `{ id, ...data }` docs.
   useEffect(() => {
     const subs = [
       onSnapshot(collection(db, 'units'), (s) => setUnits(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
@@ -26,11 +34,12 @@ export function StoreProvider({ children }) {
       onSnapshot(query(collection(db, 'events'), orderBy('ts', 'desc')), (s) => setEvents(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
       onSnapshot(collection(db, 'users'), (s) => setUsers(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
       onSnapshot(collection(db, 'schedule'), (s) => setSchedule(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
+      onSnapshot(doc(db, 'meta', 'project'), (d) => setProject(d.exists() ? { id: d.id, ...d.data() } : null)),
     ]
     return () => subs.forEach((u) => u())
   }, [])
 
-  const state = { units, containers, overflow, events, users, schedule }
+  const state = { units, containers, overflow, events, users, schedule, project: project || DEFAULT_PROJECT }
 
   // Auth session: subscribe to the signed-in user's Firestore profile doc so
   // role/status changes (e.g. admin approval) show up live without a re-login.
@@ -146,6 +155,142 @@ export function StoreProvider({ children }) {
         if (mismatch) await ev('flag', `FLAG raised on container ${cont0.number}: piece count mismatch (${p.verifiedPieces}/${expected})`, { containerId: cont0.id })
         return
       }
+
+      // ---- Return phase (docs/superpowers/specs/2026-08-26-return-phase-design.md) ----
+      // Exact reverse of the outbound actions above: same piece-count
+      // verification + photo trail at every handoff, same roles doing the
+      // reverse of their outbound step, back into the same apartment. See
+      // §3's mirror table for which outbound action each one undoes.
+
+      case 'setReturnPhase': {
+        // Admin toggle. Preserve name/address on the write (not just merge)
+        // so a first-ever toggle doesn't create a meta/project doc missing
+        // those fields, which would drop the project chip's fallback text.
+        const current = state.project
+        await setDoc(doc(db, 'meta', 'project'), { returnPhase: p.on, name: current.name, address: current.address }, { merge: true })
+        return ev('system', `${p.on ? 'Began' : 'Ended'} the return phase`)
+      }
+      case 'loadForReturn': {
+        // Mirror of loadUnit: warehouse loads a unit back into a return
+        // container, piece-verifies against what it left with.
+        const cont = state.containers.find((c) => c.id === p.containerId)
+        // Abort BEFORE any write if the container can't accept this load:
+        // gone, or already past return_filling (return_full/return_transit/
+        // back_on_site/returned_empty). Checking first (instead of omitting
+        // status on the later container write) avoids a partial write where
+        // the unit gets promoted to return_loaded but the container update
+        // then self-loops (e.g. return_full -> return_full) and the return
+        // rules reject it as a no-op transition, leaving the unit orphaned.
+        if (!cont || (cont.status !== 'at_warehouse' && cont.status !== 'return_filling')) {
+          throw new Error('That BigBox is no longer accepting items for return. Refresh and pick another container.')
+        }
+        p.media = attributeMedia(p.media)
+        const mismatch = boxMismatch(unit.pieces, p.pieces)
+        const patch = { stage: 'return_loaded', containerIds: arrayUnion(p.containerId) }
+        if (mismatch) patch.flag = { message: `Piece count mismatch at return load: ${p.pieces} loaded vs ${unit.pieces} packed. Recount pending.`, ts: Date.now(), by: currentUser.name, open: true }
+        await updateDoc(doc(db, 'units', p.unitId), patch)
+        // Status is always written explicitly here (never omitted), same as
+        // outbound loadUnit: both at_warehouse->return_filling and
+        // return_filling->return_filling are allowed by the rules, so this
+        // can't self-loop into a deny the way omitting status could.
+        await updateDoc(doc(db, 'containers', p.containerId), { status: 'return_filling', unitIds: arrayUnion(p.unitId) })
+        await ev('stage', `Loaded unit ${unit.number} for return into container ${cont.number}: ${p.pieces} of ${unit.pieces ?? p.pieces} pieces verified`, { unitId: unit.id, containerId: p.containerId, from: unit.stage, to: 'return_loaded', media: p.media })
+        if (mismatch) await ev('flag', `FLAG raised on unit ${unit.number}: piece count mismatch on return load (${p.pieces}/${unit.pieces})`, { unitId: unit.id })
+        return
+      }
+      case 'markReturnFull': {
+        await updateDoc(doc(db, 'containers', p.containerId), { status: 'return_full' })
+        return ev('stage', `Container ${cont0.number} marked full for return, ready for dispatch`, { containerId: cont0.id })
+      }
+      case 'dispatchReturn': {
+        // Mirror of bigboxSwap, but the return leg doesn't necessarily bring
+        // new empties back (newEmptyNumbers is optional), and it hands off
+        // one container at a time rather than a batch.
+        const media = attributeMedia(p.media || [])
+        const patch = { status: 'return_transit', driverName: p.driverName, dispatchedAt: Date.now(), handoffBy: currentUser.uid }
+        if (media.length) patch.media = arrayUnion(...media)
+        await updateDoc(doc(db, 'containers', p.containerId), patch)
+        // cont0.unitIds is stale: it still holds every unit ever loaded onto
+        // this physical container, including its outbound trip. Only
+        // promote units actually loaded for THIS return trip (loadForReturn
+        // already flipped them to return_loaded) so a sibling that was
+        // never loaded for return (still at_warehouse) isn't force-promoted.
+        const toDispatch = (cont0.unitIds || []).map((uid) => state.units.find((u) => u.id === uid)).filter((u) => u && u.stage === 'return_loaded')
+        await Promise.all(toDispatch.map((u) => updateDoc(doc(db, 'units', u.id), { stage: 'return_transit' })))
+        let addedMsg = ''
+        if (p.newEmptyNumbers && p.newEmptyNumbers.length) {
+          const newNumbers = p.newEmptyNumbers.map((n) => n.toUpperCase())
+          await Promise.all(newNumbers.map((number) => addDoc(collection(db, 'containers'), { number, status: 'empty', unitIds: [], deliveredAt: Date.now() })))
+          addedMsg = `, ${newNumbers.length} empty${newNumbers.length === 1 ? '' : 's'} in (${newNumbers.join(', ')})`
+        }
+        return ev('system', `Return dispatch with ${p.driverName}: container ${cont0.number} out for delivery back to site${addedMsg}`, { containerId: cont0.id, ...(media.length ? { media } : {}) })
+      }
+      case 'deliverReturn': {
+        // Mirror of the BigBox drive to the warehouse (no dedicated outbound
+        // action): the container and its units arrive back on site. Piece
+        // verification happens per-unit at unloadReturn, not here.
+        const media = attributeMedia(p.media || [])
+        const patch = { status: 'back_on_site', receivedBy: currentUser.uid, backOnSiteAt: Date.now() }
+        if (media.length) patch.media = arrayUnion(...media)
+        await updateDoc(doc(db, 'containers', p.containerId), patch)
+        // Same staleness guard as dispatchReturn: only promote units that
+        // are actually in transit on this return trip (return_transit), not
+        // every unit ever associated with this container.
+        const toDeliver = (cont0.unitIds || []).map((uid) => state.units.find((u) => u.id === uid)).filter((u) => u && u.stage === 'return_transit')
+        await Promise.all(toDeliver.map((u) => updateDoc(doc(db, 'units', u.id), { stage: 'back_on_site' })))
+        return ev('stage', `Container ${cont0.number} delivered back on site`, { containerId: cont0.id, ...(media.length ? { media } : {}) })
+      }
+      case 'unloadReturn': {
+        // Mirror of loadUnit's piece verify, reversed: the mover carries the
+        // unit off the container and into its apartment. When this was the
+        // last unit still owed to that container, the container is now
+        // empty, so flip it to returned_empty (mirror of a container
+        // emptying out, the return-side end of its lifecycle).
+        p.media = attributeMedia(p.media)
+        const mismatch = boxMismatch(unit.pieces, p.pieces)
+        const patch = { stage: 'unloaded', 'crew.movers': arrayUnion(currentUser.uid) }
+        if (mismatch) patch.flag = { message: `Piece count mismatch at return unload: ${p.pieces} unloaded vs ${unit.pieces} packed. Recount pending.`, ts: Date.now(), by: currentUser.name, open: true }
+        await updateDoc(doc(db, 'units', p.unitId), patch)
+        const cont = state.containers.find((c) => c.status === 'back_on_site' && (c.unitIds || []).includes(p.unitId))
+        if (cont) {
+          // cont.unitIds is stale (still carries the container's outbound
+          // roster too), so "last unit unloaded" can't just mean every id in
+          // that list: a sibling that was never loaded for this return trip
+          // sits at at_warehouse forever and would block returned_empty from
+          // ever firing. Only count siblings that actually entered the
+          // return flow (anything past at_warehouse) toward "last one out".
+          const others = cont.unitIds.filter((id) => id !== p.unitId).map((id) => state.units.find((u) => u.id === id)).filter((u) => u && u.stage !== 'at_warehouse')
+          const allOthersUnloaded = others.every((u) => stageOf(u.stage).step >= stageOf('unloaded').step)
+          if (allOthersUnloaded) await updateDoc(doc(db, 'containers', cont.id), { status: 'returned_empty' })
+        }
+        await ev('stage', `Unloaded unit ${unit.number} back into its apartment${cont ? `, from container ${cont.number}` : ''}: ${p.pieces} of ${unit.pieces ?? p.pieces} pieces verified`, { unitId: unit.id, containerId: cont?.id, from: unit.stage, to: 'unloaded', media: p.media })
+        if (mismatch) await ev('flag', `FLAG raised on unit ${unit.number}: piece count mismatch on return unload (${p.pieces}/${unit.pieces})`, { unitId: unit.id })
+        return
+      }
+      case 'unpackUnit': {
+        // Mirror of finishPacking: unpack in the apartment, photo. Terminal:
+        // the unit's full round trip is complete.
+        p.media = attributeMedia(p.media)
+        await updateDoc(doc(db, 'units', p.unitId), { stage: 'unpacked', 'crew.packers': arrayUnion(currentUser.uid), media: arrayUnion(...p.media) })
+        return ev('stage', `Unpacked unit ${unit.number}, move complete (photo attached)`, { unitId: unit.id, from: 'unloaded', to: 'unpacked', media: p.media })
+      }
+      case 'transportOverflowBack': {
+        // Mirror of transportOverflow / receiveOverflow combined: Gorilla
+        // drives the overflow item from the warehouse back to the building.
+        const media = attributeMedia(p.media || [])
+        const patch = { stage: 'rt_transit', rtTransitAt: Date.now(), transportBy: currentUser.uid }
+        if (media.length) patch.media = arrayUnion(...media)
+        await updateDoc(doc(db, 'overflow', p.overflowId), patch)
+        return ev('stage', `Gorilla loaded overflow item for return transport to site, unit ${over0.unitNumber}: ${over0.description}`, { unitId: over0.unitId, overflowId: over0.id, from: 'at_warehouse', to: 'rt_transit', ...(media.length ? { media } : {}) })
+      }
+      case 'returnOverflow': {
+        // Mirror of prepOverflow: unwrap and place the item back in the
+        // apartment, photo required as proof, same as the outbound wrap.
+        p.media = attributeMedia(p.media)
+        await updateDoc(doc(db, 'overflow', p.overflowId), { stage: 'returned', returnedAt: Date.now(), returnedBy: currentUser.uid, media: arrayUnion(...p.media) })
+        return ev('media', `Overflow item unwrapped and placed back, unit ${over0.unitNumber}: ${over0.description}`, { unitId: over0.unitId, overflowId: over0.id, media: p.media })
+      }
+
       case 'createOverflow': {
         // Oversized piece that won't fit a BigBox container, so Gorilla
         // Movers transports it to the warehouse directly, on its own chain
@@ -249,21 +394,35 @@ export function StoreProvider({ children }) {
         // Doc id = date, so this is an idempotent upsert (setDoc + merge),
         // never a duplicate, whether it's the first load or an admin's
         // "Reset to default plan". Admin-only server-side (Firestore rules).
-        await Promise.all(DEFAULT_SCHEDULE.map((day) => setDoc(doc(db, 'schedule', day.date), day, { merge: true })))
+        // Explicitly tags phase: 'out' on every write, which also backfills
+        // the field onto any pre-existing days seeded before phase existed.
+        await Promise.all(DEFAULT_SCHEDULE.map((day) => setDoc(doc(db, 'schedule', day.date), { ...day, phase: 'out' }, { merge: true })))
         return ev('system', `Loaded the floor plan: ${DEFAULT_SCHEDULE.length} days, Sep 8 to Oct 8`)
       }
+      case 'seedReturnSchedule': {
+        // Same idempotent upsert as seedSchedule, but return days live at a
+        // prefixed doc id (scheduleDocId) so an admin re-dating a return day
+        // can never collide with an outbound day on the same calendar date.
+        await Promise.all(DEFAULT_RETURN_SCHEDULE.map((day) => setDoc(doc(db, 'schedule', scheduleDocId(day.date, 'return')), { ...day, phase: 'return' }, { merge: true })))
+        return ev('system', `Loaded the return floor plan: ${DEFAULT_RETURN_SCHEDULE.length} days`)
+      }
       case 'editScheduleDay': {
-        // Doc id is the date itself, so a date change means the old doc id
-        // has to go and a new one gets written, not just an updateDoc.
+        // Doc id is normally the date itself, so a date change means the old
+        // doc id has to go and a new one gets written, not just an
+        // updateDoc. Return days keep their phase (and its doc-id prefix)
+        // across an edit, since they don't carry it in p.patch.
+        const phase = day0?.phase || 'out'
         const next = {
           date: p.patch.date ?? day0.date,
           work: p.patch.work ?? day0.work,
           floor: p.patch.floor ?? day0.floor,
           unitCount: p.patch.unitCount ?? day0.unitCount,
+          phase,
         }
-        if (next.date !== p.dateId) await deleteDoc(doc(db, 'schedule', p.dateId))
-        await setDoc(doc(db, 'schedule', next.date), next, { merge: true })
-        const moved = next.date !== p.dateId ? ` (moved to ${next.date})` : ''
+        const nextId = scheduleDocId(next.date, phase)
+        if (nextId !== p.dateId) await deleteDoc(doc(db, 'schedule', p.dateId))
+        await setDoc(doc(db, 'schedule', nextId), next, { merge: true })
+        const moved = nextId !== p.dateId ? ` (moved to ${next.date})` : ''
         return ev('system', `Admin edited schedule day ${p.dateId}${moved}: Floor ${next.floor}, ${next.work}, ${next.unitCount} units`)
       }
       default:
@@ -310,11 +469,21 @@ export function fmtAgo(ts) {
   return `${Math.round(s / 86400)}d ago`
 }
 
-export function canAct(user, unit) {
+export function canAct(user, unit, returnPhase = false) {
   // Returns the action available to this user on this unit right now, or null.
-  // One-way Phase-1 lifecycle: not_started → packing → packed → loaded → picked_up → at_warehouse.
+  // Outbound one-way lifecycle: not_started → packing → packed → loaded → picked_up → at_warehouse.
+  // When returnPhase is on, at_warehouse/back_on_site/unloaded also try the
+  // return-leg mirror first (nextReturnUnitAction); a unit still mid-outbound
+  // (not yet at_warehouse) keeps getting its normal outbound action either
+  // way, so a project can have units on both legs at once. returnPhase
+  // defaults to false so every existing call site (canAct(user, unit)) keeps
+  // behaving exactly like before this feature.
   if (!user) return null
   const role = user.role
+  if (returnPhase) {
+    const ret = nextReturnUnitAction(role, unit.stage)
+    if (ret) return ret
+  }
   const admin = role === 'admin'
   switch (unit.stage) {
     case 'not_started': return admin || role === 'packer' ? { key: 'startPacking', label: 'Start packing' } : null
@@ -324,13 +493,20 @@ export function canAct(user, unit) {
   }
 }
 
-export function containerAction(user, cont) {
+export function containerAction(user, cont, returnPhase = false) {
   // Container status lifecycle: empty → filling → full → picked_up → at_warehouse.
   // The swap (full → picked_up) and warehouse receive (picked_up → at_warehouse)
   // are batch/dedicated screens, not a single-container quick action, so they
   // return null here rather than a one-tap action — this only covers the
-  // simple in-place transition (filling → full).
+  // simple in-place transition (filling → full). Same story on the return
+  // leg: dispatchReturn/deliverReturn are dedicated screens, so only
+  // return_filling gets a quick action here. returnPhase defaults to false
+  // so existing call sites are unaffected.
   if (!user) return null
+  if (returnPhase) {
+    const ret = nextReturnContainerAction(user.role, cont.status)
+    if (ret) return ret
+  }
   const admin = user.role === 'admin'
   switch (cont.status) {
     case 'filling':
@@ -346,16 +522,29 @@ export const CONT_STATUS = {
   full: { label: 'Full · ready', color: '#f59e0b' },
   picked_up: { label: 'In transit', color: '#f97316' },
   at_warehouse: { label: 'At warehouse', color: '#3b82f6' },
+  // Return leg (cool-to-warm palette, distinct from the outbound colors
+  // above, so the board reads direction at a glance).
+  return_filling: { label: 'Filling for return', color: '#0891b2' },
+  return_full: { label: 'Full · ready for dispatch', color: '#0ea5e9' },
+  return_transit: { label: 'In transit to site', color: '#6366f1' },
+  back_on_site: { label: 'Back on site', color: '#22c55e' },
+  returned_empty: { label: 'Returned, empty', color: '#15803d' },
 }
 
-export function overflowAction(user, item) {
+export function overflowAction(user, item, returnPhase = false) {
   // Overflow lifecycle: identified → prepped → in_transit → at_warehouse.
   // Only the prepped → in_transit hop is a simple one-tap transition (no
   // form): identify/prep/receive all need a bit of input (description,
   // required photo, warehouse location) so they get dedicated forms in
   // Overflow.jsx instead of a quick action here, matching how
-  // containerAction() only covers container's filling → full hop.
+  // containerAction() only covers container's filling → full hop. Same
+  // return-leg mirror pattern as canAct/containerAction; returnPhase
+  // defaults to false so existing call sites are unaffected.
   if (!user) return null
+  if (returnPhase) {
+    const ret = nextReturnOverflowAction(user.role, item.stage)
+    if (ret) return ret
+  }
   const admin = user.role === 'admin'
   switch (item.stage) {
     case 'prepped':
@@ -370,6 +559,9 @@ export const OVERFLOW_STATUS = {
   prepped: { label: 'Ready to transport', color: '#8b5cf6' },
   in_transit: { label: 'In transit', color: '#f97316' },
   at_warehouse: { label: 'At warehouse', color: '#3b82f6' },
+  // Return leg, same cool-to-warm palette as CONT_STATUS above.
+  rt_transit: { label: 'In transit to site', color: '#6366f1' },
+  returned: { label: 'Returned', color: '#15803d' },
 }
 
 export async function filesToMedia(fileList, labelPrefix = '') {

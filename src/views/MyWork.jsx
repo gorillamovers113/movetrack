@@ -7,9 +7,10 @@ import NewUnitButton from '../components/NewUnitModal.jsx'
 export default function MyWork({ openUnit, openContainer, toast }) {
   const { state, currentUser } = useStore()
   const role = currentUser.role
+  const returnPhase = state.project?.returnPhase
 
   if (role === 'driver') {
-    const actionable = state.containers.filter((c) => containerAction(currentUser, c))
+    const actionable = state.containers.filter((c) => containerAction(currentUser, c, returnPhase))
     return (
       <>
         <div className="page-head">
@@ -18,7 +19,7 @@ export default function MyWork({ openUnit, openContainer, toast }) {
         {actionable.length === 0 && <div className="card empty"><div className="big">🚚</div>Nothing waiting on you right now.</div>}
         <div className="cont-grid">
           {actionable.map((c) => {
-            const act = containerAction(currentUser, c)
+            const act = containerAction(currentUser, c, returnPhase)
             const units = c.unitIds.map((id) => state.units.find((u) => u.id === id)).filter(Boolean)
             return (
               <div key={c.id} className="card cont-card" onClick={() => openContainer(c.id)}>
@@ -36,7 +37,7 @@ export default function MyWork({ openUnit, openContainer, toast }) {
     )
   }
 
-  const mine = state.units.filter((u) => canAct(currentUser, u))
+  const mine = state.units.filter((u) => canAct(currentUser, u, returnPhase))
   const inProgress = mine.filter((u) => u.stage === 'packing')
   const ready = mine.filter((u) => u.stage !== 'packing')
   const myRecent = [...state.events].filter((e) => e.uid === currentUser.uid).sort((a, b) => b.ts - a.ts).slice(0, 5)
@@ -53,7 +54,7 @@ export default function MyWork({ openUnit, openContainer, toast }) {
             </div>
             <div className="cont-units">{u.tenant || '—'} · Floor {u.floor}{u.pieces ? ` · ${u.pieces} pieces` : ''}</div>
             {u.note && <div className="muted" style={{ marginTop: 4 }}>⚠️ {u.note}</div>}
-            <button className="btn btn-primary btn-sm" style={{ marginTop: 10, width: '100%' }}>{canAct(currentUser, u).label} →</button>
+            <button className="btn btn-primary btn-sm" style={{ marginTop: 10, width: '100%' }}>{canAct(currentUser, u, returnPhase).label} →</button>
           </div>
         ))}
       </div>

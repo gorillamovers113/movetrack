@@ -2,7 +2,7 @@
 // progress helpers shared by the store (dispatch actions), the Dashboard
 // today banner, and the Schedule view. No React/Firebase imports here so
 // this stays trivially testable and importable from the Node seed script.
-import { stageOf } from '../seed.js'
+import { stageOf, FLOOR_UNITS } from '../seed.js'
 
 // 27 scheduled days, Sep 8 -> Oct 8 2026, floor 9 down to floor 1.
 // Source: spec §10 ("Schedule seed data (from Casey's calendar, Sept-Oct 2026)").
@@ -39,6 +39,45 @@ export const DEFAULT_SCHEDULE = [
   { date: '2026-10-08', work: 'MOVEOUT', floor: 1, unitCount: 4 },
 ]
 
+// Return-phase template (docs/superpowers/specs/2026-08-26-return-phase-design.md
+// §7). Return runs on its own October timeline, floors coming back in reverse
+// of the outbound order (floor 1, the last one moved out, comes back first;
+// floor 9, moved out first, comes back last) since that is the natural "rewind"
+// reading of Casey's "exact reverse" framing. Exact dates are TBD; these are
+// placeholder weekdays starting after the outbound plan's last day (Oct 8) to
+// leave room for the building work, and are meant to be edited by the admin
+// once real dates are known. Each floor gets a single RETURN work day
+// (deliver + unload + unpack all happen on-site the same visit; there is no
+// return equivalent of the two-day outbound PACK prep). unitCount mirrors
+// FLOOR_UNITS, the same source of truth the outbound seed data was built from.
+export const DEFAULT_RETURN_SCHEDULE = [
+  { date: '2026-10-12', work: 'RETURN', floor: 1, unitCount: FLOOR_UNITS[1] },
+  { date: '2026-10-13', work: 'RETURN', floor: 2, unitCount: FLOOR_UNITS[2] },
+  { date: '2026-10-14', work: 'RETURN', floor: 3, unitCount: FLOOR_UNITS[3] },
+  { date: '2026-10-15', work: 'RETURN', floor: 4, unitCount: FLOOR_UNITS[4] },
+  { date: '2026-10-16', work: 'RETURN', floor: 5, unitCount: FLOOR_UNITS[5] },
+  { date: '2026-10-19', work: 'RETURN', floor: 6, unitCount: FLOOR_UNITS[6] },
+  { date: '2026-10-20', work: 'RETURN', floor: 7, unitCount: FLOOR_UNITS[7] },
+  { date: '2026-10-21', work: 'RETURN', floor: 8, unitCount: FLOOR_UNITS[8] },
+  { date: '2026-10-22', work: 'RETURN', floor: 9, unitCount: FLOOR_UNITS[9] },
+]
+
+// A schedule day's Firestore doc id is normally just its date (outbound,
+// phase 'out', matching the existing collection). Return days are prefixed so
+// an admin editing/re-dating a return day can never collide with an outbound
+// day that happens to land on the same calendar date.
+export function scheduleDocId(date, phase = 'out') {
+  return phase === 'return' ? `return-${date}` : date
+}
+
+// Filters the schedule array down to one phase. Existing docs written before
+// this feature have no `phase` field at all, so they default to 'out' here
+// too (the spec's "backfilled for existing days"), same as the other schedule
+// helpers below which keep operating on whatever array they're handed.
+export function scheduleForPhase(schedule, phase = 'out') {
+  return (schedule || []).filter((d) => (d.phase || 'out') === phase)
+}
+
 // Client-local YYYY-MM-DD, built from getFullYear/getMonth/getDate (never
 // toISOString, which is UTC and can land on the wrong day near midnight).
 export function todayKey(d = new Date()) {
@@ -72,9 +111,12 @@ export function nextScheduleDay(schedule, dateKey) {
 }
 
 // PACK days track packed-or-later units on the floor; MOVEOUT days track
-// loaded-or-later. Mirrors the "at or past a stage" idiom from stageOf().
+// loaded-or-later; RETURN days (return phase) track unpacked, the terminal
+// return stage. Mirrors the "at or past a stage" idiom from stageOf().
 export function targetStageForWork(work) {
-  return work === 'MOVEOUT' ? 'loaded' : 'packed'
+  if (work === 'MOVEOUT') return 'loaded'
+  if (work === 'RETURN') return 'unpacked'
+  return 'packed'
 }
 
 export function atOrPastStage(stageKey, targetKey) {

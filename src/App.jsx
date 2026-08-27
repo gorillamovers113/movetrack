@@ -127,6 +127,9 @@ function Shell() {
           <button style={{ color: '#a6aebb', fontSize: 12, fontWeight: 600 }} onClick={logout}>Sign out</button>
         </div>
         <main className="main">
+          {state.project?.returnPhase && (
+            <div className="return-banner">↩ RETURN PHASE. {state.project?.name || 'Trinity Manor'} items are heading back home.</div>
+          )}
           {page()}
           <div className="brandfoot">MoveTrack — a Gorilla Movers platform · every action logged with name, date &amp; time</div>
         </main>

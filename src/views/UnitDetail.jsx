@@ -9,6 +9,11 @@ const WAIT_HINTS = {
   loaded: 'Waiting on driver: container pickup from site.',
   picked_up: 'On the truck — driver will check it into the warehouse.',
   at_warehouse: 'Safely stored in the warehouse. Full history preserved below.',
+  return_loaded: 'Waiting on the warehouse to dispatch the return container back to site.',
+  return_transit: 'On the truck, heading back to the building.',
+  back_on_site: 'Back on site. Waiting on a mover to unload it into the apartment.',
+  unloaded: 'Unloaded into the apartment. Waiting on a packer to unpack it.',
+  unpacked: 'Complete. This unit has made its full round trip.',
 }
 
 export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
@@ -55,22 +60,29 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
   const events = useMemo(() => state.events.filter((e) => e.unitId === unitId).sort((a, b) => b.ts - a.ts), [state.events, unitId])
   if (!unit) return null
 
-  const action = canAct(currentUser, unit)
+  const action = canAct(currentUser, unit, state.project?.returnPhase)
   const canContribute = currentUser && currentUser.role !== 'viewer'
   const stage = stageOf(unit.stage)
   const conts = unit.containerIds.map((id) => state.containers.find((c) => c.id === id)).filter(Boolean)
   // On-site containers still available to load into — mover picks from
   // this list instead of typing a container number.
   const loadableContainers = state.containers.filter((c) => c.status === 'empty' || c.status === 'filling')
+  // Return-leg mirror: return containers still open to load a unit back into
+  // at the warehouse (docs/superpowers/specs/2026-08-26-return-phase-design.md §3).
+  const returnLoadableContainers = state.containers.filter((c) => c.status === 'at_warehouse' || c.status === 'return_filling')
+  // Outbound-only stepper (packing..at_warehouse) unless the return phase is
+  // on, so the unit page looks exactly like it does today until the return
+  // leg is actually in play.
+  const stepperStages = STAGES.slice(1).filter((s) => state.project?.returnPhase || s.step <= 5)
   const crewName = (uid) => state.users.find((u) => u.id === uid)?.name
   const crewNames = (uids) => (uids || []).map(crewName).filter(Boolean).join(', ')
 
   const openAction = () => { setForm({}); setPending([]); resetInventoryCapture(); setModal('action') }
   const closeActionModal = () => { setModal(null); resetInventoryCapture() }
 
-  const submitAction = () => {
+  const submitAction = async () => {
     const media = pending
-    const needsPhoto = ['loadUnit'].includes(action.key)
+    const needsPhoto = ['loadUnit', 'loadForReturn', 'unloadReturn', 'unpackUnit'].includes(action.key)
     if (needsPhoto && !media.some((m) => m.kind === 'photo')) {
       return alert('At least one photo is required to complete this step — the photo record is the whole point.')
     }
@@ -91,8 +103,35 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
       dispatch({ type: 'loadUnit', p: { unitId, containerId, pieces: n, media } })
       if (unit.pieces != null && n !== unit.pieces) toast(`⚑ Piece count mismatch flagged (${n} vs ${unit.pieces})`)
     }
+    if (action.key === 'loadForReturn') {
+      const containerId = form.containerId
+      const n = parseInt(form.pieces)
+      if (!containerId) return alert('Pick a return container to load into.')
+      if (!n || n < 1) return alert('Enter the piece count you verified while loading.')
+      // loadForReturn can throw if the picked container was just filled or
+      // dispatched by someone else in the meantime (a real race, not a bug):
+      // catch it and toast instead of letting the whole form crash, so the
+      // warehouse worker can just refresh and pick another container.
+      try {
+        await dispatch({ type: 'loadForReturn', p: { unitId, containerId, pieces: n, media } })
+      } catch (err) {
+        toast(err.message || 'Could not load for return, try again.')
+        return
+      }
+      if (unit.pieces != null && n !== unit.pieces) toast(`⚑ Piece count mismatch flagged (${n} vs ${unit.pieces})`)
+    }
+    if (action.key === 'unloadReturn') {
+      const n = parseInt(form.pieces)
+      if (!n || n < 1) return alert('Enter the piece count you verified while unloading.')
+      dispatch({ type: 'unloadReturn', p: { unitId, pieces: n, media } })
+      if (unit.pieces != null && n !== unit.pieces) toast(`⚑ Piece count mismatch flagged (${n} vs ${unit.pieces})`)
+    }
+    if (action.key === 'unpackUnit') {
+      dispatch({ type: 'unpackUnit', p: { unitId, media } })
+    }
     closeActionModal()
-    if (action.key !== 'loadUnit' || unit.pieces == null || parseInt(form.pieces) === unit.pieces) toast('Logged — timestamped under your name ✓')
+    const pieceCheckKeys = ['loadUnit', 'unloadReturn', 'loadForReturn']
+    if (!pieceCheckKeys.includes(action.key) || unit.pieces == null || parseInt(form.pieces) === unit.pieces) toast('Logged, timestamped under your name ✓')
   }
 
   return (
@@ -117,7 +156,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
 
       <div className="card" style={{ padding: '14px 20px 16px', marginBottom: 18 }}>
         <div className="stepper">
-          {STAGES.slice(1).map((s) => (
+          {stepperStages.map((s) => (
             <div key={s.key} className={`step ${stage.step >= s.step ? 'done' : ''} ${stage.step === s.step ? 'now' : ''}`} style={{ '--stage-c': s.color }}>
               <div className="bar" />
               <div className="cap">{s.short}</div>
@@ -241,6 +280,37 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
               <div className="field"><label>Pieces counted while loading {unit.pieces != null && <span className="muted">(packer recorded {unit.pieces})</span>}</label>
                 <input className="input" type="number" min="1" inputMode="numeric" placeholder={unit.pieces ?? 'count'} value={form.pieces || ''} onChange={(e) => setForm({ ...form, pieces: e.target.value })} /></div>
             </>
+          )}
+          {action.key === 'loadForReturn' && (
+            <>
+              <div className="field">
+                <label>Load into which return container?</label>
+                {returnLoadableContainers.length === 0 ? (
+                  <div className="empty" style={{ padding: '22px 10px' }}>
+                    <div className="big">📦</div>No return containers available yet at the warehouse.
+                  </div>
+                ) : (
+                  <div className="pick-list">
+                    {returnLoadableContainers.map((c) => (
+                      <button
+                        type="button" key={c.id}
+                        className={`pick-row ${form.containerId === c.id ? 'sel' : ''}`}
+                        onClick={() => setForm({ ...form, containerId: c.id })}
+                      >
+                        <span className="cont-num grow">{c.number}</span>
+                        <span className="badge" style={{ background: CONT_STATUS[c.status].color + '22', color: CONT_STATUS[c.status].color }}>{CONT_STATUS[c.status].label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="field"><label>Pieces counted while loading for return {unit.pieces != null && <span className="muted">(left with {unit.pieces})</span>}</label>
+                <input className="input" type="number" min="1" inputMode="numeric" placeholder={unit.pieces ?? 'count'} value={form.pieces || ''} onChange={(e) => setForm({ ...form, pieces: e.target.value })} /></div>
+            </>
+          )}
+          {action.key === 'unloadReturn' && (
+            <div className="field"><label>Pieces counted while unloading {unit.pieces != null && <span className="muted">(packed with {unit.pieces})</span>}</label>
+              <input className="input" type="number" min="1" inputMode="numeric" autoFocus placeholder={unit.pieces ?? 'count'} value={form.pieces || ''} onChange={(e) => setForm({ ...form, pieces: e.target.value })} /></div>
           )}
           {action.key !== 'startPacking' && action.key !== 'finishPacking' && (
             <div className="field">

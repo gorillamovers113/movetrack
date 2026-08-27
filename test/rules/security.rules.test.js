@@ -548,3 +548,418 @@ describe('user management — admin only (unchanged)', () => {
     )
   })
 })
+
+// =====================================================================
+// 11. Return phase (docs/superpowers/specs/2026-08-26-return-phase-design.md
+//     §6). Every new return dispatch action from src/store.jsx must be
+//     permitted only when meta/project.returnPhase is true, by the exact
+//     role that owns that reverse step, and only from the right before-stage.
+//     Outbound rules above must stay untouched (regression coverage lives
+//     in the sections above; this section is additive).
+// =====================================================================
+
+async function setReturnPhase(on) {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'meta', 'project'), { returnPhase: on, name: 'Trinity Manor', address: '3940 Park Blvd' })
+  })
+}
+
+describe('meta/project — return phase switch', () => {
+  it('admin writing meta/project (setReturnPhase on) allowed', async () => {
+    await assertSucceeds(
+      setDoc(doc(dbAs(ADMIN), 'meta', 'project'), { returnPhase: true, name: 'Trinity Manor', address: '3940 Park Blvd' })
+    )
+  })
+
+  it('non-admin writing meta/project denied', async () => {
+    await assertFails(
+      setDoc(doc(dbAs(WAREHOUSE), 'meta', 'project'), { returnPhase: true, name: 'Trinity Manor', address: '3940 Park Blvd' })
+    )
+  })
+
+  it('viewer writing meta/project denied', async () => {
+    await assertFails(
+      setDoc(doc(dbAs(VIEWER), 'meta', 'project'), { returnPhase: true, name: 'Trinity Manor', address: '3940 Park Blvd' })
+    )
+  })
+
+  it('active user reading meta/project allowed', async () => {
+    await setReturnPhase(true)
+    await assertSucceeds(getDoc(doc(dbAs(WAREHOUSE), 'meta', 'project')))
+  })
+
+  it('pending user reading meta/project denied', async () => {
+    await setReturnPhase(true)
+    await assertFails(getDoc(doc(dbAs(PENDING), 'meta', 'project')))
+  })
+})
+
+describe('return phase — loadForReturn (warehouse: unit at_warehouse -> return_loaded)', () => {
+  it('warehouse, returnPhase on, right stage: allowed', async () => {
+    await setReturnPhase(true)
+    await seed('units', 'u1', baseUnit({ stage: 'at_warehouse', pieces: 12 }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), {
+        stage: 'return_loaded',
+        containerIds: arrayUnion('c1'),
+      })
+    )
+  })
+
+  it('warehouse, returnPhase OFF: denied', async () => {
+    await setReturnPhase(false)
+    await seed('units', 'u1', baseUnit({ stage: 'at_warehouse', pieces: 12 }))
+    await assertFails(
+      updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), { stage: 'return_loaded', containerIds: arrayUnion('c1') })
+    )
+  })
+
+  it('wrong role (mover), returnPhase on: denied', async () => {
+    await setReturnPhase(true)
+    await seed('units', 'u1', baseUnit({ stage: 'at_warehouse', pieces: 12 }))
+    await assertFails(updateDoc(doc(dbAs(MOVER), 'units', 'u1'), { stage: 'return_loaded' }))
+  })
+
+  it('wrong before-stage (packed), returnPhase on: denied', async () => {
+    await setReturnPhase(true)
+    await seed('units', 'u1', baseUnit({ stage: 'packed', pieces: 12 }))
+    await assertFails(updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), { stage: 'return_loaded' }))
+  })
+})
+
+describe('return phase — loadForReturn (warehouse: container at_warehouse|return_filling -> return_filling)', () => {
+  it('warehouse, returnPhase on, container at_warehouse: allowed', async () => {
+    await setReturnPhase(true)
+    await seed('containers', 'c1', baseContainer({ status: 'at_warehouse', unitIds: [] }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(WAREHOUSE), 'containers', 'c1'), { status: 'return_filling', unitIds: arrayUnion('u1') })
+    )
+  })
+
+  it('warehouse, returnPhase on, container already return_filling (second load): allowed', async () => {
+    await setReturnPhase(true)
+    await seed('containers', 'c1', baseContainer({ status: 'return_filling', unitIds: ['u1'] }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(WAREHOUSE), 'containers', 'c1'), { status: 'return_filling', unitIds: arrayUnion('u2') })
+    )
+  })
+
+  it('warehouse, returnPhase OFF: denied', async () => {
+    await setReturnPhase(false)
+    await seed('containers', 'c1', baseContainer({ status: 'at_warehouse', unitIds: [] }))
+    await assertFails(
+      updateDoc(doc(dbAs(WAREHOUSE), 'containers', 'c1'), { status: 'return_filling', unitIds: arrayUnion('u1') })
+    )
+  })
+
+  it('wrong role (mover), returnPhase on: denied', async () => {
+    await setReturnPhase(true)
+    await seed('containers', 'c1', baseContainer({ status: 'at_warehouse', unitIds: [] }))
+    await assertFails(
+      updateDoc(doc(dbAs(MOVER), 'containers', 'c1'), { status: 'return_filling', unitIds: arrayUnion('u1') })
+    )
+  })
+
+  it('wrong before-stage (empty), returnPhase on: denied', async () => {
+    await setReturnPhase(true)
+    await seed('containers', 'c1', baseContainer({ status: 'empty', unitIds: [] }))
+    await assertFails(
+      updateDoc(doc(dbAs(WAREHOUSE), 'containers', 'c1'), { status: 'return_filling', unitIds: arrayUnion('u1') })
+    )
+  })
+})
+
+describe('return phase — markReturnFull (warehouse: container return_filling -> return_full)', () => {
+  it('warehouse, returnPhase on: allowed', async () => {
+    await setReturnPhase(true)
+    await seed('containers', 'c1', baseContainer({ status: 'return_filling', unitIds: ['u1'] }))
+    await assertSucceeds(updateDoc(doc(dbAs(WAREHOUSE), 'containers', 'c1'), { status: 'return_full' }))
+  })
+
+  it('warehouse, returnPhase OFF: denied', async () => {
+    await setReturnPhase(false)
+    await seed('containers', 'c1', baseContainer({ status: 'return_filling', unitIds: ['u1'] }))
+    await assertFails(updateDoc(doc(dbAs(WAREHOUSE), 'containers', 'c1'), { status: 'return_full' }))
+  })
+
+  it('wrong role (mover), returnPhase on: denied', async () => {
+    await setReturnPhase(true)
+    await seed('containers', 'c1', baseContainer({ status: 'return_filling', unitIds: ['u1'] }))
+    await assertFails(updateDoc(doc(dbAs(MOVER), 'containers', 'c1'), { status: 'return_full' }))
+  })
+
+  it('wrong before-stage (return_full, self-loop not a transition), returnPhase on: denied', async () => {
+    await setReturnPhase(true)
+    await seed('containers', 'c1', baseContainer({ status: 'return_full', unitIds: ['u1'] }))
+    await assertFails(updateDoc(doc(dbAs(WAREHOUSE), 'containers', 'c1'), { status: 'return_full' }))
+  })
+})
+
+describe('return phase — dispatchReturn (warehouse: container return_full -> return_transit; units return_loaded -> return_transit)', () => {
+  it('warehouse, returnPhase on, container return_full: allowed', async () => {
+    await setReturnPhase(true)
+    await seed('containers', 'c1', baseContainer({ status: 'return_full', unitIds: ['u1'] }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(WAREHOUSE), 'containers', 'c1'), {
+        status: 'return_transit',
+        driverName: 'Dave',
+        dispatchedAt: 1,
+        handoffBy: WAREHOUSE,
+      })
+    )
+  })
+
+  it('warehouse, returnPhase on, unit return_loaded: allowed', async () => {
+    await setReturnPhase(true)
+    await seed('units', 'u1', baseUnit({ stage: 'return_loaded' }))
+    await assertSucceeds(updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), { stage: 'return_transit' }))
+  })
+
+  it('warehouse, returnPhase OFF: denied (container)', async () => {
+    await setReturnPhase(false)
+    await seed('containers', 'c1', baseContainer({ status: 'return_full', unitIds: ['u1'] }))
+    await assertFails(updateDoc(doc(dbAs(WAREHOUSE), 'containers', 'c1'), { status: 'return_transit' }))
+  })
+
+  it('wrong role (mover), returnPhase on: denied (container)', async () => {
+    await setReturnPhase(true)
+    await seed('containers', 'c1', baseContainer({ status: 'return_full', unitIds: ['u1'] }))
+    await assertFails(updateDoc(doc(dbAs(MOVER), 'containers', 'c1'), { status: 'return_transit' }))
+  })
+
+  it('wrong before-stage (return_filling), returnPhase on: denied (container)', async () => {
+    await setReturnPhase(true)
+    await seed('containers', 'c1', baseContainer({ status: 'return_filling', unitIds: ['u1'] }))
+    await assertFails(updateDoc(doc(dbAs(WAREHOUSE), 'containers', 'c1'), { status: 'return_transit' }))
+  })
+
+  it('wrong role (mover), returnPhase on: denied (unit)', async () => {
+    await setReturnPhase(true)
+    await seed('units', 'u1', baseUnit({ stage: 'return_loaded' }))
+    await assertFails(updateDoc(doc(dbAs(MOVER), 'units', 'u1'), { stage: 'return_transit' }))
+  })
+
+  it('wrong before-stage (at_warehouse), returnPhase on: denied (unit)', async () => {
+    await setReturnPhase(true)
+    await seed('units', 'u1', baseUnit({ stage: 'at_warehouse' }))
+    await assertFails(updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), { stage: 'return_transit' }))
+  })
+})
+
+describe('return phase — deliverReturn (mover: container return_transit -> back_on_site; units return_transit -> back_on_site)', () => {
+  it('mover, returnPhase on, container return_transit: allowed', async () => {
+    await setReturnPhase(true)
+    await seed('containers', 'c1', baseContainer({ status: 'return_transit', unitIds: ['u1'] }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(MOVER), 'containers', 'c1'), { status: 'back_on_site', receivedBy: MOVER, backOnSiteAt: 1 })
+    )
+  })
+
+  it('mover, returnPhase on, unit return_transit: allowed', async () => {
+    await setReturnPhase(true)
+    await seed('units', 'u1', baseUnit({ stage: 'return_transit' }))
+    await assertSucceeds(updateDoc(doc(dbAs(MOVER), 'units', 'u1'), { stage: 'back_on_site' }))
+  })
+
+  it('mover, returnPhase OFF: denied (container)', async () => {
+    await setReturnPhase(false)
+    await seed('containers', 'c1', baseContainer({ status: 'return_transit', unitIds: ['u1'] }))
+    await assertFails(updateDoc(doc(dbAs(MOVER), 'containers', 'c1'), { status: 'back_on_site' }))
+  })
+
+  it('wrong role (warehouse), returnPhase on: denied (container)', async () => {
+    await setReturnPhase(true)
+    await seed('containers', 'c1', baseContainer({ status: 'return_transit', unitIds: ['u1'] }))
+    await assertFails(updateDoc(doc(dbAs(WAREHOUSE), 'containers', 'c1'), { status: 'back_on_site' }))
+  })
+
+  it('wrong before-stage (return_full), returnPhase on: denied (container)', async () => {
+    await setReturnPhase(true)
+    await seed('containers', 'c1', baseContainer({ status: 'return_full', unitIds: ['u1'] }))
+    await assertFails(updateDoc(doc(dbAs(MOVER), 'containers', 'c1'), { status: 'back_on_site' }))
+  })
+
+  it('wrong role (warehouse), returnPhase on: denied (unit)', async () => {
+    await setReturnPhase(true)
+    await seed('units', 'u1', baseUnit({ stage: 'return_transit' }))
+    await assertFails(updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), { stage: 'back_on_site' }))
+  })
+
+  it('wrong before-stage (return_loaded), returnPhase on: denied (unit)', async () => {
+    await setReturnPhase(true)
+    await seed('units', 'u1', baseUnit({ stage: 'return_loaded' }))
+    await assertFails(updateDoc(doc(dbAs(MOVER), 'units', 'u1'), { stage: 'back_on_site' }))
+  })
+})
+
+describe('return phase — unloadReturn (mover: unit back_on_site -> unloaded; container -> returned_empty)', () => {
+  it('mover, returnPhase on, unit back_on_site: allowed', async () => {
+    await setReturnPhase(true)
+    await seed('units', 'u1', baseUnit({ stage: 'back_on_site', pieces: 12 }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(MOVER), 'units', 'u1'), { stage: 'unloaded', 'crew.movers': arrayUnion(MOVER) })
+    )
+  })
+
+  it('mover, returnPhase on, last unit out flips container back_on_site -> returned_empty: allowed', async () => {
+    await setReturnPhase(true)
+    await seed('containers', 'c1', baseContainer({ status: 'back_on_site', unitIds: ['u1'] }))
+    await assertSucceeds(updateDoc(doc(dbAs(MOVER), 'containers', 'c1'), { status: 'returned_empty' }))
+  })
+
+  it('mover, returnPhase OFF: denied (unit)', async () => {
+    await setReturnPhase(false)
+    await seed('units', 'u1', baseUnit({ stage: 'back_on_site', pieces: 12 }))
+    await assertFails(updateDoc(doc(dbAs(MOVER), 'units', 'u1'), { stage: 'unloaded' }))
+  })
+
+  it('mover, returnPhase OFF: denied (container)', async () => {
+    await setReturnPhase(false)
+    await seed('containers', 'c1', baseContainer({ status: 'back_on_site', unitIds: ['u1'] }))
+    await assertFails(updateDoc(doc(dbAs(MOVER), 'containers', 'c1'), { status: 'returned_empty' }))
+  })
+
+  it('wrong role (warehouse), returnPhase on: denied (unit)', async () => {
+    await setReturnPhase(true)
+    await seed('units', 'u1', baseUnit({ stage: 'back_on_site', pieces: 12 }))
+    await assertFails(updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), { stage: 'unloaded' }))
+  })
+
+  it('wrong before-stage (return_transit), returnPhase on: denied (unit)', async () => {
+    await setReturnPhase(true)
+    await seed('units', 'u1', baseUnit({ stage: 'return_transit' }))
+    await assertFails(updateDoc(doc(dbAs(MOVER), 'units', 'u1'), { stage: 'unloaded' }))
+  })
+
+  it('wrong role (warehouse), returnPhase on: denied (container)', async () => {
+    await setReturnPhase(true)
+    await seed('containers', 'c1', baseContainer({ status: 'back_on_site', unitIds: ['u1'] }))
+    await assertFails(updateDoc(doc(dbAs(WAREHOUSE), 'containers', 'c1'), { status: 'returned_empty' }))
+  })
+})
+
+describe('return phase — unpackUnit (packer: unit unloaded -> unpacked, terminal)', () => {
+  it('packer, returnPhase on: allowed', async () => {
+    await setReturnPhase(true)
+    await seed('units', 'u1', baseUnit({ stage: 'unloaded' }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(PACKER), 'units', 'u1'), {
+        stage: 'unpacked',
+        'crew.packers': arrayUnion(PACKER),
+        media: arrayUnion({ id: 'm1', kind: 'photo', url: 'x' }),
+      })
+    )
+  })
+
+  it('packer, returnPhase OFF: denied', async () => {
+    await setReturnPhase(false)
+    await seed('units', 'u1', baseUnit({ stage: 'unloaded' }))
+    await assertFails(updateDoc(doc(dbAs(PACKER), 'units', 'u1'), { stage: 'unpacked' }))
+  })
+
+  it('wrong role (mover), returnPhase on: denied', async () => {
+    await setReturnPhase(true)
+    await seed('units', 'u1', baseUnit({ stage: 'unloaded' }))
+    await assertFails(updateDoc(doc(dbAs(MOVER), 'units', 'u1'), { stage: 'unpacked' }))
+  })
+
+  it('wrong before-stage (back_on_site), returnPhase on: denied', async () => {
+    await setReturnPhase(true)
+    await seed('units', 'u1', baseUnit({ stage: 'back_on_site' }))
+    await assertFails(updateDoc(doc(dbAs(PACKER), 'units', 'u1'), { stage: 'unpacked' }))
+  })
+})
+
+describe('return phase — transportOverflowBack (mover: overflow at_warehouse -> rt_transit)', () => {
+  it('mover, returnPhase on: allowed', async () => {
+    await setReturnPhase(true)
+    await seed('overflow', 'o1', baseOverflow({ stage: 'at_warehouse' }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(MOVER), 'overflow', 'o1'), { stage: 'rt_transit', rtTransitAt: 1, transportBy: MOVER })
+    )
+  })
+
+  it('mover, returnPhase OFF: denied', async () => {
+    await setReturnPhase(false)
+    await seed('overflow', 'o1', baseOverflow({ stage: 'at_warehouse' }))
+    await assertFails(updateDoc(doc(dbAs(MOVER), 'overflow', 'o1'), { stage: 'rt_transit' }))
+  })
+
+  it('wrong role (warehouse), returnPhase on: denied', async () => {
+    await setReturnPhase(true)
+    await seed('overflow', 'o1', baseOverflow({ stage: 'at_warehouse' }))
+    await assertFails(updateDoc(doc(dbAs(WAREHOUSE), 'overflow', 'o1'), { stage: 'rt_transit' }))
+  })
+
+  it('wrong before-stage (in_transit), returnPhase on: denied', async () => {
+    await setReturnPhase(true)
+    await seed('overflow', 'o1', baseOverflow({ stage: 'in_transit' }))
+    await assertFails(updateDoc(doc(dbAs(MOVER), 'overflow', 'o1'), { stage: 'rt_transit' }))
+  })
+})
+
+describe('return phase — returnOverflow (mover or packer: overflow rt_transit -> returned)', () => {
+  it('mover, returnPhase on: allowed', async () => {
+    await setReturnPhase(true)
+    await seed('overflow', 'o1', baseOverflow({ stage: 'rt_transit' }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(MOVER), 'overflow', 'o1'), {
+        stage: 'returned',
+        returnedAt: 1,
+        returnedBy: MOVER,
+        media: arrayUnion({ id: 'm1', kind: 'photo', url: 'x' }),
+      })
+    )
+  })
+
+  it('packer, returnPhase on: allowed', async () => {
+    await setReturnPhase(true)
+    await seed('overflow', 'o1', baseOverflow({ stage: 'rt_transit' }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(PACKER), 'overflow', 'o1'), {
+        stage: 'returned',
+        returnedAt: 1,
+        returnedBy: PACKER,
+        media: arrayUnion({ id: 'm1', kind: 'photo', url: 'x' }),
+      })
+    )
+  })
+
+  it('returnPhase OFF: denied', async () => {
+    await setReturnPhase(false)
+    await seed('overflow', 'o1', baseOverflow({ stage: 'rt_transit' }))
+    await assertFails(updateDoc(doc(dbAs(MOVER), 'overflow', 'o1'), { stage: 'returned' }))
+  })
+
+  it('wrong role (warehouse), returnPhase on: denied', async () => {
+    await setReturnPhase(true)
+    await seed('overflow', 'o1', baseOverflow({ stage: 'rt_transit' }))
+    await assertFails(updateDoc(doc(dbAs(WAREHOUSE), 'overflow', 'o1'), { stage: 'returned' }))
+  })
+
+  it('wrong before-stage (at_warehouse), returnPhase on: denied', async () => {
+    await setReturnPhase(true)
+    await seed('overflow', 'o1', baseOverflow({ stage: 'at_warehouse' }))
+    await assertFails(updateDoc(doc(dbAs(MOVER), 'overflow', 'o1'), { stage: 'returned' }))
+  })
+})
+
+describe('return phase — identity guards still apply on return transitions', () => {
+  it('warehouse changing unit number during loadForReturn denied', async () => {
+    await setReturnPhase(true)
+    await seed('units', 'u1', baseUnit({ stage: 'at_warehouse', pieces: 12 }))
+    await assertFails(updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), { stage: 'return_loaded', number: 'B999' }))
+  })
+
+  it('mover changing container number during deliverReturn denied', async () => {
+    await setReturnPhase(true)
+    await seed('containers', 'c1', baseContainer({ status: 'return_transit', unitIds: ['u1'] }))
+    await assertFails(updateDoc(doc(dbAs(MOVER), 'containers', 'c1'), { status: 'back_on_site', number: 'ZZ-9' }))
+  })
+
+  it('mover changing overflow unitId during returnOverflow denied', async () => {
+    await setReturnPhase(true)
+    await seed('overflow', 'o1', baseOverflow({ stage: 'rt_transit' }))
+    await assertFails(updateDoc(doc(dbAs(MOVER), 'overflow', 'o1'), { stage: 'returned', unitId: 'other-unit' }))
+  })
+})
