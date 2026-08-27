@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { useStore } from '../store.jsx'
 import { Modal } from '../ui.jsx'
 import { uploadImage } from '../lib/upload.js'
+import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import { matchContainerByNumber } from '../lib/mutations.js'
 
 // "Receive returning BigBox": the blind container-number check on the
@@ -59,9 +60,9 @@ export default function DeliverReturnButton({ toast }) {
     setBusy(true)
     try {
       const media = photoUrl ? [{ id: `deliver-${Date.now()}`, kind: 'photo', url: photoUrl, label: `Container ${match.number} back on site` }] : []
-      await dispatch({ type: 'deliverReturn', p: { containerId: match.id, media } })
+      const status = await submitWrite(dispatch({ type: 'deliverReturn', p: { containerId: match.id, media } }))
       setOpen(false)
-      toast?.(`Verified, BigBox ${match.number} is back on site ✓`)
+      toast?.(status === 'queued' ? QUEUED_MESSAGE : `Verified, BigBox ${match.number} is back on site ✓`)
     } catch (err) {
       toast?.(err.message || "Couldn't save that. Check your signal and try again.")
     } finally {
@@ -75,12 +76,12 @@ export default function DeliverReturnButton({ toast }) {
   const reportDiscrepancy = async () => {
     setBusy(true)
     try {
-      await dispatch({
+      const status = await submitWrite(dispatch({
         type: 'addNote',
         p: { containerId: '', text: `Return delivery check: typed container number "${typed.trim()}" did not match any container expected back on site. Flagged for admin review.` },
-      })
+      }))
       setOpen(false)
-      toast?.('Discrepancy reported to admin ✓')
+      toast?.(status === 'queued' ? QUEUED_MESSAGE : 'Discrepancy reported to admin ✓')
     } catch (err) {
       toast?.(err.message || "Couldn't save that. Check your signal and try again.")
     } finally {

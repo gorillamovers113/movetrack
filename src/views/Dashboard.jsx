@@ -5,6 +5,7 @@ import { todayKey, findScheduleDay, nextScheduleDay, fmtScheduleDate, progressFo
 import BuildingView from './BuildingView.jsx'
 import NewUnitButton from '../components/NewUnitModal.jsx'
 import ReturnPhaseToggle from '../components/ReturnPhaseToggle.jsx'
+import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 
 // Compact "today" banner: floor + work type + progress vs plan, or a
 // sensible off-day / empty-schedule fallback. Never crashes on an empty
@@ -37,11 +38,11 @@ function TodayBanner({ toast }) {
               setBusy(true)
               try {
                 if (phase === 'return') {
-                  await dispatch({ type: 'seedReturnSchedule', p: {} })
-                  toast?.('Return schedule loaded ✓')
+                  const status = await submitWrite(dispatch({ type: 'seedReturnSchedule', p: {} }))
+                  toast?.(status === 'queued' ? QUEUED_MESSAGE : 'Return schedule loaded ✓')
                 } else {
-                  await dispatch({ type: 'seedSchedule', p: {} })
-                  toast?.('Schedule loaded: 27 days, Sep 8 to Oct 8 ✓')
+                  const status = await submitWrite(dispatch({ type: 'seedSchedule', p: {} }))
+                  toast?.(status === 'queued' ? QUEUED_MESSAGE : 'Schedule loaded: 27 days, Sep 8 to Oct 8 ✓')
                 }
               } catch (err) {
                 toast?.(err?.message || "Couldn't load the plan. Check your signal and try again.")

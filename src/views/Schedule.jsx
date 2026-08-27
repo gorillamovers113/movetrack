@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { useStore } from '../store.jsx'
 import { Modal } from '../ui.jsx'
+import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import { fmtScheduleDate, todayKey, progressForDay, targetStageForWork, scheduleForPhase, DEFAULT_RETURN_SCHEDULE } from '../lib/schedule.js'
 import ReturnPhaseToggle from '../components/ReturnPhaseToggle.jsx'
 
@@ -31,11 +32,11 @@ function DayEditModal({ day, onClose, toast }) {
     if (!ready) return
     setBusy(true)
     try {
-      await dispatch({
+      const status = await submitWrite(dispatch({
         type: 'editScheduleDay',
         p: { dateId: day.id, patch: { date: form.date, work: form.work, floor: Number(form.floor), unitCount: Number(form.unitCount) } },
-      })
-      toast?.('Schedule day updated ✓')
+      }))
+      toast?.(status === 'queued' ? QUEUED_MESSAGE : 'Schedule day updated ✓')
       onClose()
     } catch (err) {
       toast?.(err.message || "Couldn't save that. Check your signal and try again.")
@@ -105,11 +106,11 @@ export default function Schedule({ toast }) {
     setBusy(true)
     try {
       if (phase === 'return') {
-        await dispatch({ type: 'seedReturnSchedule', p: {} })
-        toast?.(`Return floor plan loaded: ${DEFAULT_RETURN_SCHEDULE.length} days ✓`)
+        const status = await submitWrite(dispatch({ type: 'seedReturnSchedule', p: {} }))
+        toast?.(status === 'queued' ? QUEUED_MESSAGE : `Return floor plan loaded: ${DEFAULT_RETURN_SCHEDULE.length} days ✓`)
       } else {
-        await dispatch({ type: 'seedSchedule', p: {} })
-        toast?.(phaseSchedule.length ? 'Reset to default plan ✓' : 'Schedule loaded: 27 days, Sep 8 to Oct 8 ✓')
+        const status = await submitWrite(dispatch({ type: 'seedSchedule', p: {} }))
+        toast?.(status === 'queued' ? QUEUED_MESSAGE : (phaseSchedule.length ? 'Reset to default plan ✓' : 'Schedule loaded: 27 days, Sep 8 to Oct 8 ✓'))
       }
     } catch (err) {
       toast?.(err.message || "Couldn't save that. Check your signal and try again.")

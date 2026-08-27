@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { useStore } from '../store.jsx'
 import { Modal } from '../ui.jsx'
 import { uploadImage } from '../lib/upload.js'
+import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 
 // "BigBox swap" — the driver hands off full containers and drops new empties,
 // but never touches the app. The on-site mover is the custody witness: pick
@@ -45,7 +46,7 @@ export default function BigBoxSwapButton({ toast }) {
       const url = await uploadImage(file, `containers/swaps/${Date.now()}-${currentUser.uid}.jpg`)
       setPhotoUrl(url)
     } catch (err) {
-      setPhotoError(err.message || 'Upload failed — try again.')
+      setPhotoError(err.message || 'Upload failed, try again.')
     } finally {
       setUploading(false)
     }
@@ -58,9 +59,9 @@ export default function BigBoxSwapButton({ toast }) {
     setBusy(true)
     try {
       const media = photoUrl ? [{ id: `swap-${Date.now()}`, kind: 'photo', url: photoUrl, label: 'BigBox handoff' }] : []
-      await dispatch({ type: 'bigboxSwap', p: { fullIds: selected, driverName: driverName.trim(), newEmptyNumbers: newNumbers, media } })
+      const status = await submitWrite(dispatch({ type: 'bigboxSwap', p: { fullIds: selected, driverName: driverName.trim(), newEmptyNumbers: newNumbers, media } }))
       setOpen(false)
-      toast?.(`Swap logged with ${driverName.trim()} — ${selected.length} out${newNumbers.length ? `, ${newNumbers.length} new empt${newNumbers.length === 1 ? 'y' : 'ies'} in` : ''} ✓`)
+      toast?.(status === 'queued' ? QUEUED_MESSAGE : `Swap logged with ${driverName.trim()}, ${selected.length} out${newNumbers.length ? `, ${newNumbers.length} new empt${newNumbers.length === 1 ? 'y' : 'ies'} in` : ''} ✓`)
     } catch (err) {
       toast?.(err.message || "Couldn't save that. Check your signal and try again.")
     } finally {
@@ -107,7 +108,7 @@ export default function BigBoxSwapButton({ toast }) {
                 <div className="inv-preview">
                   <img src={preview} alt="Loaded container" className="inv-thumb" />
                   <div className="muted" style={{ marginTop: 8 }}>
-                    {uploading ? 'Uploading…' : photoUrl ? '✓ Uploaded — tap to retake' : photoError || 'Tap to retake'}
+                    {uploading ? 'Uploading…' : photoUrl ? '✓ Uploaded, tap to retake' : photoError || 'Tap to retake'}
                   </div>
                 </div>
               ) : <>📷 Tap to photograph the loaded container(s)</>}

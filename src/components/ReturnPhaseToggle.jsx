@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
 import { useStore } from '../store.jsx'
+import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 
 // Admin-only "Begin / End return phase" switch
 // (docs/superpowers/specs/2026-08-26-return-phase-design.md section 2).
@@ -22,8 +23,8 @@ export default function ReturnPhaseToggle({ toast }) {
     if (!confirm(msg)) return
     setBusy(true)
     try {
-      await dispatch({ type: 'setReturnPhase', p: { on: !on } })
-      toast?.(on ? 'Return phase ended ✓' : 'Return phase begun. The board now shows return actions ✓')
+      const status = await submitWrite(dispatch({ type: 'setReturnPhase', p: { on: !on } }))
+      toast?.(status === 'queued' ? QUEUED_MESSAGE : (on ? 'Return phase ended ✓' : 'Return phase begun. The board now shows return actions ✓'))
     } catch (err) {
       toast?.(err.message || "Couldn't save that. Check your signal and try again.")
     } finally {

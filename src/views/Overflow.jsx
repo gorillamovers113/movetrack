@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react'
 import { useStore, OVERFLOW_STATUS, overflowAction } from '../store.jsx'
 import { Modal, Lightbox, EventRow, AttributedMedia } from '../ui.jsx'
 import { uploadImage } from '../lib/upload.js'
+import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import ReportOverflowButton from '../components/ReportOverflowButton.jsx'
 
 // Lifecycle order the pool view groups by, matches OVERFLOW_STATUS in
@@ -110,8 +111,8 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
     if (busyIds.has(item.id)) return false
     setBusyIds((s) => new Set(s).add(item.id))
     try {
-      await dispatch({ type: 'transportOverflow', p: { overflowId: item.id } })
-      toast(`Unit ${item.unitNumber} overflow item: loaded for transport ✓`)
+      const status = await submitWrite(dispatch({ type: 'transportOverflow', p: { overflowId: item.id } }))
+      toast(status === 'queued' ? QUEUED_MESSAGE : `Unit ${item.unitNumber} overflow item: loaded for transport ✓`)
       return true
     } catch (err) {
       toast(err.message || SAVE_ERROR)
@@ -127,8 +128,8 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
     setBusy(true)
     try {
       const media = [{ id: `prep-${Date.now()}`, kind: 'photo', url: pUrl, label: 'Padded, wrapped & labeled' }]
-      await dispatch({ type: 'prepOverflow', p: { overflowId: open.id, media } })
-      toast(`Unit ${open.unitNumber} overflow item: prepped ✓`)
+      const status = await submitWrite(dispatch({ type: 'prepOverflow', p: { overflowId: open.id, media } }))
+      toast(status === 'queued' ? QUEUED_MESSAGE : `Unit ${open.unitNumber} overflow item: prepped ✓`)
       close()
     } catch (err) {
       toast(err.message || SAVE_ERROR)
@@ -142,8 +143,8 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
     setBusy(true)
     try {
       const media = rUrl ? [{ id: `recv-${Date.now()}`, kind: 'photo', url: rUrl, label: 'Received condition' }] : []
-      await dispatch({ type: 'receiveOverflow', p: { overflowId: open.id, warehouseLocation: location.trim(), media } })
-      toast(`Unit ${open.unitNumber} overflow item: received at ${location.trim()} ✓`)
+      const status = await submitWrite(dispatch({ type: 'receiveOverflow', p: { overflowId: open.id, warehouseLocation: location.trim(), media } }))
+      toast(status === 'queued' ? QUEUED_MESSAGE : `Unit ${open.unitNumber} overflow item: received at ${location.trim()} ✓`)
       close()
     } catch (err) {
       toast(err.message || SAVE_ERROR)
@@ -156,8 +157,8 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
     setBusy(true)
     try {
       const media = bUrl ? [{ id: `back-${Date.now()}`, kind: 'photo', url: bUrl, label: 'Loaded for return transport' }] : []
-      await dispatch({ type: 'transportOverflowBack', p: { overflowId: open.id, media } })
-      toast(`Unit ${open.unitNumber} overflow item: loaded for return transport ✓`)
+      const status = await submitWrite(dispatch({ type: 'transportOverflowBack', p: { overflowId: open.id, media } }))
+      toast(status === 'queued' ? QUEUED_MESSAGE : `Unit ${open.unitNumber} overflow item: loaded for return transport ✓`)
       close()
     } catch (err) {
       toast(err.message || SAVE_ERROR)
@@ -172,8 +173,8 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
     setBusy(true)
     try {
       const media = [{ id: `return-${Date.now()}`, kind: 'photo', url: pUrl, label: 'Unwrapped & placed back' }]
-      await dispatch({ type: 'returnOverflow', p: { overflowId: open.id, media } })
-      toast(`Unit ${open.unitNumber} overflow item: back in place ✓`)
+      const status = await submitWrite(dispatch({ type: 'returnOverflow', p: { overflowId: open.id, media } }))
+      toast(status === 'queued' ? QUEUED_MESSAGE : `Unit ${open.unitNumber} overflow item: back in place ✓`)
       close()
     } catch (err) {
       toast(err.message || SAVE_ERROR)
@@ -279,8 +280,8 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
                   <button className="btn btn-dark btn-sm" style={{ marginTop: 8 }} disabled={busy || !resolveNote.trim()} onClick={async () => {
                     setBusy(true)
                     try {
-                      await dispatch({ type: 'resolveOverflowFlag', p: { overflowId: open.id, note: resolveNote.trim() } })
-                      setResolveNote(''); toast('Flag resolved ✓')
+                      const status = await submitWrite(dispatch({ type: 'resolveOverflowFlag', p: { overflowId: open.id, note: resolveNote.trim() } }))
+                      setResolveNote(''); toast(status === 'queued' ? QUEUED_MESSAGE : 'Flag resolved ✓')
                     } catch (err) {
                       toast(err.message || SAVE_ERROR)
                     } finally {

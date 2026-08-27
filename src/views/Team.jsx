@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { ROLES } from '../seed.js'
 import { useStore, fmtTime, fmtAgo } from '../store.jsx'
 import { Avatar, Modal } from '../ui.jsx'
+import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 
 export default function Team({ toast }) {
   const { state, dispatch, currentUser } = useStore()
@@ -57,8 +58,8 @@ export default function Team({ toast }) {
                 <>
                   <button className="btn btn-primary btn-sm" disabled={busyIds.has(u.id)} onClick={() => { setRole('packer'); setApproving(u) }}>Approve…</button>
                   <button className="btn btn-danger btn-sm" disabled={busyIds.has(u.id)} onClick={() => withUserBusy(u.id, async () => {
-                    await dispatch({ type: 'denyUser', p: { userId: u.id, byId: currentUser.uid } })
-                    toast(`${u.name} denied`)
+                    const status = await submitWrite(dispatch({ type: 'denyUser', p: { userId: u.id, byId: currentUser.uid } }))
+                    toast(status === 'queued' ? QUEUED_MESSAGE : `${u.name} denied`)
                   })}>{busyIds.has(u.id) ? 'Working…' : 'Deny'}</button>
                 </>
               ) : <span className="badge" style={{ background: '#fffbeb', color: '#92400e' }}>Pending admin review</span>}
@@ -80,8 +81,8 @@ export default function Team({ toast }) {
                     {isAdmin && u.id !== currentUser.uid ? (
                       <select className="input" style={{ width: 'auto', padding: '5px 9px', fontSize: 13 }} value={u.role} disabled={busyIds.has(u.id)}
                         onChange={(e) => { const nextRole = e.target.value; withUserBusy(u.id, async () => {
-                          await dispatch({ type: 'changeRole', p: { userId: u.id, role: nextRole, byId: currentUser.uid } })
-                          toast(`${u.name} → ${ROLES[nextRole].label}`)
+                          const status = await submitWrite(dispatch({ type: 'changeRole', p: { userId: u.id, role: nextRole, byId: currentUser.uid } }))
+                          toast(status === 'queued' ? QUEUED_MESSAGE : `${u.name} → ${ROLES[nextRole].label}`)
                         }) }}>
                         {ASSIGNABLE.map(([k, r]) => <option key={k} value={k}>{r.label}</option>)}
                       </select>
@@ -97,8 +98,8 @@ export default function Team({ toast }) {
                         <button className="btn btn-danger btn-sm" disabled={busyIds.has(u.id)} onClick={() => {
                           if (confirm(`Remove ${u.name}'s access? They'll lose access to the board on next load.`)) {
                             withUserBusy(u.id, async () => {
-                              await dispatch({ type: 'removeUser', p: { userId: u.id, byId: currentUser.uid } })
-                              toast(`${u.name} removed`)
+                              const status = await submitWrite(dispatch({ type: 'removeUser', p: { userId: u.id, byId: currentUser.uid } }))
+                              toast(status === 'queued' ? QUEUED_MESSAGE : `${u.name} removed`)
                             })
                           }
                         }}>{busyIds.has(u.id) ? 'Working…' : 'Remove'}</button>
@@ -124,8 +125,8 @@ export default function Team({ toast }) {
           <button className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={busy} onClick={async () => {
             setBusy(true)
             try {
-              await dispatch({ type: 'approveUser', p: { userId: approving.id, role, byId: currentUser.uid } })
-              toast(`${approving.name} approved as ${ROLES[role].label} ✓`)
+              const status = await submitWrite(dispatch({ type: 'approveUser', p: { userId: approving.id, role, byId: currentUser.uid } }))
+              toast(status === 'queued' ? QUEUED_MESSAGE : `${approving.name} approved as ${ROLES[role].label} ✓`)
               setApproving(null)
             } catch (err) {
               toast(err.message || SAVE_ERROR)

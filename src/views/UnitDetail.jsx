@@ -3,6 +3,7 @@ import { STAGES, stageOf } from '../seed.js'
 import { useStore, canAct, filesToMedia, fmtTime, CONT_STATUS } from '../store.jsx'
 import { Modal, Lightbox, Uploader, EventRow, Avatar, StagePill } from '../ui.jsx'
 import { uploadImage } from '../lib/upload.js'
+import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import ReportOverflowButton from '../components/ReportOverflowButton.jsx'
 
 const WAIT_HINTS = {
@@ -55,7 +56,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
       const url = await uploadImage(file, path)
       setInvUrl(url)
     } catch (err) {
-      setInvError(err.message || 'Upload failed — try again.')
+      setInvError(err.message || 'Upload failed, try again.')
     } finally {
       setInvUploading(false)
     }
@@ -113,37 +114,44 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
 
     setBusy(true)
     try {
-      if (action.key === 'startPacking') await dispatch({ type: 'startPacking', p: { unitId } })
+      let status = 'synced'
+      if (action.key === 'startPacking') status = await submitWrite(dispatch({ type: 'startPacking', p: { unitId } }))
       if (action.key === 'finishPacking') {
         const invMedia = [{ id: `inv-${Date.now()}`, kind: 'photo', url: invUrl, label: 'inventory', phase: 'inventory', uid: currentUser.uid, ts: Date.now() }]
-        await dispatch({ type: 'finishPacking', p: { unitId, pieces: n, media: invMedia } })
+        status = await submitWrite(dispatch({ type: 'finishPacking', p: { unitId, pieces: n, media: invMedia } }))
       }
       if (action.key === 'loadUnit') {
         // loadUnit can throw if the picked container was just filled or
         // swapped out by someone else in the meantime (a real race, not a
         // bug): the catch below toasts instead of leaving the crew member
-        // staring at a form that silently did nothing.
-        await dispatch({ type: 'loadUnit', p: { unitId, containerId: form.containerId, pieces: n, media } })
+        // staring at a form that silently did nothing. That throw happens
+        // synchronously before any write, so submitWrite still surfaces it
+        // even offline (see src/lib/submit.js).
+        status = await submitWrite(dispatch({ type: 'loadUnit', p: { unitId, containerId: form.containerId, pieces: n, media } }))
       }
       if (action.key === 'loadForReturn') {
         // loadForReturn can throw if the picked container was just filled or
         // dispatched by someone else in the meantime (a real race, not a
         // bug): catch it and toast so the warehouse worker can refresh and
         // pick another container instead of the form silently doing nothing.
-        await dispatch({ type: 'loadForReturn', p: { unitId, containerId: form.containerId, pieces: n, media } })
+        status = await submitWrite(dispatch({ type: 'loadForReturn', p: { unitId, containerId: form.containerId, pieces: n, media } }))
       }
       if (action.key === 'unloadReturn') {
-        await dispatch({ type: 'unloadReturn', p: { unitId, pieces: n, media } })
+        status = await submitWrite(dispatch({ type: 'unloadReturn', p: { unitId, pieces: n, media } }))
       }
       if (action.key === 'unpackUnit') {
-        await dispatch({ type: 'unpackUnit', p: { unitId, media } })
+        status = await submitWrite(dispatch({ type: 'unpackUnit', p: { unitId, media } }))
       }
       closeActionModal()
-      const pieceCheckKeys = ['loadUnit', 'unloadReturn', 'loadForReturn']
-      if (pieceCheckKeys.includes(action.key) && unit.pieces != null && n !== unit.pieces) {
-        toast(`⚑ Piece count mismatch flagged (${n} vs ${unit.pieces})`)
+      if (status === 'queued') {
+        toast(QUEUED_MESSAGE)
       } else {
-        toast('Logged, timestamped under your name ✓')
+        const pieceCheckKeys = ['loadUnit', 'unloadReturn', 'loadForReturn']
+        if (pieceCheckKeys.includes(action.key) && unit.pieces != null && n !== unit.pieces) {
+          toast(`⚑ Piece count mismatch flagged (${n} vs ${unit.pieces})`)
+        } else {
+          toast('Logged, timestamped under your name ✓')
+        }
       }
     } catch (err) {
       toast(err.message || SAVE_ERROR)
@@ -238,8 +246,8 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
                 const media = await filesToMedia(files)
                 if (!media.length) return
                 try {
-                  await dispatch({ type: 'addMedia', p: { unitId, media } })
-                  toast(`${media.length} file${media.length > 1 ? 's' : ''} added to unit ${unit.number} ✓`)
+                  const status = await submitWrite(dispatch({ type: 'addMedia', p: { unitId, media } }))
+                  toast(status === 'queued' ? QUEUED_MESSAGE : `${media.length} file${media.length > 1 ? 's' : ''} added to unit ${unit.number} ✓`)
                 } catch (err) {
                   toast(err.message || SAVE_ERROR)
                 }
@@ -270,7 +278,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
                     <div className="inv-preview">
                       <img src={invPreview} alt="Inventory sheet" className="inv-thumb" />
                       <div className="muted" style={{ marginTop: 8 }}>
-                        {invUploading ? 'Uploading…' : invUrl ? '✓ Uploaded — tap to retake' : invError || 'Tap to retake'}
+                        {invUploading ? 'Uploading…' : invUrl ? '✓ Uploaded, tap to retake' : invError || 'Tap to retake'}
                       </div>
                     </div>
                   ) : <>📷 Tap to photograph the inventory sheet</>}
@@ -355,8 +363,8 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
           <button className="btn btn-primary" style={{ width: '100%' }} disabled={busy || !form.text?.trim()} onClick={async () => {
             setBusy(true)
             try {
-              await dispatch({ type: 'addNote', p: { unitId, text: form.text.trim() } })
-              setModal(null); toast('Note added ✓')
+              const status = await submitWrite(dispatch({ type: 'addNote', p: { unitId, text: form.text.trim() } }))
+              setModal(null); toast(status === 'queued' ? QUEUED_MESSAGE : 'Note added ✓')
             } catch (err) {
               toast(err.message || SAVE_ERROR)
             } finally {
@@ -377,8 +385,8 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
           <button className="btn btn-primary" style={{ width: '100%' }} disabled={busy || !(form.tenant || '').trim()} onClick={async () => {
             setBusy(true)
             try {
-              await dispatch({ type: 'editUnit', p: { unitId, patch: { tenant: (form.tenant || '').trim(), phone: (form.phone || '').trim(), note: (form.note || '').trim() } } })
-              setModal(null); toast('Unit updated — edit logged ✓')
+              const status = await submitWrite(dispatch({ type: 'editUnit', p: { unitId, patch: { tenant: (form.tenant || '').trim(), phone: (form.phone || '').trim(), note: (form.note || '').trim() } } }))
+              setModal(null); toast(status === 'queued' ? QUEUED_MESSAGE : 'Unit updated, edit logged ✓')
             } catch (err) {
               toast(err.message || SAVE_ERROR)
             } finally {
@@ -395,8 +403,8 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
           <button className="btn btn-primary" style={{ width: '100%' }} disabled={busy || !form.text?.trim()} onClick={async () => {
             setBusy(true)
             try {
-              await dispatch({ type: 'resolveFlag', p: { unitId, note: form.text.trim() } })
-              setModal(null); toast('Flag resolved ✓')
+              const status = await submitWrite(dispatch({ type: 'resolveFlag', p: { unitId, note: form.text.trim() } }))
+              setModal(null); toast(status === 'queued' ? QUEUED_MESSAGE : 'Flag resolved ✓')
             } catch (err) {
               toast(err.message || SAVE_ERROR)
             } finally {

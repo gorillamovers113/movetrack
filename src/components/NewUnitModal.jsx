@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useStore } from '../store.jsx'
 import { Modal } from '../ui.jsx'
+import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 
 const FLOORS = Array.from({ length: 9 }, (_, i) => i + 1)
 
@@ -27,10 +28,10 @@ export default function NewUnitButton({ toast }) {
     if (!number || !tenant || !floor) return
     setBusy(true)
     try {
-      await dispatch({ type: 'createUnit', p: { number, tenant, floor } })
+      const status = await submitWrite(dispatch({ type: 'createUnit', p: { number, tenant, floor } }))
       setOpen(false)
       setForm({ number: '', tenant: '', floor: '' })
-      toast?.(`Unit ${number} created ✓`)
+      toast?.(status === 'queued' ? QUEUED_MESSAGE : `Unit ${number} created ✓`)
     } catch (err) {
       toast?.(err.message || "Couldn't save that. Check your signal and try again.")
     } finally {

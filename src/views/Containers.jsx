@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react'
 import { useStore, CONT_STATUS, containerAction } from '../store.jsx'
 import { Modal, Lightbox, EventRow, StagePill } from '../ui.jsx'
 import { uploadImage } from '../lib/upload.js'
+import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import EmptiesInButton from '../components/EmptiesInButton.jsx'
 import BigBoxSwapButton from '../components/BigBoxSwapButton.jsx'
 import DeliverReturnButton from '../components/DeliverReturnButton.jsx'
@@ -72,8 +73,8 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
     if (busyIds.has(c.id)) return false
     setBusyIds((s) => new Set(s).add(c.id))
     try {
-      await dispatch({ type: 'markContainerFull', p: { containerId: c.id } })
-      toast(`${c.number}: marked full — ready for pickup ✓`)
+      const status = await submitWrite(dispatch({ type: 'markContainerFull', p: { containerId: c.id } }))
+      toast(status === 'queued' ? QUEUED_MESSAGE : `${c.number}: marked full, ready for pickup ✓`)
       return true
     } catch (err) {
       toast(err.message || SAVE_ERROR)
@@ -87,8 +88,8 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
     if (busyIds.has(c.id)) return false
     setBusyIds((s) => new Set(s).add(c.id))
     try {
-      await dispatch({ type: 'markReturnFull', p: { containerId: c.id } })
-      toast(`${c.number}: marked full for return, ready for dispatch ✓`)
+      const status = await submitWrite(dispatch({ type: 'markReturnFull', p: { containerId: c.id } }))
+      toast(status === 'queued' ? QUEUED_MESSAGE : `${c.number}: marked full for return, ready for dispatch ✓`)
       return true
     } catch (err) {
       toast(err.message || SAVE_ERROR)
@@ -104,8 +105,8 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
     setBusy(true)
     try {
       const media = drUrl ? [{ id: `dispatch-${Date.now()}`, kind: 'photo', url: drUrl, label: `Container ${open.number} dispatched for return` }] : []
-      await dispatch({ type: 'dispatchReturn', p: { containerId: open.id, driverName: driverName.trim(), media } })
-      toast(`${open.number}: dispatched for return with ${driverName.trim()} ✓`)
+      const status = await submitWrite(dispatch({ type: 'dispatchReturn', p: { containerId: open.id, driverName: driverName.trim(), media } }))
+      toast(status === 'queued' ? QUEUED_MESSAGE : `${open.number}: dispatched for return with ${driverName.trim()} ✓`)
       close()
     } catch (err) {
       toast(err.message || SAVE_ERROR)
@@ -216,8 +217,8 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
                   <button className="btn btn-dark btn-sm" style={{ marginTop: 8 }} disabled={busy || !resolveNote.trim()} onClick={async () => {
                     setBusy(true)
                     try {
-                      await dispatch({ type: 'resolveContainerFlag', p: { containerId: open.id, note: resolveNote.trim() } })
-                      setResolveNote(''); toast('Flag resolved ✓')
+                      const status = await submitWrite(dispatch({ type: 'resolveContainerFlag', p: { containerId: open.id, note: resolveNote.trim() } }))
+                      setResolveNote(''); toast(status === 'queued' ? QUEUED_MESSAGE : 'Flag resolved ✓')
                     } catch (err) {
                       toast(err.message || SAVE_ERROR)
                     } finally {
