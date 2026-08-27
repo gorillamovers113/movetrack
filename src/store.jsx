@@ -179,7 +179,12 @@ export function StoreProvider({ children }) {
         const patch = { stage: 'return_loaded', containerIds: arrayUnion(p.containerId) }
         if (mismatch) patch.flag = { message: `Piece count mismatch at return load: ${p.pieces} loaded vs ${unit.pieces} packed. Recount pending.`, ts: Date.now(), by: currentUser.name, open: true }
         await updateDoc(doc(db, 'units', p.unitId), patch)
-        await updateDoc(doc(db, 'containers', p.containerId), { status: 'return_filling', unitIds: arrayUnion(p.unitId) })
+        // Don't regress a container that's already further along the return
+        // leg (e.g. return_full): only stamp return_filling when it's still
+        // at_warehouse or already return_filling.
+        const contPatch = { unitIds: arrayUnion(p.unitId) }
+        if (cont.status === 'at_warehouse' || cont.status === 'return_filling') contPatch.status = 'return_filling'
+        await updateDoc(doc(db, 'containers', p.containerId), contPatch)
         await ev('stage', `Loaded unit ${unit.number} for return into container ${cont.number}: ${p.pieces} of ${unit.pieces ?? p.pieces} pieces verified`, { unitId: unit.id, containerId: p.containerId, from: unit.stage, to: 'return_loaded', media: p.media })
         if (mismatch) await ev('flag', `FLAG raised on unit ${unit.number}: piece count mismatch on return load (${p.pieces}/${unit.pieces})`, { unitId: unit.id })
         return
@@ -196,7 +201,13 @@ export function StoreProvider({ children }) {
         const patch = { status: 'return_transit', driverName: p.driverName, dispatchedAt: Date.now(), handoffBy: currentUser.uid }
         if (media.length) patch.media = arrayUnion(...media)
         await updateDoc(doc(db, 'containers', p.containerId), patch)
-        await Promise.all((cont0.unitIds || []).map((uid) => updateDoc(doc(db, 'units', uid), { stage: 'return_transit' })))
+        // cont0.unitIds is stale: it still holds every unit ever loaded onto
+        // this physical container, including its outbound trip. Only
+        // promote units actually loaded for THIS return trip (loadForReturn
+        // already flipped them to return_loaded) so a sibling that was
+        // never loaded for return (still at_warehouse) isn't force-promoted.
+        const toDispatch = (cont0.unitIds || []).map((uid) => state.units.find((u) => u.id === uid)).filter((u) => u && u.stage === 'return_loaded')
+        await Promise.all(toDispatch.map((u) => updateDoc(doc(db, 'units', u.id), { stage: 'return_transit' })))
         let addedMsg = ''
         if (p.newEmptyNumbers && p.newEmptyNumbers.length) {
           const newNumbers = p.newEmptyNumbers.map((n) => n.toUpperCase())
@@ -213,7 +224,11 @@ export function StoreProvider({ children }) {
         const patch = { status: 'back_on_site', receivedBy: currentUser.uid, backOnSiteAt: Date.now() }
         if (media.length) patch.media = arrayUnion(...media)
         await updateDoc(doc(db, 'containers', p.containerId), patch)
-        await Promise.all((cont0.unitIds || []).map((uid) => updateDoc(doc(db, 'units', uid), { stage: 'back_on_site' })))
+        // Same staleness guard as dispatchReturn: only promote units that
+        // are actually in transit on this return trip (return_transit), not
+        // every unit ever associated with this container.
+        const toDeliver = (cont0.unitIds || []).map((uid) => state.units.find((u) => u.id === uid)).filter((u) => u && u.stage === 'return_transit')
+        await Promise.all(toDeliver.map((u) => updateDoc(doc(db, 'units', u.id), { stage: 'back_on_site' })))
         return ev('stage', `Container ${cont0.number} delivered back on site`, { containerId: cont0.id, ...(media.length ? { media } : {}) })
       }
       case 'unloadReturn': {
@@ -229,7 +244,13 @@ export function StoreProvider({ children }) {
         await updateDoc(doc(db, 'units', p.unitId), patch)
         const cont = state.containers.find((c) => c.status === 'back_on_site' && (c.unitIds || []).includes(p.unitId))
         if (cont) {
-          const others = cont.unitIds.filter((id) => id !== p.unitId).map((id) => state.units.find((u) => u.id === id)).filter(Boolean)
+          // cont.unitIds is stale (still carries the container's outbound
+          // roster too), so "last unit unloaded" can't just mean every id in
+          // that list: a sibling that was never loaded for this return trip
+          // sits at at_warehouse forever and would block returned_empty from
+          // ever firing. Only count siblings that actually entered the
+          // return flow (anything past at_warehouse) toward "last one out".
+          const others = cont.unitIds.filter((id) => id !== p.unitId).map((id) => state.units.find((u) => u.id === id)).filter((u) => u && u.stage !== 'at_warehouse')
           const allOthersUnloaded = others.every((u) => stageOf(u.stage).step >= stageOf('unloaded').step)
           if (allOthersUnloaded) await updateDoc(doc(db, 'containers', cont.id), { status: 'returned_empty' })
         }
