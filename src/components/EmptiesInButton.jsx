@@ -29,6 +29,8 @@ export default function EmptiesInButton({ toast }) {
       await dispatch({ type: 'logEmpties', p: { numbers } })
       setOpen(false)
       toast?.(`${numbers.length} empty container${numbers.length === 1 ? '' : 's'} logged ✓`)
+    } catch (err) {
+      toast?.(err.message || "Couldn't save that. Check your signal and try again.")
     } finally {
       setBusy(false)
     }

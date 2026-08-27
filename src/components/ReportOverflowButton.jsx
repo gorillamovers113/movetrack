@@ -30,6 +30,8 @@ export default function ReportOverflowButton({ unitId, toast, fullWidth = false 
       await dispatch({ type: 'createOverflow', p: { unitId: pickUnitId, description: description.trim() } })
       setOpen(false)
       toast?.('Overflow item logged ✓')
+    } catch (err) {
+      toast?.(err.message || "Couldn't save that. Check your signal and try again.")
     } finally {
       setBusy(false)
     }

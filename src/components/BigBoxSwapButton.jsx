@@ -61,6 +61,8 @@ export default function BigBoxSwapButton({ toast }) {
       await dispatch({ type: 'bigboxSwap', p: { fullIds: selected, driverName: driverName.trim(), newEmptyNumbers: newNumbers, media } })
       setOpen(false)
       toast?.(`Swap logged with ${driverName.trim()} — ${selected.length} out${newNumbers.length ? `, ${newNumbers.length} new empt${newNumbers.length === 1 ? 'y' : 'ies'} in` : ''} ✓`)
+    } catch (err) {
+      toast?.(err.message || "Couldn't save that. Check your signal and try again.")
     } finally {
       setBusy(false)
     }

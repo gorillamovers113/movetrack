@@ -37,6 +37,8 @@ function DayEditModal({ day, onClose, toast }) {
       })
       toast?.('Schedule day updated ✓')
       onClose()
+    } catch (err) {
+      toast?.(err.message || "Couldn't save that. Check your signal and try again.")
     } finally {
       setBusy(false)
     }
@@ -109,6 +111,8 @@ export default function Schedule({ toast }) {
         await dispatch({ type: 'seedSchedule', p: {} })
         toast?.(phaseSchedule.length ? 'Reset to default plan ✓' : 'Schedule loaded: 27 days, Sep 8 to Oct 8 ✓')
       }
+    } catch (err) {
+      toast?.(err.message || "Couldn't save that. Check your signal and try again.")
     } finally {
       setBusy(false)
     }

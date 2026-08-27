@@ -24,6 +24,8 @@ export default function ReturnPhaseToggle({ toast }) {
     try {
       await dispatch({ type: 'setReturnPhase', p: { on: !on } })
       toast?.(on ? 'Return phase ended ✓' : 'Return phase begun. The board now shows return actions ✓')
+    } catch (err) {
+      toast?.(err.message || "Couldn't save that. Check your signal and try again.")
     } finally {
       setBusy(false)
     }

@@ -79,6 +79,8 @@ export default function ReceiveContainerButton({ toast }) {
       const expected = matched.unitIds.reduce((sum, id) => sum + (state.units.find((u) => u.id === id)?.pieces || 0), 0)
       setOpen(false)
       toast?.(expected && n !== expected ? `Mismatch flagged (${n} vs ${expected}) ⚑` : `Verified, BigBox ${matched.number} received at ${bay.trim()} ✓`)
+    } catch (err) {
+      toast?.(err.message || "Couldn't save that. Check your signal and try again.")
     } finally {
       setBusy(false)
     }
@@ -97,6 +99,8 @@ export default function ReceiveContainerButton({ toast }) {
       })
       setOpen(false)
       toast?.('Discrepancy reported to admin ✓')
+    } catch (err) {
+      toast?.(err.message || "Couldn't save that. Check your signal and try again.")
     } finally {
       setBusy(false)
     }

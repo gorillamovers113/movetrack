@@ -18,6 +18,10 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
   const [resolveNote, setResolveNote] = useState('')
   const [location, setLocation] = useState('')
   const [busy, setBusy] = useState(false)
+  // Per-item busy set so a double-tap on the "load & transport" quick action
+  // (rendered once per card) can't fire the same write twice.
+  const [busyIds, setBusyIds] = useState(() => new Set())
+  const SAVE_ERROR = "Couldn't save that. Check your signal and try again."
 
   // Prep photo (required) and receive photo (optional), same upload-as-you-go
   // capture pattern as Containers' warehouse-receive photo. The prep photo
@@ -99,9 +103,22 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
     }
   }
 
-  const transport = (item) => {
-    dispatch({ type: 'transportOverflow', p: { overflowId: item.id } })
-    toast(`Unit ${item.unitNumber} overflow item: loaded for transport ✓`)
+  // Returns a success boolean (instead of throwing) so a modal-context
+  // caller can decide whether to close the modal: close on success, stay
+  // open with the error toast already shown on failure.
+  const transport = async (item) => {
+    if (busyIds.has(item.id)) return false
+    setBusyIds((s) => new Set(s).add(item.id))
+    try {
+      await dispatch({ type: 'transportOverflow', p: { overflowId: item.id } })
+      toast(`Unit ${item.unitNumber} overflow item: loaded for transport ✓`)
+      return true
+    } catch (err) {
+      toast(err.message || SAVE_ERROR)
+      return false
+    } finally {
+      setBusyIds((s) => { const n = new Set(s); n.delete(item.id); return n })
+    }
   }
 
   const submitPrep = async () => {
@@ -113,6 +130,8 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
       await dispatch({ type: 'prepOverflow', p: { overflowId: open.id, media } })
       toast(`Unit ${open.unitNumber} overflow item: prepped ✓`)
       close()
+    } catch (err) {
+      toast(err.message || SAVE_ERROR)
     } finally {
       setBusy(false)
     }
@@ -126,6 +145,8 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
       await dispatch({ type: 'receiveOverflow', p: { overflowId: open.id, warehouseLocation: location.trim(), media } })
       toast(`Unit ${open.unitNumber} overflow item: received at ${location.trim()} ✓`)
       close()
+    } catch (err) {
+      toast(err.message || SAVE_ERROR)
     } finally {
       setBusy(false)
     }
@@ -138,6 +159,8 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
       await dispatch({ type: 'transportOverflowBack', p: { overflowId: open.id, media } })
       toast(`Unit ${open.unitNumber} overflow item: loaded for return transport ✓`)
       close()
+    } catch (err) {
+      toast(err.message || SAVE_ERROR)
     } finally {
       setBusy(false)
     }
@@ -152,6 +175,8 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
       await dispatch({ type: 'returnOverflow', p: { overflowId: open.id, media } })
       toast(`Unit ${open.unitNumber} overflow item: back in place ✓`)
       close()
+    } catch (err) {
+      toast(err.message || SAVE_ERROR)
     } finally {
       setBusy(false)
     }
@@ -203,8 +228,9 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
                   {act && act.key === 'transportOverflow' && (
                     <button
                       className="btn btn-primary btn-sm" style={{ marginTop: 10, width: '100%' }}
+                      disabled={busyIds.has(item.id)}
                       onClick={(e) => { e.stopPropagation(); transport(item) }}
-                    >{act.label}</button>
+                    >{busyIds.has(item.id) ? 'Saving…' : act.label}</button>
                   )}
                   {act && (act.key === 'transportOverflowBack' || act.key === 'returnOverflow') && (
                     <button
@@ -229,7 +255,7 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
         <Modal
           title={`Overflow item · Unit ${open.unitNumber}`}
           sub={`${OVERFLOW_STATUS[open.stage]?.label || open.stage} · ${open.unitTenant || '—'} · Floor ${open.floor}`}
-          onClose={close}
+          onClose={() => { if (!busy) close() }}
         >
           <div className="field"><label>Description</label><div>{open.description}</div></div>
 
@@ -250,10 +276,17 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
               {open.flag.open && isAdmin && (
                 <div style={{ marginTop: 10 }}>
                   <input className="input" placeholder="How was it resolved?" value={resolveNote} onChange={(e) => setResolveNote(e.target.value)} />
-                  <button className="btn btn-dark btn-sm" style={{ marginTop: 8 }} disabled={!resolveNote.trim()} onClick={() => {
-                    dispatch({ type: 'resolveOverflowFlag', p: { overflowId: open.id, note: resolveNote.trim() } })
-                    setResolveNote(''); toast('Flag resolved ✓')
-                  }}>Resolve flag</button>
+                  <button className="btn btn-dark btn-sm" style={{ marginTop: 8 }} disabled={busy || !resolveNote.trim()} onClick={async () => {
+                    setBusy(true)
+                    try {
+                      await dispatch({ type: 'resolveOverflowFlag', p: { overflowId: open.id, note: resolveNote.trim() } })
+                      setResolveNote(''); toast('Flag resolved ✓')
+                    } catch (err) {
+                      toast(err.message || SAVE_ERROR)
+                    } finally {
+                      setBusy(false)
+                    }
+                  }}>{busy ? 'Saving…' : 'Resolve flag'}</button>
                 </div>
               )}
               {open.flag.open && !isAdmin && <div className="muted" style={{ marginTop: 6 }}>Only the admin can resolve flags.</div>}
@@ -288,7 +321,9 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
 
           {open.stage === 'prepped' && isMover && (
             <div style={{ marginTop: 16 }}>
-              <button className="btn btn-primary btn-lg" style={{ width: '100%' }} onClick={() => { transport(open); close() }}>Load & transport to warehouse</button>
+              <button className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={busyIds.has(open.id)} onClick={async () => { if (await transport(open)) close() }}>
+                {busyIds.has(open.id) ? 'Saving…' : 'Load & transport to warehouse'}
+              </button>
             </div>
           )}
 

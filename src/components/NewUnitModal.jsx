@@ -31,6 +31,8 @@ export default function NewUnitButton({ toast }) {
       setOpen(false)
       setForm({ number: '', tenant: '', floor: '' })
       toast?.(`Unit ${number} created ✓`)
+    } catch (err) {
+      toast?.(err.message || "Couldn't save that. Check your signal and try again.")
     } finally {
       setBusy(false)
     }

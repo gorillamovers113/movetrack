@@ -23,6 +23,10 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
   const [lightbox, setLightbox] = useState(null)
   const [form, setForm] = useState({})
   const [pending, setPending] = useState([])
+  // Guards every dispatch below from a double-tap firing the same write
+  // twice, and gates the confirm buttons while a write is in flight.
+  const [busy, setBusy] = useState(false)
+  const SAVE_ERROR = "Couldn't save that. Check your signal and try again."
 
   // Packer "Finish packing" inventory-sheet photo: captured via the device
   // camera, resized + uploaded to Storage as soon as it's picked so the
@@ -81,57 +85,71 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
   const closeActionModal = () => { setModal(null); resetInventoryCapture() }
 
   const submitAction = async () => {
+    if (busy) return
     const media = pending
     const needsPhoto = ['loadUnit', 'loadForReturn', 'unloadReturn', 'unpackUnit'].includes(action.key)
     if (needsPhoto && !media.some((m) => m.kind === 'photo')) {
       return alert('At least one photo is required to complete this step — the photo record is the whole point.')
     }
-    if (action.key === 'startPacking') dispatch({ type: 'startPacking', p: { unitId } })
+    // Client-side validation up front, same as before: nothing here talks to
+    // Firestore, so it stays outside the busy/try below.
+    const n = parseInt(form.pieces)
     if (action.key === 'finishPacking') {
-      const n = parseInt(form.pieces)
       if (!n || n < 1) return alert('Enter the total pieces packed.')
       if (invUploading) return alert('Still uploading the inventory sheet photo — wait a moment and try again.')
       if (!invUrl) return alert('Take a photo of the paper inventory sheet to finish packing.')
-      const invMedia = [{ id: `inv-${Date.now()}`, kind: 'photo', url: invUrl, label: 'inventory', phase: 'inventory', uid: currentUser.uid, ts: Date.now() }]
-      dispatch({ type: 'finishPacking', p: { unitId, pieces: n, media: invMedia } })
     }
     if (action.key === 'loadUnit') {
-      const containerId = form.containerId
-      const n = parseInt(form.pieces)
-      if (!containerId) return alert('Pick a container to load into.')
+      if (!form.containerId) return alert('Pick a container to load into.')
       if (!n || n < 1) return alert('Enter the piece count you verified while loading.')
-      dispatch({ type: 'loadUnit', p: { unitId, containerId, pieces: n, media } })
-      if (unit.pieces != null && n !== unit.pieces) toast(`⚑ Piece count mismatch flagged (${n} vs ${unit.pieces})`)
     }
     if (action.key === 'loadForReturn') {
-      const containerId = form.containerId
-      const n = parseInt(form.pieces)
-      if (!containerId) return alert('Pick a return container to load into.')
+      if (!form.containerId) return alert('Pick a return container to load into.')
       if (!n || n < 1) return alert('Enter the piece count you verified while loading.')
-      // loadForReturn can throw if the picked container was just filled or
-      // dispatched by someone else in the meantime (a real race, not a bug):
-      // catch it and toast instead of letting the whole form crash, so the
-      // warehouse worker can just refresh and pick another container.
-      try {
-        await dispatch({ type: 'loadForReturn', p: { unitId, containerId, pieces: n, media } })
-      } catch (err) {
-        toast(err.message || 'Could not load for return, try again.')
-        return
-      }
-      if (unit.pieces != null && n !== unit.pieces) toast(`⚑ Piece count mismatch flagged (${n} vs ${unit.pieces})`)
     }
     if (action.key === 'unloadReturn') {
-      const n = parseInt(form.pieces)
       if (!n || n < 1) return alert('Enter the piece count you verified while unloading.')
-      dispatch({ type: 'unloadReturn', p: { unitId, pieces: n, media } })
-      if (unit.pieces != null && n !== unit.pieces) toast(`⚑ Piece count mismatch flagged (${n} vs ${unit.pieces})`)
     }
-    if (action.key === 'unpackUnit') {
-      dispatch({ type: 'unpackUnit', p: { unitId, media } })
+
+    setBusy(true)
+    try {
+      if (action.key === 'startPacking') await dispatch({ type: 'startPacking', p: { unitId } })
+      if (action.key === 'finishPacking') {
+        const invMedia = [{ id: `inv-${Date.now()}`, kind: 'photo', url: invUrl, label: 'inventory', phase: 'inventory', uid: currentUser.uid, ts: Date.now() }]
+        await dispatch({ type: 'finishPacking', p: { unitId, pieces: n, media: invMedia } })
+      }
+      if (action.key === 'loadUnit') {
+        // loadUnit can throw if the picked container was just filled or
+        // swapped out by someone else in the meantime (a real race, not a
+        // bug): the catch below toasts instead of leaving the crew member
+        // staring at a form that silently did nothing.
+        await dispatch({ type: 'loadUnit', p: { unitId, containerId: form.containerId, pieces: n, media } })
+      }
+      if (action.key === 'loadForReturn') {
+        // loadForReturn can throw if the picked container was just filled or
+        // dispatched by someone else in the meantime (a real race, not a
+        // bug): catch it and toast so the warehouse worker can refresh and
+        // pick another container instead of the form silently doing nothing.
+        await dispatch({ type: 'loadForReturn', p: { unitId, containerId: form.containerId, pieces: n, media } })
+      }
+      if (action.key === 'unloadReturn') {
+        await dispatch({ type: 'unloadReturn', p: { unitId, pieces: n, media } })
+      }
+      if (action.key === 'unpackUnit') {
+        await dispatch({ type: 'unpackUnit', p: { unitId, media } })
+      }
+      closeActionModal()
+      const pieceCheckKeys = ['loadUnit', 'unloadReturn', 'loadForReturn']
+      if (pieceCheckKeys.includes(action.key) && unit.pieces != null && n !== unit.pieces) {
+        toast(`⚑ Piece count mismatch flagged (${n} vs ${unit.pieces})`)
+      } else {
+        toast('Logged, timestamped under your name ✓')
+      }
+    } catch (err) {
+      toast(err.message || SAVE_ERROR)
+    } finally {
+      setBusy(false)
     }
-    closeActionModal()
-    const pieceCheckKeys = ['loadUnit', 'unloadReturn', 'loadForReturn']
-    if (!pieceCheckKeys.includes(action.key) || unit.pieces == null || parseInt(form.pieces) === unit.pieces) toast('Logged, timestamped under your name ✓')
   }
 
   return (
@@ -218,7 +236,13 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
               <div className="section-title" style={{ marginTop: 0 }}>Add to the record</div>
               <Uploader onFiles={async (files) => {
                 const media = await filesToMedia(files)
-                if (media.length) { dispatch({ type: 'addMedia', p: { unitId, media } }); toast(`${media.length} file${media.length > 1 ? 's' : ''} added to unit ${unit.number} ✓`) }
+                if (!media.length) return
+                try {
+                  await dispatch({ type: 'addMedia', p: { unitId, media } })
+                  toast(`${media.length} file${media.length > 1 ? 's' : ''} added to unit ${unit.number} ✓`)
+                } catch (err) {
+                  toast(err.message || SAVE_ERROR)
+                }
               }} />
               <button className="btn btn-ghost" style={{ width: '100%', marginTop: 10 }} onClick={() => { setForm({}); setModal('note') }}>📝 Add a note</button>
               <div style={{ marginTop: 10 }}>
@@ -230,7 +254,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
       </div>
 
       {modal === 'action' && action && (
-        <Modal title={action.label} sub={`Unit ${unit.number} · ${unit.tenant} — logged as ${currentUser.name}, ${fmtTime(Date.now())}`} onClose={closeActionModal}>
+        <Modal title={action.label} sub={`Unit ${unit.number} · ${unit.tenant} — logged as ${currentUser.name}, ${fmtTime(Date.now())}`} onClose={() => { if (!busy) closeActionModal() }}>
           {action.key === 'finishPacking' && (
             <>
               <div className="field"><label>Total pieces packed</label>
@@ -319,45 +343,66 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
               {pending.length > 0 && <div className="muted" style={{ marginTop: 6 }}>{pending.length} file{pending.length > 1 ? 's' : ''} attached</div>}
             </div>
           )}
-          <button className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={action.key === 'finishPacking' && invUploading} onClick={submitAction}>Confirm — {action.label}</button>
+          <button className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={busy || (action.key === 'finishPacking' && invUploading)} onClick={submitAction}>{busy ? 'Saving…' : `Confirm — ${action.label}`}</button>
         </Modal>
       )}
 
       {modal === 'note' && (
-        <Modal title="Add a note" sub={`Unit ${unit.number} — logged as ${currentUser.name} with date & time`} onClose={() => setModal(null)}>
+        <Modal title="Add a note" sub={`Unit ${unit.number} — logged as ${currentUser.name} with date & time`} onClose={() => { if (!busy) setModal(null) }}>
           <div className="field">
             <textarea className="input" rows="4" autoFocus placeholder="e.g. Tenant asked us to keep the bikes accessible…" value={form.text || ''} onChange={(e) => setForm({ ...form, text: e.target.value })} />
           </div>
-          <button className="btn btn-primary" style={{ width: '100%' }} disabled={!form.text?.trim()} onClick={() => {
-            dispatch({ type: 'addNote', p: { unitId, text: form.text.trim() } })
-            setModal(null); toast('Note added ✓')
-          }}>Save note</button>
+          <button className="btn btn-primary" style={{ width: '100%' }} disabled={busy || !form.text?.trim()} onClick={async () => {
+            setBusy(true)
+            try {
+              await dispatch({ type: 'addNote', p: { unitId, text: form.text.trim() } })
+              setModal(null); toast('Note added ✓')
+            } catch (err) {
+              toast(err.message || SAVE_ERROR)
+            } finally {
+              setBusy(false)
+            }
+          }}>{busy ? 'Saving…' : 'Save note'}</button>
         </Modal>
       )}
 
       {modal === 'edit' && (
-        <Modal title={`Edit unit ${unit.number}`} sub="Admin only — the change itself gets logged in the activity record." onClose={() => setModal(null)}>
+        <Modal title={`Edit unit ${unit.number}`} sub="Admin only — the change itself gets logged in the activity record." onClose={() => { if (!busy) setModal(null) }}>
           <div className="field"><label>Tenant name</label>
             <input className="input" value={form.tenant || ''} onChange={(e) => setForm({ ...form, tenant: e.target.value })} /></div>
           <div className="field"><label>Phone</label>
             <input className="input" value={form.phone || ''} onChange={(e) => setForm({ ...form, phone: e.target.value })} /></div>
           <div className="field"><label>Special notes</label>
             <textarea className="input" rows="2" value={form.note || ''} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="e.g. Piano — needs 4-person crew" /></div>
-          <button className="btn btn-primary" style={{ width: '100%' }} onClick={() => {
-            dispatch({ type: 'editUnit', p: { unitId, patch: { tenant: form.tenant.trim(), phone: form.phone.trim(), note: (form.note || '').trim() } } })
-            setModal(null); toast('Unit updated — edit logged ✓')
-          }}>Save changes</button>
+          <button className="btn btn-primary" style={{ width: '100%' }} disabled={busy} onClick={async () => {
+            setBusy(true)
+            try {
+              await dispatch({ type: 'editUnit', p: { unitId, patch: { tenant: form.tenant.trim(), phone: form.phone.trim(), note: (form.note || '').trim() } } })
+              setModal(null); toast('Unit updated — edit logged ✓')
+            } catch (err) {
+              toast(err.message || SAVE_ERROR)
+            } finally {
+              setBusy(false)
+            }
+          }}>{busy ? 'Saving…' : 'Save changes'}</button>
         </Modal>
       )}
 
       {modal === 'resolve' && (
-        <Modal title="Resolve flag" sub={unit.flag?.message} onClose={() => setModal(null)}>
+        <Modal title="Resolve flag" sub={unit.flag?.message} onClose={() => { if (!busy) setModal(null) }}>
           <div className="field"><label>How was it resolved?</label>
             <textarea className="input" rows="3" autoFocus value={form.text || ''} onChange={(e) => setForm({ ...form, text: e.target.value })} placeholder="e.g. Recounted at warehouse — all 18 pieces present." /></div>
-          <button className="btn btn-primary" style={{ width: '100%' }} disabled={!form.text?.trim()} onClick={() => {
-            dispatch({ type: 'resolveFlag', p: { unitId, note: form.text.trim() } })
-            setModal(null); toast('Flag resolved ✓')
-          }}>Mark resolved</button>
+          <button className="btn btn-primary" style={{ width: '100%' }} disabled={busy || !form.text?.trim()} onClick={async () => {
+            setBusy(true)
+            try {
+              await dispatch({ type: 'resolveFlag', p: { unitId, note: form.text.trim() } })
+              setModal(null); toast('Flag resolved ✓')
+            } catch (err) {
+              toast(err.message || SAVE_ERROR)
+            } finally {
+              setBusy(false)
+            }
+          }}>{busy ? 'Saving…' : 'Mark resolved'}</button>
         </Modal>
       )}
 

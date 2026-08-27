@@ -21,6 +21,10 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
   const [lightbox, setLightbox] = useState(null)
   const [resolveNote, setResolveNote] = useState('')
   const [busy, setBusy] = useState(false)
+  // Per-container busy set so a double-tap on the "mark full" quick action
+  // (rendered once per card) can't fire the same write twice.
+  const [busyIds, setBusyIds] = useState(() => new Set())
+  const SAVE_ERROR = "Couldn't save that. Check your signal and try again."
 
   // Return-leg "dispatch for return" (driver name + optional photo), the
   // mirror of the outbound BigBox swap but one container at a time instead
@@ -61,14 +65,37 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
     }
   }
 
-  const markFull = (c) => {
-    dispatch({ type: 'markContainerFull', p: { containerId: c.id } })
-    toast(`${c.number}: marked full — ready for pickup ✓`)
+  // Both return a success boolean (instead of throwing) so a modal-context
+  // caller can decide whether to close the modal: close on success, stay
+  // open with the error toast already shown on failure.
+  const markFull = async (c) => {
+    if (busyIds.has(c.id)) return false
+    setBusyIds((s) => new Set(s).add(c.id))
+    try {
+      await dispatch({ type: 'markContainerFull', p: { containerId: c.id } })
+      toast(`${c.number}: marked full — ready for pickup ✓`)
+      return true
+    } catch (err) {
+      toast(err.message || SAVE_ERROR)
+      return false
+    } finally {
+      setBusyIds((s) => { const n = new Set(s); n.delete(c.id); return n })
+    }
   }
 
-  const markReturnFull = (c) => {
-    dispatch({ type: 'markReturnFull', p: { containerId: c.id } })
-    toast(`${c.number}: marked full for return, ready for dispatch ✓`)
+  const markReturnFull = async (c) => {
+    if (busyIds.has(c.id)) return false
+    setBusyIds((s) => new Set(s).add(c.id))
+    try {
+      await dispatch({ type: 'markReturnFull', p: { containerId: c.id } })
+      toast(`${c.number}: marked full for return, ready for dispatch ✓`)
+      return true
+    } catch (err) {
+      toast(err.message || SAVE_ERROR)
+      return false
+    } finally {
+      setBusyIds((s) => { const n = new Set(s); n.delete(c.id); return n })
+    }
   }
 
   const submitDispatchReturn = async () => {
@@ -80,6 +107,8 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
       await dispatch({ type: 'dispatchReturn', p: { containerId: open.id, driverName: driverName.trim(), media } })
       toast(`${open.number}: dispatched for return with ${driverName.trim()} ✓`)
       close()
+    } catch (err) {
+      toast(err.message || SAVE_ERROR)
     } finally {
       setBusy(false)
     }
@@ -141,8 +170,9 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
                   {quickAction && (
                     <button
                       className="btn btn-primary btn-sm" style={{ marginTop: 10, width: '100%' }}
+                      disabled={busyIds.has(c.id)}
                       onClick={(e) => { e.stopPropagation(); if (quickAction.key === 'markReturnFull') markReturnFull(c); else markFull(c) }}
-                    >{quickAction.label}</button>
+                    >{busyIds.has(c.id) ? 'Saving…' : quickAction.label}</button>
                   )}
                   {status === 'return_full' && isWarehouse && (
                     <button
@@ -161,7 +191,7 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
         <Modal
           title={`Container ${open.number}`}
           sub={`${CONT_STATUS[open.status]?.label || open.status}${open.bay ? ' · ' + open.bay : ''}${open.driverName ? ' · driver: ' + open.driverName : ''}`}
-          onClose={close}
+          onClose={() => { if (!busy) close() }}
         >
           <div className="section-title" style={{ marginTop: 0 }}>Units inside</div>
           {open.unitIds.length === 0 && <div className="muted" style={{ padding: '6px 0' }}>No units loaded yet.</div>}
@@ -183,10 +213,17 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
               {open.flag.open && currentUser?.role === 'admin' && (
                 <div style={{ marginTop: 10 }}>
                   <input className="input" placeholder="How was it resolved?" value={resolveNote} onChange={(e) => setResolveNote(e.target.value)} />
-                  <button className="btn btn-dark btn-sm" style={{ marginTop: 8 }} disabled={!resolveNote.trim()} onClick={() => {
-                    dispatch({ type: 'resolveContainerFlag', p: { containerId: open.id, note: resolveNote.trim() } })
-                    setResolveNote(''); toast('Flag resolved ✓')
-                  }}>Resolve flag</button>
+                  <button className="btn btn-dark btn-sm" style={{ marginTop: 8 }} disabled={busy || !resolveNote.trim()} onClick={async () => {
+                    setBusy(true)
+                    try {
+                      await dispatch({ type: 'resolveContainerFlag', p: { containerId: open.id, note: resolveNote.trim() } })
+                      setResolveNote(''); toast('Flag resolved ✓')
+                    } catch (err) {
+                      toast(err.message || SAVE_ERROR)
+                    } finally {
+                      setBusy(false)
+                    }
+                  }}>{busy ? 'Saving…' : 'Resolve flag'}</button>
                 </div>
               )}
               {open.flag.open && currentUser?.role !== 'admin' && <div className="muted" style={{ marginTop: 6 }}>Only the admin can resolve flags.</div>}
@@ -195,13 +232,17 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
 
           {open.status === 'filling' && isMover && (
             <div style={{ marginTop: 16 }}>
-              <button className="btn btn-primary btn-lg" style={{ width: '100%' }} onClick={() => { markFull(open); close() }}>Full — ready for pickup</button>
+              <button className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={busyIds.has(open.id)} onClick={async () => { if (await markFull(open)) close() }}>
+                {busyIds.has(open.id) ? 'Saving…' : 'Full — ready for pickup'}
+              </button>
             </div>
           )}
 
           {open.status === 'return_filling' && isWarehouse && (
             <div style={{ marginTop: 16 }}>
-              <button className="btn btn-primary btn-lg" style={{ width: '100%' }} onClick={() => { markReturnFull(open); close() }}>Mark full, ready for dispatch</button>
+              <button className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={busyIds.has(open.id)} onClick={async () => { if (await markReturnFull(open)) close() }}>
+                {busyIds.has(open.id) ? 'Saving…' : 'Mark full, ready for dispatch'}
+              </button>
             </div>
           )}
 

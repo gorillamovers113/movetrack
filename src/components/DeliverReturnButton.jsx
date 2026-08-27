@@ -62,6 +62,8 @@ export default function DeliverReturnButton({ toast }) {
       await dispatch({ type: 'deliverReturn', p: { containerId: match.id, media } })
       setOpen(false)
       toast?.(`Verified, BigBox ${match.number} is back on site ✓`)
+    } catch (err) {
+      toast?.(err.message || "Couldn't save that. Check your signal and try again.")
     } finally {
       setBusy(false)
     }
@@ -79,6 +81,8 @@ export default function DeliverReturnButton({ toast }) {
       })
       setOpen(false)
       toast?.('Discrepancy reported to admin ✓')
+    } catch (err) {
+      toast?.(err.message || "Couldn't save that. Check your signal and try again.")
     } finally {
       setBusy(false)
     }
