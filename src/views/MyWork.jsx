@@ -1,5 +1,5 @@
 import React from 'react'
-import { nextPackingStep, packingProgress, PACKING_STEPS } from '../lib/mutations.js'
+import { nextPackingStep, packingProgress } from '../lib/mutations.js'
 import { useStore, canAct, containerAction, CONT_STATUS } from '../store.jsx'
 import { StagePill } from '../ui.jsx'
 import FindUnitButton from '../components/FindUnitButton.jsx'
@@ -51,6 +51,15 @@ export default function MyWork({ openUnit, openContainer, toast }) {
     : actionable
   const inProgress = mine.filter((u) => u.stage === 'packing')
   const ready = mine.filter((u) => u.stage !== 'packing')
+
+  // Units this packer has already finished. They drop out of the queue above
+  // the moment they are packed (canAct stops being true), which left no way
+  // back to a unit to check what was recorded on it. Read-only: the work is
+  // done and handed to the movers, so nothing here is editable.
+  const finishedByMe = state.units
+    .filter((u) => (u.crew?.packers || []).includes(currentUser.uid))
+    .filter((u) => u.stage !== 'not_started' && u.stage !== 'packing')
+    .sort((a, b) => (b.times?.packEnd || 0) - (a.times?.packEnd || 0))
   const myRecent = [...state.events].filter((e) => e.uid === currentUser.uid).sort((a, b) => b.ts - a.ts).slice(0, 5)
 
   // A packer's queue names the next checklist item rather than "Finish
@@ -59,12 +68,17 @@ export default function MyWork({ openUnit, openContainer, toast }) {
   const queueLabel = (u) => {
     const onChecklist = role === 'packer' && (u.stage === 'not_started' || u.stage === 'packing')
     if (!onChecklist) return canAct(currentUser, u, returnPhase).label
-    const next = nextPackingStep(u, state.events.filter((e) => e.unitId === u.id))
+    const unitEvents = state.events.filter((e) => e.unitId === u.id)
+    const next = nextPackingStep(u, unitEvents)
     if (!next) return canAct(currentUser, u, returnPhase).label
-    return `${next.label} (${packingProgress(u, state.events.filter((e) => e.unitId === u.id)).done}/${PACKING_STEPS.length})`
+    // Denominator comes from the progress itself, which counts the seven
+    // required items. Using the full step list would read "3/8" and imply the
+    // optional note was outstanding work.
+    const p = packingProgress(u, unitEvents)
+    return `${next.label} (${p.done}/${p.total})`
   }
 
-  const Section = ({ title, units }) => units.length > 0 && (
+  const Section = ({ title, units, done = false }) => units.length > 0 && (
     <>
       <div className="section-title">{title} · {units.length}</div>
       <div className="cont-grid" style={{ marginBottom: 8 }}>
@@ -76,7 +90,11 @@ export default function MyWork({ openUnit, openContainer, toast }) {
             </div>
             <div className="cont-units">{u.tenant || '-'} · Floor {u.floor}{u.pieces ? ` · ${u.pieces} pieces` : ''}</div>
             {u.note && <div className="muted" style={{ marginTop: 4 }}>⚠️ {u.note}</div>}
-            <button className="btn btn-primary btn-sm" style={{ marginTop: 10, width: '100%' }}>{queueLabel(u)} →</button>
+            {done ? (
+              <button className="btn btn-ghost btn-sm" style={{ marginTop: 10, width: '100%' }}>View what you recorded →</button>
+            ) : (
+              <button className="btn btn-primary btn-sm" style={{ marginTop: 10, width: '100%' }}>{queueLabel(u)} →</button>
+            )}
           </div>
         ))}
       </div>
@@ -89,7 +107,7 @@ export default function MyWork({ openUnit, openContainer, toast }) {
         <div><h1>My queue</h1><p>Units waiting on you, {currentUser.name.split(' ')[0]}</p></div>
         <FindUnitButton openUnit={openUnit} toast={toast} />
       </div>
-      {mine.length === 0 && (
+      {mine.length === 0 && finishedByMe.length === 0 && (
         <div className="card empty">
           <div className="big">🚪</div>
           Nothing open right now. Walk up to a unit and tap <b>Start a unit</b>, then type the number on the door.
@@ -97,6 +115,7 @@ export default function MyWork({ openUnit, openContainer, toast }) {
       )}
       <Section title="In progress: finish these" units={inProgress} />
       <Section title="Ready to start" units={ready} />
+      <Section title="Finished by you · view only" units={finishedByMe} done />
       {myRecent.length > 0 && (
         <>
           <div className="section-title">Your recent activity</div>

@@ -309,6 +309,19 @@ export function packingComplete(unit, events = []) {
   return packingChecklist(unit, events).every((s) => s.done || s.optional)
 }
 
+// Would ticking `key` be the thing that finishes this unit?
+//
+// The seven required items may be done in any order, skipping around as the
+// packer works, so "finished" cannot mean "reached the last item in the list".
+// It means every required item is now accounted for, whichever one happened to
+// be last. This is the rule the unit's stage follows, kept here as a pure
+// function so it is testable rather than buried in a Firestore write.
+export function wouldCompletePacking(unit, events = [], key) {
+  const done = new Set(packingChecklist(unit, events).filter((s) => s.done).map((s) => s.key))
+  done.add(key)
+  return REQUIRED_STEPS.every((s) => done.has(s.key))
+}
+
 // Progress counts only the required items, so a unit reads 7/7 when it is
 // genuinely finished rather than 7/8 forever because nobody had anything to
 // say about it.

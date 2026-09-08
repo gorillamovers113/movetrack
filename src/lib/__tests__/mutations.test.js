@@ -6,7 +6,7 @@ import {
   matchContainerByNumber, surnameOf,
   STICKER_COLORS, stickerHex, inventoryRangeLabel, inventoryRangeError, overlappingUnits,
   CARTON_TYPES, sumCartons, cartonsFromForm, cartonSummary,
-  PACKING_STEPS, REQUIRED_STEPS, packingChecklist, packingProgress, nextPackingStep, packingComplete,
+  PACKING_STEPS, REQUIRED_STEPS, packingChecklist, packingProgress, nextPackingStep, packingComplete, wouldCompletePacking,
 } from '../mutations.js'
 
 describe('boxMismatch', () => {
@@ -507,5 +507,46 @@ describe('embedded media accounting', () => {
     expect(embeddedMediaBytes({})).toBe(0)
     expect(embeddedMediaBytes(null)).toBe(0)
     expect(embeddedMediaBytes({ media: [null, {}, { url: null }] })).toBe(0)
+  })
+})
+
+// Casey's rule: the seven can be done in any order, skipping around, but all
+// seven have to be there before a unit counts as finished.
+describe('any order, but all seven to finish', () => {
+  const tick = (at) => ({ uid: 'u', userName: 'Liv', at })
+  const withSteps = (keys) => ({ steps: Object.fromEntries(keys.map((k, i) => [k, tick(i + 1)])) })
+  const KEYS = REQUIRED_STEPS.map((s) => s.key)
+
+  it('a scrambled order finishes on the seventh item, whichever it is', () => {
+    const order = ['materials', 'packed', 'door', 'numbers', 'rooms', 'inventory', 'sticker']
+    let unit = { steps: {} }
+    order.forEach((key, i) => {
+      const last = i === order.length - 1
+      expect(wouldCompletePacking(unit, [], key)).toBe(last)
+      unit = { steps: { ...unit.steps, [key]: tick(i + 1) } }
+    })
+    expect(packingComplete(unit, [])).toBe(true)
+  })
+
+  it('every single item can be the last one and still complete the unit', () => {
+    for (const last of KEYS) {
+      const rest = KEYS.filter((k) => k !== last)
+      expect(wouldCompletePacking(withSteps(rest), [], last)).toBe(true)
+    }
+  })
+
+  it('six of seven never completes, whichever one is missing', () => {
+    for (const missing of KEYS) {
+      const six = KEYS.filter((k) => k !== missing)
+      expect(packingComplete(withSteps(six), [])).toBe(false)
+      // Re-ticking one already done must not finish it either.
+      expect(wouldCompletePacking(withSteps(six), [], six[0])).toBe(false)
+    }
+  })
+
+  it('the optional note neither completes a unit nor is needed by one', () => {
+    const six = KEYS.slice(0, 6)
+    expect(wouldCompletePacking(withSteps(six), [], 'notes')).toBe(false)
+    expect(packingComplete(withSteps(KEYS), [])).toBe(true)
   })
 })

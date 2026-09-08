@@ -4,7 +4,7 @@ import { doc, setDoc, updateDoc, deleteDoc, addDoc, arrayUnion, onSnapshot, coll
 import { app, auth, db } from './firebase.js'
 import { captureMedia, uploadFile } from './lib/upload.js'
 import { stepRow, pushRows } from './lib/sheetBackup.js'
-import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction, sumCartons, PACKING_STEPS, REQUIRED_STEPS, packingChecklist } from './lib/mutations.js'
+import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction, sumCartons, PACKING_STEPS, REQUIRED_STEPS, packingChecklist, wouldCompletePacking } from './lib/mutations.js'
 import { DEFAULT_SCHEDULE, DEFAULT_RETURN_SCHEDULE, scheduleDocId } from './lib/schedule.js'
 import { stageOf } from './seed.js'
 
@@ -201,7 +201,7 @@ export function StoreProvider({ children }) {
         // apartment nobody has touched yet must not claim it and put it in
         // the packing queue, and a note is not what finishes a unit either.
         const starting = unit.stage === 'not_started' && !step.optional
-        const finishing = unit.stage === 'packing' && REQUIRED_STEPS.every((s) => done.has(s.key))
+        const finishing = unit.stage === 'packing' && wouldCompletePacking(unit, unitEvents, key)
         if (starting) {
           patch.stage = 'packing'
           patch['crew.packers'] = arrayUnion(currentUser.uid)

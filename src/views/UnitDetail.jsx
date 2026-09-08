@@ -86,7 +86,6 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
   if (!unit) return null
 
   const action = canAct(currentUser, unit, state.project?.returnPhase)
-  const canContribute = currentUser && currentUser.role !== 'viewer'
   const stage = stageOf(unit.stage)
   const conts = (unit.containerIds || []).map((id) => state.containers.find((c) => c.id === id)).filter(Boolean)
   // On-site containers still available to load into, mover picks from
@@ -115,6 +114,18 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
   const checklist = packingChecklist(unit, events)
   const progress = packingProgress(unit, events)
   const upNext = onChecklist ? nextPackingStep(unit, events) : null
+
+  // View-only: crew can always look back at a unit they worked on, but once it
+  // has moved past their part of the job they can no longer change it. That is
+  // already what the security rules enforce, so offering an upload button here
+  // only produced a permission error after the photo had been taken. An admin
+  // is never view-only; they can correct anything at any stage.
+  const viewOnly = currentUser.role !== 'admin' && !onChecklist && !action
+  const canContribute = currentUser.role !== 'viewer' && !viewOnly
+  // A viewer is view-only on every unit by design and knows it, so the lock
+  // banner would be noise. It is for crew, who could edit this unit until
+  // moments ago and need to know why they no longer can.
+  const showLockBanner = viewOnly && currentUser.role !== 'viewer'
 
   const openStep = (key) => { setForm({}); setPending([]); resetInventoryCapture(); setStepKey(key) }
   const closeStep = () => { setStepKey(null); resetInventoryCapture() }
@@ -309,13 +320,31 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
         <div className="row">
           {onChecklist && upNext && (
             <button className="btn btn-primary btn-lg" onClick={() => openStep(upNext.key)}>
-              Next: {upNext.label}
+              {upNext.label}
             </button>
           )}
           {!onChecklist && action && <button className="btn btn-primary btn-lg" onClick={openAction}>{action.label}</button>}
           {!onChecklist && !action && WAIT_HINTS[unit.stage] && <span className="muted" style={{ maxWidth: 300, textAlign: 'right' }}>{WAIT_HINTS[unit.stage]}</span>}
         </div>
       </div>
+
+      {showLockBanner && (
+        <div
+          className="card"
+          style={{
+            padding: '11px 16px', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 10,
+            background: 'color-mix(in srgb, var(--ink) 5%, var(--panel))',
+          }}
+        >
+          <span aria-hidden style={{ fontSize: 16 }}>🔒</span>
+          <span style={{ fontSize: 13.5 }}>
+            <b>View only.</b>{' '}
+            {(unit.crew?.packers || []).includes(currentUser.uid)
+              ? 'You finished this unit. Everything you recorded is below, and it can no longer be changed.'
+              : 'This unit has moved past your part of the job, so it is a record now rather than a task.'}
+          </span>
+        </div>
+      )}
 
       <div className="card" style={{ padding: '14px 20px 16px', marginBottom: 18 }}>
         <div className="stepper">
@@ -404,7 +433,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
             {onChecklist && (
               <div className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>
                 {upNext
-                  ? 'Tap any item as you do it. Each one saves on its own under your name.'
+                  ? 'Do these in any order, whatever you are doing at the time. Each one saves on its own under your name, and the unit is finished once all seven are ticked.'
                   : 'All seven done. This unit is packed and ready for the movers.'}
               </div>
             )}
