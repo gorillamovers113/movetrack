@@ -28,22 +28,55 @@ export function StoreProvider({ children }) {
   const [schedule, setSchedule] = useState([])
   const [project, setProject] = useState(null)
   const [currentUser, setCurrentUser] = useState(null)
+  // Bumped by a listener error so the subscription effect re-runs and
+  // rebuilds it, rather than that collection staying dead all session.
+  const [subGeneration, setSubGeneration] = useState(0)
 
   // Live Firestore state: collection (+ one singleton doc) subscriptions
   // replace the old localStorage-backed reducer state. Each array holds
   // `{ id, ...data }` docs.
+  // Attach only once there is an ACTIVE user, and re-attach whenever that
+  // changes.
+  //
+  // This used to run once on mount with []. Every rule here is `isActive()`,
+  // so a person who opened the app signed out (which is everyone signing up
+  // for the first time) had all seven listeners denied at once. A denied
+  // Firestore listener is dead permanently, it does not retry, and the empty
+  // dep array meant signing in never re-attached them. Liv hit exactly this
+  // on her first shift: approved, signed in, and every collection empty, so
+  // a valid unit number reported "no unit".
+  //
+  // Keying on uid + status also means the moment Casey approves someone, the
+  // board fills in on their phone without them reloading anything.
+  const sessionKey = currentUser && currentUser.status === 'active'
+    ? `${currentUser.uid}:${currentUser.role}`
+    : null
+
   useEffect(() => {
+    if (!sessionKey) {
+      // Signed out, or signed up and waiting on approval. Nothing is
+      // readable yet, so don't ask and don't leave stale data on screen.
+      setUnits([]); setContainers([]); setOverflow([]); setEvents([]); setUsers([]); setSchedule([]); setProject(null)
+      return
+    }
+    // Every listener gets an error handler. Without one a permission blip
+    // (a role change landing mid-flight, a token refresh) silently kills
+    // that collection for the rest of the session.
+    const onErr = (label) => (err) => {
+      console.error(`[store] ${label} subscription dropped:`, err?.code || err?.message)
+      if (err?.code === 'permission-denied') setSubGeneration((n) => n + 1)
+    }
     const subs = [
-      onSnapshot(collection(db, 'units'), (s) => setUnits(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
-      onSnapshot(collection(db, 'containers'), (s) => setContainers(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
-      onSnapshot(collection(db, 'overflow'), (s) => setOverflow(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
-      onSnapshot(query(collection(db, 'events'), orderBy('ts', 'desc')), (s) => setEvents(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
-      onSnapshot(collection(db, 'users'), (s) => setUsers(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
-      onSnapshot(collection(db, 'schedule'), (s) => setSchedule(s.docs.map((d) => ({ id: d.id, ...d.data() })))),
-      onSnapshot(doc(db, 'meta', 'project'), (d) => setProject(d.exists() ? { id: d.id, ...d.data() } : null)),
+      onSnapshot(collection(db, 'units'), (s) => setUnits(s.docs.map((d) => ({ id: d.id, ...d.data() }))), onErr('units')),
+      onSnapshot(collection(db, 'containers'), (s) => setContainers(s.docs.map((d) => ({ id: d.id, ...d.data() }))), onErr('containers')),
+      onSnapshot(collection(db, 'overflow'), (s) => setOverflow(s.docs.map((d) => ({ id: d.id, ...d.data() }))), onErr('overflow')),
+      onSnapshot(query(collection(db, 'events'), orderBy('ts', 'desc')), (s) => setEvents(s.docs.map((d) => ({ id: d.id, ...d.data() }))), onErr('events')),
+      onSnapshot(collection(db, 'users'), (s) => setUsers(s.docs.map((d) => ({ id: d.id, ...d.data() }))), onErr('users')),
+      onSnapshot(collection(db, 'schedule'), (s) => setSchedule(s.docs.map((d) => ({ id: d.id, ...d.data() }))), onErr('schedule')),
+      onSnapshot(doc(db, 'meta', 'project'), (d) => setProject(d.exists() ? { id: d.id, ...d.data() } : null), onErr('project')),
     ]
     return () => subs.forEach((u) => u())
-  }, [])
+  }, [sessionKey, subGeneration])
 
   const state = { units, containers, overflow, events, users, schedule, project: project || DEFAULT_PROJECT }
 
