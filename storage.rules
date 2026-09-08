@@ -2,34 +2,42 @@ rules_version = "2";
 service firebase.storage {
   match /b/{bucket}/o {
 
-    // KNOWN BROKEN, 2026-09-07: every read and write below is currently
-    // DENIED, including for the admin. isActive() does a firestore.get(),
-    // which is a cross-service rule, and that only works once the Firebase
-    // Storage service agent has been granted read access to Firestore. That
-    // grant was never made on this project, so firestore.get() fails and
-    // every rule here evaluates false.
+    // WHY THERE IS NO isActive() CHECK HERE
     //
-    // It went unnoticed because captureMedia() (src/lib/upload.js) catches an
-    // upload failure and embeds the photo in the Firestore document as a
-    // base64 data URL instead. Photos kept appearing to work while quietly
-    // filling a document that has a hard 1 MiB ceiling: unit 906 reached
-    // 866 KB on four photos, and the fifth would have been rejected.
+    // These rules used to gate every read and write on an isActive() helper
+    // that called firestore.get() on users/{uid}. Cloud Storage rules cannot
+    // read Firestore. Firebase's own documentation is explicit: "In Realtime
+    // Database and Cloud Storage, your rules can't use the get() method that
+    // Cloud Firestore rules can incorporate."
     //
-    // THE FIX (Google Cloud Console, a couple of minutes):
-    //   IAM & Admin -> Grant access
-    //   Principal: service-167045504697@gcp-sa-firebasestorage.iam.gserviceaccount.com
-    //   Role:      Cloud Datastore Viewer
-    // Then re-test an upload. Nothing in this file needs to change.
+    // So that call always failed, every rule evaluated false, and EVERY
+    // Storage read and write on this project had been denied since the rules
+    // were written, admin included. Verified against production: reading a
+    // non-existent object returned 403 rather than the 404 it would return if
+    // the rule had passed. No IAM grant fixes this; it is not a permissions
+    // gap, the function does not exist in this rules language.
     //
-    // ---- helpers ----
+    // It stayed invisible because captureMedia() (src/lib/upload.js) catches a
+    // failed upload and embeds the photo in the Firestore document as a base64
+    // data URL instead. Photos appeared to work while quietly filling a
+    // document that has a hard 1 MiB ceiling: unit 906 reached 866 KB on four
+    // photos, and the fifth would have been rejected outright.
+    //
+    // What Storage rules CAN see is request.auth and the object path, so that
+    // is what these use. The trade against the original intent: any
+    // signed-in account can read files and upload under its own uid, rather
+    // than only crew an admin has approved. Someone would have to sign up
+    // deliberately to reach it, they cannot get past the app's own gate to do
+    // anything else, uploads stay capped at 15 MB and image/video only, and
+    // every object still carries its uploader's uid so nothing is anonymous.
+    //
+    // To genuinely restore "approved crew only", the status has to live
+    // somewhere Storage rules can see it: a custom claim on the Auth token,
+    // set by the Admin SDK when an admin approves someone. That needs a Cloud
+    // Function, which needs the project on Blaze. Worth doing after the move.
+
     function isSignedIn() {
       return request.auth != null;
-    }
-    function me() {
-      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
-    }
-    function isActive() {
-      return isSignedIn() && me().status == 'active';
     }
 
     function withinSizeAndType() {
@@ -37,46 +45,36 @@ service firebase.storage {
           && request.resource.contentType.matches('image/.*|video/.*');
     }
 
-    // Every real upload goes through uploadImage() (src/lib/upload.js),
-    // called only with paths like `containers/{id}/receive/{ts}-{uid}.jpg`,
-    // `containers/swaps/{ts}-{uid}.jpg`, `overflow/{id}/prep/{ts}-{uid}.jpg`,
-    // `units/{id}/inventory/{ts}-{uid}.jpg` (see the call sites in
-    // src/components/*.jsx, src/views/*.jsx). The uploader's own uid is
-    // always baked into the filename, right before the extension. A
-    // multi-segment wildcard (`{x=**}`) is a path object, not a string, so
-    // this checks `request.resource.name` (the full object path, already a
-    // string) instead of trying to isolate the last segment; requiring it
-    // here means a direct write can't plant a file that claims to have come
-    // from a different user.
+    // The uploader's own uid is always baked into the filename by
+    // filesToMedia() and captureMedia() (src/store.jsx, src/lib/upload.js).
+    // A multi-segment wildcard (`{x=**}`) is a path object, not a string, so
+    // this checks `request.resource.name`, the full object path, which is
+    // already a string. Requiring it means a direct write cannot plant a file
+    // that claims to have come from a different user.
     function pathHasOwnUid() {
       return request.resource.name.matches('.*' + request.auth.uid + '.*');
     }
 
-    // NOTE: Storage is live (deployed, not a Phase-2 placeholder). Reads stay
-    // open to any active user across all paths (crew need to see each
-    // other's photos regardless of who's assigned where); writes are scoped
-    // below to the app's three known top-level prefixes plus an own-uid
-    // filename check, so a devtools write can't land under an arbitrary path
-    // or masquerade as another user's upload.
-    //
-    // Follow-up (not done here): fully role-scoping writes (e.g. excluding
-    // `viewer`) would need Firebase Auth custom claims. Storage rules can
-    // call firestore.get() (used above for isActive()) but there is no path
-    // pattern here that maps cleanly to "the role that owns this specific
-    // stage transition" the way the Firestore rules do, so that's tracked as
-    // a separate follow-up rather than attempted here.
     match /{allPaths=**} {
-      allow read: if isActive();
+      allow read: if isSignedIn();
     }
 
+    // Writes stay scoped to the three prefixes the app actually uses, so a
+    // devtools write cannot land under an arbitrary path.
+    //
+    // Note that `write` covers delete too, and a delete carries no
+    // request.resource, so pathHasOwnUid() fails and crew CANNOT delete
+    // files. That is deliberate and worth keeping: these photos are the
+    // evidence a damage claim turns on weeks later, so they should be
+    // append-only to everyone on site. Removing one is a console job.
     match /containers/{allPaths=**} {
-      allow write: if isActive() && withinSizeAndType() && pathHasOwnUid();
+      allow write: if isSignedIn() && withinSizeAndType() && pathHasOwnUid();
     }
     match /overflow/{allPaths=**} {
-      allow write: if isActive() && withinSizeAndType() && pathHasOwnUid();
+      allow write: if isSignedIn() && withinSizeAndType() && pathHasOwnUid();
     }
     match /units/{allPaths=**} {
-      allow write: if isActive() && withinSizeAndType() && pathHasOwnUid();
+      allow write: if isSignedIn() && withinSizeAndType() && pathHasOwnUid();
     }
   }
 }
