@@ -69,10 +69,11 @@ service cloud.firestore {
     // no stage at all, and without this a packer would be denied.
     //
     // Deliberately narrow: only a packer, only while the unit is mid-packing,
-    // and only the fields a checklist item can produce. Everything else on the
-    // doc (stage, crew, flag, containerIds, times, identity, custody) is
-    // untouchable on this path, so it cannot be used to skip a stage, claim
-    // someone else's work, or clear a flag.
+    // and only the fields a checklist item can produce, plus adding themselves
+    // to crew.packers (see crewChangeOK). Everything else on the doc (stage,
+    // flag, containerIds, times, identity, custody) is untouchable on this
+    // path, so it cannot be used to skip a stage, claim someone else's work,
+    // or clear a flag.
     // not_started is allowed as well as packing, because the optional Notes
     // item deliberately does NOT start a unit: a packer must be able to record
     // "tenant not home, come back after 2" against an apartment nobody has
@@ -82,7 +83,26 @@ service cloud.firestore {
           && resource.data.stage == request.resource.data.stage
           && (resource.data.stage == 'packing' || resource.data.stage == 'not_started')
           && request.resource.data.diff(resource.data).affectedKeys()
-               .hasOnly(['steps', 'media', 'stickerColor', 'inventoryFrom', 'inventoryTo', 'materials', 'pieces']);
+               .hasOnly(['steps', 'media', 'stickerColor', 'inventoryFrom', 'inventoryTo', 'materials', 'pieces', 'crew'])
+          && crewChangeOK();
+    }
+
+    // Several packers work one apartment at once, so whoever ticks an item
+    // gets added to crew.packers, not just whoever opened the unit. Otherwise
+    // the second and third packer are invisible: the unit never appears in
+    // their queue and the unit's own Packer line never names them.
+    //
+    // Tightly bounded, because this is the one same-stage write a packer can
+    // make. They may add THEMSELVES to the packers list and nothing else:
+    // movers and unpackers cannot be touched, nobody already credited can be
+    // removed, and no other uid can be added. So a packer cannot quietly
+    // credit themselves as a mover, drop a colleague off a unit they worked,
+    // or put someone else's name on their own work.
+    function crewChangeOK() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['crew'])
+          || (request.resource.data.crew.diff(resource.data.crew).affectedKeys().hasOnly(['packers'])
+              && request.resource.data.crew.packers.hasAll(resource.data.crew.packers)
+              && request.resource.data.crew.packers.hasOnly(resource.data.crew.packers.concat([request.auth.uid])));
     }
     function unitReturnTransitionOK(role, before, after) {
       return (role == 'warehouse'

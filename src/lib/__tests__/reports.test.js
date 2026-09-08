@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeUserReport, computeAllReports, summarizeRoster, fmtDuration, reportsToCSV } from '../reports.js'
+import { computeUserReport, computeAllReports, summarizeRoster, fmtDuration, reportsToCSV, crewOnUnit } from '../reports.js'
 
 const packer = { id: 'u-packer', name: 'Sam Packer', role: 'packer', status: 'active' }
 const mover = { id: 'u-mover', name: 'Ali Mover', role: 'mover', status: 'active' }
@@ -252,5 +252,53 @@ describe('reportsToCSV', () => {
   })
   it('handles an empty report list', () => {
     expect(reportsToCSV([]).split('\n')).toHaveLength(1)
+  })
+})
+
+// Three packers share one apartment, so each needs to see who else is in it.
+describe('crewOnUnit', () => {
+  const NOW = 1_000_000_000
+  const min = (n) => n * 60 * 1000
+  const ev = (uid, name, unitId, agoMin, action = 'did a thing') =>
+    ({ uid, userName: name, role: 'packer', unitId, ts: NOW - min(agoMin), action })
+
+  it('lists everyone who touched this unit recently, most recent first', () => {
+    const events = [
+      ev('a', 'Liv Post', 'u1', 10),
+      ev('b', 'Ana Ruiz', 'u1', 2),
+      ev('c', 'Sam Diaz', 'u1', 6),
+    ]
+    expect(crewOnUnit(events, 'u1', NOW).map((r) => r.name)).toEqual(['Ana Ruiz', 'Sam Diaz', 'Liv Post'])
+  })
+
+  it('ignores other units entirely', () => {
+    const events = [ev('a', 'Liv Post', 'u1', 1), ev('b', 'Ana Ruiz', 'u2', 1)]
+    expect(crewOnUnit(events, 'u1', NOW).map((r) => r.name)).toEqual(['Liv Post'])
+  })
+
+  it('drops anyone whose last action has gone cold', () => {
+    const events = [ev('a', 'Liv Post', 'u1', 5), ev('b', 'Ana Ruiz', 'u1', 45)]
+    expect(crewOnUnit(events, 'u1', NOW).map((r) => r.name)).toEqual(['Liv Post'])
+  })
+
+  it('shows one row per person, at their latest action', () => {
+    const events = [
+      ev('a', 'Liv Post', 'u1', 12, 'first'),
+      ev('a', 'Liv Post', 'u1', 3, 'latest'),
+    ]
+    const rows = crewOnUnit(events, 'u1', NOW)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].action).toBe('latest')
+  })
+
+  it('holds three packers at once, which is the case it exists for', () => {
+    const events = [ev('a', 'Liv', 'u1', 1), ev('b', 'Ana', 'u1', 2), ev('c', 'Sam', 'u1', 3)]
+    expect(crewOnUnit(events, 'u1', NOW)).toHaveLength(3)
+  })
+
+  it('does not crash on junk, and ignores events dated in the future', () => {
+    const events = [null, {}, { uid: 'a' }, { uid: 'b', unitId: 'u1', ts: NOW + min(5), userName: 'Future' }]
+    expect(crewOnUnit(events, 'u1', NOW)).toEqual([])
+    expect(crewOnUnit(undefined, 'u1', NOW)).toEqual([])
   })
 })

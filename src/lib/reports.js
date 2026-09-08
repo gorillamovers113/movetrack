@@ -281,3 +281,27 @@ export function activeCrew({ events = [], units = [] } = {}, now = 0, windowMs =
   }
   return rows.sort((a, b) => b.ts - a.ts)
 }
+
+
+// Who else is working this same apartment right now.
+//
+// Up to three packers share a unit, so someone standing in a bedroom needs to
+// know a colleague is already doing the kitchen, or two people photograph the
+// same rooms and nobody does the rest. Derived purely from the unit's own
+// recent events, so it costs no extra writes and no presence system: doing
+// something on a unit IS the signal that you are on it.
+//
+// `now` is passed in rather than read from the clock, so this stays pure and
+// testable.
+export function crewOnUnit(events = [], unitId, now = 0, windowMs = 20 * 60 * 1000) {
+  const latest = new Map()
+  for (const e of events) {
+    if (!e || e.unitId !== unitId || !e.uid || typeof e.ts !== 'number') continue
+    if (e.ts > now || now - e.ts > windowMs) continue
+    const prev = latest.get(e.uid)
+    if (!prev || e.ts > prev.ts) latest.set(e.uid, e)
+  }
+  return [...latest.values()]
+    .map((e) => ({ uid: e.uid, name: e.userName || 'Someone', role: e.role || null, ts: e.ts, action: e.action || '' }))
+    .sort((a, b) => b.ts - a.ts)
+}

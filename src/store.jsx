@@ -202,9 +202,19 @@ export function StoreProvider({ children }) {
         // the packing queue, and a note is not what finishes a unit either.
         const starting = unit.stage === 'not_started' && !step.optional
         const finishing = unit.stage === 'packing' && wouldCompletePacking(unit, unitEvents, key)
+
+        // Credit whoever ticked this item, not just whoever opened the unit.
+        // Up to three packers work one apartment at once, and the second and
+        // third were previously invisible on it: the unit never showed in
+        // their queue, never appeared under "Finished by you", and the unit's
+        // own Packer line named only the first person there. arrayUnion is
+        // idempotent, so re-ticking costs nothing and changes nothing.
+        // Skipped for the optional note, which is not packing work and should
+        // not put someone's name on an apartment they only commented on.
+        if (!step.optional) patch['crew.packers'] = arrayUnion(currentUser.uid)
+
         if (starting) {
           patch.stage = 'packing'
-          patch['crew.packers'] = arrayUnion(currentUser.uid)
           patch['times.packStart'] = now
         }
         if (finishing) {
@@ -281,6 +291,22 @@ export function StoreProvider({ children }) {
           })])
         }
         return written
+      }
+      case 'sealPacking': {
+        // Self-heal for the race that three packers on one apartment make
+        // real. Each client decides "was mine the last item?" from its own
+        // copy of the unit, so if two packers tick their final items in the
+        // same instant, each can see six of seven and neither promotes the
+        // unit. It would then sit at 7 of 7, finished, but still in the
+        // packing queue and invisible to the movers.
+        //
+        // Any client that notices a complete-but-unpromoted unit fixes it.
+        // Whoever gets there first wins; the loser's write is refused by the
+        // rules (packed -> packed is not a transition) and swallowed, which
+        // is the correct outcome rather than an error worth showing anyone.
+        if (unit.stage !== 'packing') return
+        await updateDoc(doc(db, 'units', p.unitId), { stage: 'packed', 'times.packEnd': Date.now() })
+        return ev('stage', `Unit ${unit.number} fully packed, all ${REQUIRED_STEPS.length} checklist items complete`, { unitId: unit.id, from: 'packing', to: 'packed' })
       }
       case 'startPacking': {
         // The "before" record. Photos of the front door with the unit number

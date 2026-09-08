@@ -1,11 +1,12 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { STAGES, stageOf } from '../seed.js'
 import { useStore, canAct, filesToMedia, fmtTime, CONT_STATUS } from '../store.jsx'
 import { Modal, Lightbox, Uploader, EventRow, Avatar, StagePill } from '../ui.jsx'
 import { captureMedia } from '../lib/upload.js'
-import { surnameOf, STICKER_COLORS, inventoryRangeError, overlappingUnits, inventoryRangeLabel, stickerHex, CARTON_TYPES, cartonsFromForm, sumCartons, cartonSummary, packingChecklist, packingProgress, nextPackingStep, PACKING_STEPS } from '../lib/mutations.js'
+import { surnameOf, STICKER_COLORS, inventoryRangeError, overlappingUnits, inventoryRangeLabel, stickerHex, CARTON_TYPES, cartonsFromForm, sumCartons, cartonSummary, packingChecklist, packingProgress, packingComplete, nextPackingStep, PACKING_STEPS } from '../lib/mutations.js'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import ReportOverflowButton from '../components/ReportOverflowButton.jsx'
+import { crewOnUnit } from '../lib/reports.js'
 
 const WAIT_HINTS = {
   loaded: 'Waiting on driver: container pickup from site.',
@@ -79,6 +80,20 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
     () => sumCartons(Object.fromEntries(CARTON_TYPES.map((t) => [t.key, form[`carton_${t.key}`]]))),
     [form],
   )
+  // See 'sealPacking' in store.jsx: with several packers on one apartment,
+  // two final ticks landing together can leave a unit complete but still in
+  // the packing queue. Whichever client notices first repairs it. Declared
+  // above the !unit guard so hook order never changes between renders.
+  const sealing = useRef(false)
+  useEffect(() => {
+    if (!unit || unit.stage !== 'packing') return
+    if (currentUser.role !== 'packer' && currentUser.role !== 'admin') return
+    if (sealing.current || !packingComplete(unit, events)) return
+    sealing.current = true
+    Promise.resolve(dispatch({ type: 'sealPacking', p: { unitId } }))
+      .catch(() => { sealing.current = false })
+  }, [unit, events, currentUser.role, dispatch, unitId])
+
   const rangeClash = useMemo(
     () => overlappingUnits(state.units, { unitId, stickerColor: unit?.stickerColor, from: form.invFrom, to: form.invTo }),
     [state.units, unitId, unit?.stickerColor, form.invFrom, form.invTo],
@@ -114,6 +129,8 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
   const checklist = packingChecklist(unit, events)
   const progress = packingProgress(unit, events)
   const upNext = onChecklist ? nextPackingStep(unit, events) : null
+  // Colleagues who have touched this same apartment in the last 20 minutes.
+  const alsoHere = crewOnUnit(state.events, unitId, Date.now()).filter((c) => c.uid !== currentUser.uid)
 
   // View-only: crew can always look back at a unit they worked on, but once it
   // has moved past their part of the job they can no longer change it. That is
@@ -373,6 +390,26 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
               on the doc. Previously these existed only as validation messages
               inside two modals, so a packer could not see what was still
               outstanding without trying to submit and being told no. */}
+              {alsoHere.length > 0 && (
+            <div className="card" style={{ padding: '12px 16px', marginBottom: 14 }}>
+              <div className="muted" style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.04em', marginBottom: 6 }}>
+                ALSO ON THIS UNIT
+              </div>
+              {alsoHere.map((c) => (
+                <div key={c.uid} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '3px 0', fontSize: 13.5 }}>
+                  <Avatar name={c.name} size="sm" />
+                  <span style={{ minWidth: 0 }}>
+                    <b>{c.name}</b>
+                    <span className="muted"> · {fmtTime(c.ts)}</span>
+                  </span>
+                </div>
+              ))}
+              <div className="muted" style={{ fontSize: 12.5, marginTop: 6 }}>
+                Split the list so you are not both shooting the same rooms. Each item records whoever ticks it.
+              </div>
+            </div>
+          )}
+
           <div className="card" style={{ padding: '16px 20px', marginBottom: 14 }}>
             <div className="row" style={{ marginBottom: 6 }}>
               <div className="section-title grow" style={{ margin: 0 }}>Packing checklist</div>

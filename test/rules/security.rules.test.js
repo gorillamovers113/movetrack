@@ -323,6 +323,63 @@ describe('units — packer', () => {
       )
     })
 
+    // Up to three packers share one apartment, so ticking an item also credits
+    // the person who did it. That is the only reason a packer may touch crew.
+    it('ticking an item adds the packer to the crew', async () => {
+      await seed('units', 'u1', baseUnit({ stage: 'packing' }))
+      await assertSucceeds(
+        updateDoc(doc(dbAs(PACKER), 'units', 'u1'), {
+          'steps.sticker': { uid: PACKER, userName: 'Test packer-1', at: 1 },
+          stickerColor: 'Blue',
+          'crew.packers': arrayUnion(PACKER),
+        })
+      )
+    })
+
+    it('a second packer joins a unit the first one started', async () => {
+      await seed('units', 'u1', baseUnit({ stage: 'packing', crew: { packers: [PACKER], movers: [] } }))
+      await assertSucceeds(
+        updateDoc(doc(dbAs(OTHER_PACKER), 'units', 'u1'), {
+          'steps.materials': { uid: OTHER_PACKER, userName: 'Test packer-2', at: 1 },
+          materials: { small: 4 },
+          'crew.packers': arrayUnion(OTHER_PACKER),
+        })
+      )
+    })
+
+    it('a packer may not put someone else on the crew', async () => {
+      await seed('units', 'u1', baseUnit({ stage: 'packing' }))
+      await assertFails(
+        updateDoc(doc(dbAs(PACKER), 'units', 'u1'), {
+          'steps.materials': { uid: PACKER, userName: 'Test packer-1', at: 1 },
+          materials: { small: 4 },
+          'crew.packers': arrayUnion(OTHER_PACKER),
+        })
+      )
+    })
+
+    it('a packer may not drop a colleague off a unit they worked', async () => {
+      await seed('units', 'u1', baseUnit({ stage: 'packing', crew: { packers: [PACKER, OTHER_PACKER], movers: [] } }))
+      await assertFails(
+        updateDoc(doc(dbAs(PACKER), 'units', 'u1'), {
+          'steps.materials': { uid: PACKER, userName: 'Test packer-1', at: 1 },
+          materials: { small: 4 },
+          crew: { packers: [PACKER], movers: [] },
+        })
+      )
+    })
+
+    it('a packer may not credit themselves as a mover while ticking an item', async () => {
+      await seed('units', 'u1', baseUnit({ stage: 'packing' }))
+      await assertFails(
+        updateDoc(doc(dbAs(PACKER), 'units', 'u1'), {
+          'steps.materials': { uid: PACKER, userName: 'Test packer-1', at: 1 },
+          materials: { small: 4 },
+          'crew.movers': arrayUnion(PACKER),
+        })
+      )
+    })
+
     it('a packer may not tick an item on a unit already handed to the movers', async () => {
       await seed('units', 'u1', baseUnit({ stage: 'packed' }))
       await assertFails(
