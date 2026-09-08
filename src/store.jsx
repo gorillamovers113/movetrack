@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, signOut, updateProfile } from 'firebase/auth'
 import { doc, setDoc, updateDoc, deleteDoc, addDoc, arrayUnion, onSnapshot, collection, query, orderBy, serverTimestamp, writeBatch } from 'firebase/firestore'
-import { auth, db } from './firebase.js'
+import { app, auth, db } from './firebase.js'
 import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction } from './lib/mutations.js'
 import { DEFAULT_SCHEDULE, DEFAULT_RETURN_SCHEDULE, scheduleDocId } from './lib/schedule.js'
 import { stageOf } from './seed.js'
@@ -626,7 +626,24 @@ export function StoreProvider({ children }) {
     }
   }
   const login = (email, password) => signInWithEmailAndPassword(auth, email, password)
-  const resetPassword = (email) => sendPasswordResetEmail(auth, email)
+  // Password reset goes through our own function so the email carries the
+  // Gorilla logo and comes from gorillamovers.com. Firebase's built-in sender
+  // (noreply@…firebaseapp.com) scored as spam in testing, and its template
+  // cannot hold an image.
+  //
+  // Falls back to Firebase's own sender if the function is unreachable: an
+  // unbranded email that arrives beats a branded one that doesn't, especially
+  // for someone locked out mid-move.
+  const resetPassword = async (email) => {
+    try {
+      const { getFunctions, httpsCallable } = await import('firebase/functions')
+      const call = httpsCallable(getFunctions(app), 'sendPasswordReset')
+      await call({ email })
+    } catch (err) {
+      console.warn('[resetPassword] branded send unavailable, falling back', err?.message)
+      await sendPasswordResetEmail(auth, email)
+    }
+  }
   const logout = () => signOut(auth)
 
   const api = useMemo(() => ({
