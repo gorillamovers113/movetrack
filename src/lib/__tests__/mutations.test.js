@@ -5,6 +5,7 @@ import {
   nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction,
   matchContainerByNumber, surnameOf,
   STICKER_COLORS, stickerHex, inventoryRangeLabel, inventoryRangeError, overlappingUnits,
+  CARTON_TYPES, sumCartons, cartonsFromForm, cartonSummary,
 } from '../mutations.js'
 
 describe('boxMismatch', () => {
@@ -209,5 +210,46 @@ describe('inventory stickers', () => {
     expect(overlappingUnits(units, { unitId: 'a', stickerColor: 'Blue', from: 1, to: 40 })).toEqual([])
     // Units with no range recorded are ignored.
     expect(overlappingUnits([{ id: 'z', number: '999' }], { unitId: 'c', stickerColor: 'Blue', from: 1, to: 5 })).toEqual([])
+  })
+})
+
+describe('carton breakdown', () => {
+  it('covers the box types a packer actually uses', () => {
+    const keys = CARTON_TYPES.map((t) => t.key)
+    expect(keys).toContain('small')
+    expect(keys).toContain('medium')
+    expect(keys).toContain('large')
+    expect(keys).toContain('wardrobe')
+    expect(CARTON_TYPES.every((t) => t.key && t.label)).toBe(true)
+  })
+
+  it('totals the breakdown', () => {
+    expect(sumCartons({ small: 12, medium: 8, wardrobe: 2 })).toBe(22)
+    expect(sumCartons({})).toBe(0)
+    expect(sumCartons(null)).toBe(0)
+    expect(sumCartons(undefined)).toBe(0)
+  })
+
+  it('does not let junk from a form input corrupt the total', () => {
+    // Values arrive as strings from number inputs, and a packer can type
+    // anything into one.
+    expect(sumCartons({ small: '12', medium: '8' })).toBe(20)
+    expect(sumCartons({ small: 'abc', medium: 5 })).toBe(5)
+    expect(sumCartons({ small: -4, medium: 5 })).toBe(5)
+    expect(sumCartons({ small: 2.9 })).toBe(2)
+    expect(sumCartons({ notABoxType: 99 })).toBe(0)
+  })
+
+  it('stores only the box types actually used', () => {
+    expect(cartonsFromForm({ carton_small: '12', carton_medium: '', carton_wardrobe: '0' }))
+      .toEqual({ small: 12 })
+    expect(cartonsFromForm({})).toEqual({})
+    expect(cartonsFromForm(null)).toEqual({})
+  })
+
+  it('summarises for the unit page', () => {
+    expect(cartonSummary({ small: 12, wardrobe: 2 })).toBe('12 small, 2 wardrobe')
+    expect(cartonSummary({})).toBe(null)
+    expect(cartonSummary(null)).toBe(null)
   })
 })

@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
 import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, signOut, updateProfile } from 'firebase/auth'
 import { doc, setDoc, updateDoc, deleteDoc, addDoc, arrayUnion, onSnapshot, collection, query, orderBy, serverTimestamp, writeBatch } from 'firebase/firestore'
 import { app, auth, db } from './firebase.js'
-import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction } from './lib/mutations.js'
+import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction, sumCartons } from './lib/mutations.js'
 import { DEFAULT_SCHEDULE, DEFAULT_RETURN_SCHEDULE, scheduleDocId } from './lib/schedule.js'
 import { stageOf } from './seed.js'
 
@@ -162,11 +162,16 @@ export function StoreProvider({ children }) {
         // report can check for overlaps between units.
         if (Number.isInteger(p.inventoryFrom)) patch.inventoryFrom = p.inventoryFrom
         if (Number.isInteger(p.inventoryTo)) patch.inventoryTo = p.inventoryTo
+        // How many of each carton went in. Feeds materials billing and
+        // restock, and is the only record of it once the truck leaves.
+        if (p.materials && Object.keys(p.materials).length) patch.materials = p.materials
         await updateDoc(doc(db, 'units', p.unitId), patch)
         const range = Number.isInteger(p.inventoryFrom) && Number.isInteger(p.inventoryTo)
           ? `, stickers ${p.inventoryFrom}-${p.inventoryTo}` : ''
         const shots = p.media.filter((m) => m.phase !== 'inventory').length
-        return ev('stage', `Finished packing unit ${unit.number}, ${p.pieces} pieces inventoried${range} (inventory photo + ${shots} packed photo${shots === 1 ? '' : 's'})`, { unitId: unit.id, from: 'packing', to: 'packed', media: p.media })
+        const boxes = sumCartons(p.materials)
+        const boxNote = boxes > 0 ? `, ${boxes} carton${boxes === 1 ? '' : 's'}` : ''
+        return ev('stage', `Finished packing unit ${unit.number}, ${p.pieces} pieces inventoried${boxNote}${range} (inventory photo + ${shots} packed photo${shots === 1 ? '' : 's'})`, { unitId: unit.id, from: 'packing', to: 'packed', media: p.media })
       }
       case 'logEmpties': {
         // BigBox drops off empty containers before any loading happens.

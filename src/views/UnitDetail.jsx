@@ -3,7 +3,7 @@ import { STAGES, stageOf } from '../seed.js'
 import { useStore, canAct, filesToMedia, fmtTime, CONT_STATUS } from '../store.jsx'
 import { Modal, Lightbox, Uploader, EventRow, Avatar, StagePill } from '../ui.jsx'
 import { captureMedia } from '../lib/upload.js'
-import { STICKER_COLORS, inventoryRangeError, overlappingUnits, inventoryRangeLabel, stickerHex } from '../lib/mutations.js'
+import { STICKER_COLORS, inventoryRangeError, overlappingUnits, inventoryRangeLabel, stickerHex, CARTON_TYPES, cartonsFromForm, sumCartons, cartonSummary } from '../lib/mutations.js'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import ReportOverflowButton from '../components/ReportOverflowButton.jsx'
 
@@ -68,6 +68,10 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
   // is the exact mix-up the numbers prevent, but the packer is standing in
   // the apartment and knows better than we do. Declared above the !unit
   // guard: a hook after an early return changes hook order between renders.
+  const cartonTotal = useMemo(
+    () => sumCartons(Object.fromEntries(CARTON_TYPES.map((t) => [t.key, form[`carton_${t.key}`]]))),
+    [form],
+  )
   const rangeClash = useMemo(
     () => overlappingUnits(state.units, { unitId, stickerColor: unit?.stickerColor, from: form.invFrom, to: form.invTo }),
     [state.units, unitId, unit?.stickerColor, form.invFrom, form.invTo],
@@ -141,6 +145,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
         status = await submitWrite(dispatch({ type: 'finishPacking', p: {
           unitId, pieces: n, media: [...invMedia, ...media],
           inventoryFrom: parseInt(form.invFrom, 10), inventoryTo: parseInt(form.invTo, 10),
+          materials: cartonsFromForm(form),
         } }))
       }
       if (action.key === 'loadUnit') {
@@ -319,6 +324,21 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
             <>
               <div className="field"><label>Total pieces packed</label>
                 <input className="input" type="number" min="1" inputMode="numeric" autoFocus placeholder="e.g. 42" value={form.pieces || ''} onChange={(e) => setForm({ ...form, pieces: e.target.value })} /></div>
+              <div className="field">
+                <label>Cartons packed{cartonTotal > 0 ? ` · ${cartonTotal} total` : ''}</label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(132px, 1fr))', gap: 8 }}>
+                  {CARTON_TYPES.map((t) => (
+                    <label key={t.key} style={{ display: 'block' }}>
+                      <span className="muted" style={{ display: 'block', fontSize: 12.5, marginBottom: 3 }}>{t.label}</span>
+                      <input
+                        className="input" type="number" min="0" inputMode="numeric" placeholder="0"
+                        value={form[`carton_${t.key}`] || ''}
+                        onChange={(e) => setForm({ ...form, [`carton_${t.key}`]: e.target.value })}
+                      />
+                    </label>
+                  ))}
+                </div>
+              </div>
               <div className="field">
                 <label>Photo of the paper inventory sheet (required)</label>
                 <label className="dropzone camera-capture" style={{ display: 'block' }}>

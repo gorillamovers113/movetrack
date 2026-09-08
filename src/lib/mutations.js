@@ -166,3 +166,47 @@ export function overlappingUnits(units, { unitId, stickerColor, from, to }) {
     return f <= u.inventoryTo && t >= u.inventoryFrom
   })
 }
+
+// Carton breakdown a packer submits when they finish a unit. `pieces` stays
+// the total count of everything handled (furniture included, since that is
+// what gets verified against at load); this is specifically how many of each
+// box went in, which is what materials billing and restock run off.
+export const CARTON_TYPES = [
+  { key: 'small', label: 'Small', hint: '1.5 cu ft, book box' },
+  { key: 'medium', label: 'Medium', hint: '3.0 cu ft' },
+  { key: 'large', label: 'Large', hint: '4.5 cu ft' },
+  { key: 'xlarge', label: 'Extra large', hint: '6.0 cu ft' },
+  { key: 'wardrobe', label: 'Wardrobe', hint: 'hanging' },
+  { key: 'dishpack', label: 'Dish pack', hint: 'china / glassware' },
+  { key: 'mirror', label: 'Mirror / picture', hint: 'flat, framed art' },
+]
+
+// Total cartons across the breakdown. Tolerates missing keys, strings from
+// form inputs, and junk, because it feeds a count shown to crew.
+export function sumCartons(materials) {
+  if (!materials) return 0
+  return CARTON_TYPES.reduce((n, t) => {
+    const v = Number(materials[t.key])
+    return n + (Number.isFinite(v) && v > 0 ? Math.floor(v) : 0)
+  }, 0)
+}
+
+// Form values -> the map stored on the unit. Drops blanks and zeroes so a
+// unit doc carries only the box types it actually used.
+export function cartonsFromForm(form) {
+  const out = {}
+  for (const t of CARTON_TYPES) {
+    const v = Number(form?.[`carton_${t.key}`])
+    if (Number.isFinite(v) && v > 0) out[t.key] = Math.floor(v)
+  }
+  return out
+}
+
+// "12 small, 8 medium, 2 wardrobe" for the unit page and reports.
+export function cartonSummary(materials) {
+  if (!materials) return null
+  const parts = CARTON_TYPES
+    .filter((t) => Number(materials[t.key]) > 0)
+    .map((t) => `${Math.floor(Number(materials[t.key]))} ${t.label.toLowerCase()}`)
+  return parts.length ? parts.join(', ') : null
+}
