@@ -1,5 +1,5 @@
 import React from 'react'
-import { nextPackingStep, packingProgress, loadingChecklist, loadingProgress } from '../lib/mutations.js'
+import { nextPackingStep, packingProgress, loadingChecklist, loadingProgress, receivingChecklist, receivingProgress } from '../lib/mutations.js'
 import { useStore, canAct, containerAction, CONT_STATUS } from '../store.jsx'
 import { StagePill } from '../ui.jsx'
 import FindUnitButton from '../components/FindUnitButton.jsx'
@@ -53,7 +53,11 @@ export default function MyWork({ openUnit, openContainer, toast }) {
   // apartments, and for a mover any packed unit they have already started
   // loading. Without this a mover's half-loaded unit sits in "Ready to start"
   // looking untouched.
-  const started = (u) => (role === 'mover' ? loadingProgress(u).done > 0 : u.stage === 'packing')
+  const started = (u) => {
+    if (role === 'mover') return loadingProgress(u).done > 0
+    if (role === 'warehouse') return receivingProgress(u).done > 0
+    return u.stage === 'packing'
+  }
   const inProgress = mine.filter(started)
   const ready = mine.filter((u) => !started(u))
 
@@ -71,6 +75,11 @@ export default function MyWork({ openUnit, openContainer, toast }) {
   // packing", so someone glancing at their phone between apartments knows what
   // the unit is actually waiting on without opening it.
   const queueLabel = (u) => {
+    if (role === 'warehouse' && (u.stage === 'loaded' || u.stage === 'picked_up')) {
+      const next = receivingChecklist(u).find((s) => !s.done)
+      const p = receivingProgress(u)
+      return next ? `${next.label} (${p.done}/${p.total})` : `Book unit ${u.number} in`
+    }
     if (role === 'mover' && u.stage === 'packed') {
       const next = loadingChecklist(u).find((s) => !s.done)
       const p = loadingProgress(u)
@@ -122,11 +131,16 @@ export default function MyWork({ openUnit, openContainer, toast }) {
           <div className="big">🚪</div>
           {role === 'mover'
             ? <>No units are packed and waiting yet. They turn green on the board the moment the packers finish one.</>
-            : <>Nothing open right now. Walk up to a unit and tap <b>Start a unit</b>, then type the number on the door.</>}
+            : role === 'warehouse'
+              ? <>Nothing has arrived yet. Units appear here once the movers close them out on site.</>
+              : <>Nothing open right now. Walk up to a unit and tap <b>Start a unit</b>, then type the number on the door.</>}
         </div>
       )}
       <Section title="In progress: finish these" units={inProgress} />
-      <Section title={role === 'mover' ? 'Packed and ready to load' : 'Ready to start'} units={ready} />
+      <Section
+        title={role === 'mover' ? 'Packed and ready to load' : role === 'warehouse' ? 'Arrived, waiting to be checked in' : 'Ready to start'}
+        units={ready}
+      />
       <Section title="Finished by you · view only" units={finishedByMe} done />
       {myRecent.length > 0 && (
         <>

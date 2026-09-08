@@ -442,3 +442,85 @@ export function loadingProgress(unit) {
 export function loadingComplete(unit) {
   return loadingChecklist(unit).every((s) => s.done)
 }
+
+// ---------------------------------------------------------------------------
+// Warehouse receiving
+// ---------------------------------------------------------------------------
+
+// What the warehouse manager checks off as a unit's boxes come off the truck.
+//
+// All three are typed from what is physically in front of them, never
+// confirmed against something the screen already shows. That is the whole
+// point: this is the last moment anyone can catch a box that stayed on the
+// truck, or a load that came out of the wrong apartment, while the truck is
+// still in the yard and the crew who packed it are still reachable.
+export const RECEIVING_STEPS = [
+  { key: 'recv_number', label: 'Unit number' },
+  { key: 'recv_lastname', label: "Tenant's last name" },
+  { key: 'recv_boxes', label: 'Box numbers received' },
+]
+
+export function lastNameMismatch(unit, entered) {
+  const recorded = surnameOf(unit && unit.tenant)
+  const typed = String(entered || '').trim()
+  if (!recorded || recorded === '-' || !typed) return null
+  return recorded.toLowerCase() === typed.toLowerCase() ? null : { recorded, entered: typed }
+}
+
+// Reconciles the boxes the warehouse actually received against the boxes the
+// mover logged onto this unit. Reports both directions, because they mean
+// different things: a missing box is still on the truck or still on site, an
+// unexpected one belongs to another apartment and someone needs to find out
+// whose before it is put away.
+export function boxSetDiff(unit, typedNumbers = []) {
+  const expected = completeBoxes(unit).map((b) => normalizeBoxNumber(b.number))
+  const got = (typedNumbers || []).map(normalizeBoxNumber).filter(Boolean)
+  const expectedSet = new Set(expected)
+  const gotSet = new Set(got)
+  const missing = expected.filter((n) => !gotSet.has(n))
+  const unexpected = [...gotSet].filter((n) => !expectedSet.has(n))
+  return { expected, got: [...gotSet], missing, unexpected, ok: missing.length === 0 && unexpected.length === 0 }
+}
+
+// Free text off a phone keyboard: people separate box numbers with commas,
+// spaces, or new lines depending on the phone and the person.
+export function parseBoxNumbers(text) {
+  return String(text || '')
+    .split(/[\s,;]+/)
+    .map(normalizeBoxNumber)
+    .filter(Boolean)
+}
+
+export function receivingChecklist(unit) {
+  const steps = (unit && unit.steps) || {}
+  return RECEIVING_STEPS.map((s) => {
+    const raw = steps[s.key]
+    if (!raw) return { ...s, done: false }
+    return {
+      ...s,
+      done: true,
+      by: raw.userName || null,
+      at: typeof raw.at === 'number' ? raw.at : null,
+      value: raw.value,
+      matched: raw.matched,
+    }
+  })
+}
+
+export function receivingProgress(unit) {
+  const list = receivingChecklist(unit)
+  return { done: list.filter((s) => s.done).length, total: list.length }
+}
+
+export function receivingComplete(unit) {
+  return receivingChecklist(unit).every((s) => s.done)
+}
+
+// A unit is the warehouse's to receive once the movers have finished loading
+// it. Deliberately accepts 'loaded' as well as 'picked_up': the drivers do not
+// use the app, so nothing ever marks a unit picked up, and waiting for that
+// would strand every unit one step short of the warehouse forever. The driver
+// step is left in place for the day someone does use it.
+export function readyToReceive(unit) {
+  return !!unit && (unit.stage === 'loaded' || unit.stage === 'picked_up')
+}

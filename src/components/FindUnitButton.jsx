@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { useStore } from '../store.jsx'
 import { Modal, StagePill } from '../ui.jsx'
-import { surnameOf, stickerHex, inventoryRangeLabel } from '../lib/mutations.js'
+import { surnameOf, stickerHex, inventoryRangeLabel, readyToReceive } from '../lib/mutations.js'
 
 /* "Start a unit" for crew on the floor.
  *
@@ -32,8 +32,11 @@ export default function FindUnitButton({ openUnit, toast, fullWidth }) {
   // this they could check in to an apartment still being packed, take a photo
   // of a half-packed room, and find every write refused by the rules. Better
   // to say so at the door than to let them start.
-  const tooEarly = !!match && currentUser.role === 'mover'
-    && (match.stage === 'not_started' || match.stage === 'packing')
+  const tooEarly = !!match && (
+    (currentUser.role === 'mover' && (match.stage === 'not_started' || match.stage === 'packing'))
+    // The warehouse books in what the movers have loaded, nothing earlier.
+    || (currentUser.role === 'warehouse' && !readyToReceive(match) && match.stage !== 'at_warehouse')
+  )
   const canOpen = !!match && !tooEarly
 
   const go = () => {
@@ -99,8 +102,9 @@ export default function FindUnitButton({ openUnit, toast, fullWidth }) {
             <div className="card" style={{ padding: '14px 16px', marginBottom: 12, borderLeft: '3px solid var(--brand)' }}>
               <b>Unit {match.number} is not ready yet.</b>
               <div className="muted" style={{ marginTop: 4 }}>
-                The packers are still on it{match.stage === 'not_started' ? ', they have not started' : ''}. It turns green
-                on the board the moment it is ready to load.
+                {currentUser.role === 'warehouse'
+                  ? 'It has not been loaded out yet. It shows up here once the movers close it out on site.'
+                  : `The packers are still on it${match.stage === 'not_started' ? ', they have not started' : ''}. It turns green on the board the moment it is ready to load.`}
               </div>
             </div>
           )}

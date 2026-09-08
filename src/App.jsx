@@ -27,7 +27,7 @@ const NAV = {
   packer: [['mywork', '✓', 'My queue'], ['schedule', '📅', 'Schedule']],
   mover: [['mywork', '✓', 'My queue'], ['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['containers', '📦', 'Containers'], ['overflow', '🛋️', 'Overflow'], ['activity', '🕘', 'Activity']],
   driver: [['mywork', '✓', 'My queue'], ['containers', '📦', 'Containers'], ['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['activity', '🕘', 'Activity']],
-  warehouse: [['containers', '📦', 'Containers'], ['overflow', '🛋️', 'Overflow'], ['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['activity', '🕘', 'Activity']],
+  warehouse: [['mywork', '✓', 'My queue'], ['containers', '📦', 'Containers'], ['overflow', '🛋️', 'Overflow'], ['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['activity', '🕘', 'Activity']],
   viewer: [['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['containers', '📦', 'Containers'], ['overflow', '🛋️', 'Overflow'], ['reports', '📊', 'Reports'], ['activity', '🕘', 'Activity']],
 }
 

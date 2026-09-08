@@ -4,7 +4,7 @@ import { doc, setDoc, updateDoc, deleteDoc, addDoc, arrayUnion, onSnapshot, coll
 import { app, auth, db } from './firebase.js'
 import { captureMedia, uploadFile } from './lib/upload.js'
 import { stepRow, pushRows } from './lib/sheetBackup.js'
-import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction, sumCartons, PACKING_STEPS, REQUIRED_STEPS, packingChecklist, wouldCompletePacking, LOADING_STEPS, loadingComplete, normalizeBoxNumber } from './lib/mutations.js'
+import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction, sumCartons, PACKING_STEPS, REQUIRED_STEPS, packingChecklist, wouldCompletePacking, LOADING_STEPS, loadingComplete, normalizeBoxNumber, RECEIVING_STEPS, receivingComplete, readyToReceive } from './lib/mutations.js'
 import { DEFAULT_SCHEDULE, DEFAULT_RETURN_SCHEDULE, scheduleDocId } from './lib/schedule.js'
 import { stageOf } from './seed.js'
 
@@ -433,6 +433,45 @@ export function StoreProvider({ children }) {
         const boxes = (unit.boxes || []).map((b) => b.number).join(', ')
         await ev('stage', `Unit ${unit.number} fully loaded into ${(unit.boxes || []).length} box${(unit.boxes || []).length === 1 ? '' : 'es'} (${boxes})`, { unitId: unit.id, from: 'packed', to: 'loaded' })
         if (wrong.length) await ev('flag', `FLAG raised on unit ${unit.number}: ${wrong.join(' and ')} did not match the packer's record`, { unitId: unit.id })
+        return
+      }
+      case 'completeReceiveStep': {
+        // One of the warehouse manager's three checks, saved on its own with
+        // its own name and time. Runs while the unit is still 'loaded' or
+        // 'picked_up': it only enters the warehouse once all three are done.
+        const step = RECEIVING_STEPS.find((s) => s.key === p.key)
+        if (!step) throw new Error('Unknown receiving check.')
+
+        const now = Date.now()
+        const entry = { uid: currentUser.uid, userName: currentUser.name, at: now }
+        if (p.value != null) entry.value = p.value
+        if (p.matched != null) entry.matched = p.matched
+        await updateDoc(doc(db, 'units', p.unitId), { [`steps.${p.key}`]: entry })
+
+        if (p.matched === false) {
+          return ev('flag', `MISMATCH receiving unit ${unit.number}: ${step.label.toLowerCase()} came in as "${p.value}", the record says "${p.expected}"`, { unitId: unit.id, step: p.key })
+        }
+        return ev('step', `Unit ${unit.number} · ${step.label} verified ✓${p.value ? ` (${p.value})` : ''}`, { unitId: unit.id, step: p.key })
+      }
+      case 'receiveUnit': {
+        // Into the warehouse. Accepts a unit at 'loaded' as well as
+        // 'picked_up' because the drivers do not use the app, so nothing ever
+        // marks a unit picked up and waiting for it would strand every unit
+        // one step short of the warehouse.
+        if (!readyToReceive(unit)) throw new Error('That unit has not finished loading yet.')
+        if (!receivingComplete(unit)) throw new Error('Verify the unit number, last name and box numbers first.')
+
+        const patch = { stage: 'at_warehouse', receivedBy: currentUser.uid, 'times.receivedAt': Date.now() }
+        const wrong = RECEIVING_STEPS
+          .filter((s) => unit.steps && unit.steps[s.key] && unit.steps[s.key].matched === false)
+          .map((s) => s.label.toLowerCase())
+        if (wrong.length && !unit.flag?.open) {
+          patch.flag = { message: `Received into the warehouse with a mismatch on ${wrong.join(' and ')}. Reconcile against the load-out record.`, ts: Date.now(), by: currentUser.name, open: true }
+        }
+        await updateDoc(doc(db, 'units', p.unitId), patch)
+
+        await ev('stage', `Unit ${unit.number} received into the warehouse, ${(unit.boxes || []).length} box${(unit.boxes || []).length === 1 ? '' : 'es'} verified`, { unitId: unit.id, from: unit.stage, to: 'at_warehouse' })
+        if (wrong.length) await ev('flag', `FLAG raised on unit ${unit.number}: ${wrong.join(' and ')} did not match on arrival`, { unitId: unit.id })
         return
       }
       case 'logEmpties': {
@@ -979,6 +1018,11 @@ export function canAct(user, unit, returnPhase = false) {
     case 'not_started': return admin || role === 'packer' ? { key: 'startPacking', label: 'Start packing' } : null
     case 'packing': return admin || role === 'packer' ? { key: 'finishPacking', label: 'Finish packing' } : null
     case 'packed': return admin || role === 'mover' ? { key: 'loadUnit', label: 'Load into a BigBox' } : null
+    // Both stages go to the warehouse. 'loaded' is here because the drivers do
+    // not use the app, so nothing ever marks a unit picked up and the
+    // warehouse would otherwise never see any work waiting.
+    case 'loaded':
+    case 'picked_up': return admin || role === 'warehouse' ? { key: 'receiveUnit', label: 'Book into warehouse' } : null
     default: return null
   }
 }

@@ -402,6 +402,78 @@ describe('units — packer', () => {
   })
 })
 
+describe('units — warehouse receiving', () => {
+  const recv = (key, matched = true) => ({
+    [`steps.${key}`]: { uid: WAREHOUSE, userName: 'Test warehouse-1', at: 1, value: 'x', matched },
+  })
+
+  it('the three arrival checks are allowed on a loaded unit', async () => {
+    for (const key of ['recv_number', 'recv_lastname', 'recv_boxes']) {
+      await seed('units', 'u1', baseUnit({ stage: 'loaded' }))
+      await assertSucceeds(updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), recv(key)))
+    }
+  })
+
+  it('and on a picked-up unit, for the day a driver does use the app', async () => {
+    await seed('units', 'u1', baseUnit({ stage: 'picked_up' }))
+    await assertSucceeds(updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), recv('recv_number')))
+  })
+
+  it('receiving a loaded unit into the warehouse allowed, since drivers never mark pickup', async () => {
+    await seed('units', 'u1', baseUnit({ stage: 'loaded' }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), { stage: 'at_warehouse', receivedBy: WAREHOUSE })
+    )
+  })
+
+  it('verifying may not be used to jump to a stage the warehouse does not own', async () => {
+    await seed('units', 'u1', baseUnit({ stage: 'loaded' }))
+    // at_warehouse is theirs; anything past it is not.
+    await assertFails(
+      updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), { ...recv('recv_number'), stage: 'unpacked' })
+    )
+    await assertFails(
+      updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), { ...recv('recv_number'), stage: 'return_transit' })
+    )
+  })
+
+  it('the warehouse may not check in a unit the movers have not loaded', async () => {
+    for (const stage of ['not_started', 'packing', 'packed']) {
+      await seed('units', 'u1', baseUnit({ stage }))
+      await assertFails(updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), recv('recv_number')))
+    }
+  })
+
+  it('a mover may not run the warehouse checks', async () => {
+    await seed('units', 'u1', baseUnit({ stage: 'loaded' }))
+    await assertFails(updateDoc(doc(dbAs(MOVER), 'units', 'u1'), recv('recv_number')))
+  })
+
+  it('the warehouse may not clear a flag while verifying', async () => {
+    await seed('units', 'u1', baseUnit({ stage: 'loaded', flag: { message: 'x', ts: 1, by: 'admin', open: true } }))
+    await assertFails(
+      updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), { ...recv('recv_number'), 'flag.open': false })
+    )
+  })
+
+  it('the warehouse may not edit the boxes or the tenant while verifying', async () => {
+    await seed('units', 'u1', baseUnit({ stage: 'loaded' }))
+    await assertFails(
+      updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), { ...recv('recv_boxes'), boxes: [{ number: 'BB-9' }] })
+    )
+    await assertFails(
+      updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), { ...recv('recv_lastname'), tenant: 'Someone Else' })
+    )
+  })
+
+  it('the warehouse may not claim someone else as the receiver', async () => {
+    await seed('units', 'u1', baseUnit({ stage: 'loaded' }))
+    await assertFails(
+      updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), { stage: 'at_warehouse', receivedBy: MOVER })
+    )
+  })
+})
+
 describe('units — mover load-out', () => {
   // The mover records the load against a packed unit one item at a time, the
   // same way a packer works the packing checklist. The stage only moves when

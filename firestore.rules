@@ -59,7 +59,13 @@ service cloud.firestore {
               && ((before == 'packed' && after == 'loaded')         // loadUnit
                   || (before == 'loaded' && after == 'picked_up'))) // bigboxSwap (units in a full container)
           || (role == 'warehouse'
-              && before == 'picked_up' && after == 'at_warehouse')  // warehouseReceive
+              // 'loaded' as well as 'picked_up': the drivers do not use the
+              // app, so nothing ever marks a unit picked up and waiting for
+              // that stage would strand every unit one step short of the
+              // warehouse. The driver hop is left in place for the day it is
+              // used, it is simply no longer required.
+              && (before == 'picked_up' || before == 'loaded')
+              && after == 'at_warehouse')                           // receiveUnit
           || unitReturnTransitionOK(role, before, after);
     }
     // The seven packing checklist items are ticked off one at a time, each as
@@ -132,6 +138,20 @@ service cloud.firestore {
           || (request.resource.data.crew.diff(resource.data.crew).affectedKeys().hasOnly(['movers'])
               && request.resource.data.crew.movers.hasAll(resource.data.crew.movers)
               && request.resource.data.crew.movers.hasOnly(resource.data.crew.movers.concat([request.auth.uid])));
+    }
+    // The warehouse manager's three arrival checks (unit number, tenant's last
+    // name, box numbers) are each saved on their own while the unit is still
+    // on the truck's side of the line, so each carries its own name and time.
+    // The unit only becomes 'at_warehouse' once all three are recorded.
+    //
+    // Narrow in the same way as the packer and mover paths, and again `flag`
+    // is deliberately absent: a mismatch is recorded on the step and raised as
+    // a flag during the transition, so this can never clear an existing one.
+    function unitReceiveWriteOK() {
+      return hasRole('warehouse')
+          && resource.data.stage == request.resource.data.stage
+          && (resource.data.stage == 'loaded' || resource.data.stage == 'picked_up')
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['steps']);
     }
     function unitReturnTransitionOK(role, before, after) {
       return (role == 'warehouse'
@@ -304,7 +324,8 @@ service cloud.firestore {
         || (isCrew()
             && (unitTransitionOK(me().role, resource.data.stage, request.resource.data.stage)
                 || unitStepWriteOK()
-                || unitLoadWriteOK())
+                || unitLoadWriteOK()
+                || unitReceiveWriteOK())
             && unitIdentityUnchanged()
             && custodyFieldsOK());
 
