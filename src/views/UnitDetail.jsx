@@ -3,7 +3,7 @@ import { STAGES, stageOf } from '../seed.js'
 import { useStore, canAct, filesToMedia, fmtTime, CONT_STATUS } from '../store.jsx'
 import { Modal, Lightbox, Uploader, EventRow, Avatar, StagePill } from '../ui.jsx'
 import { captureMedia } from '../lib/upload.js'
-import { STICKER_COLORS, inventoryRangeError, overlappingUnits, inventoryRangeLabel, stickerHex, CARTON_TYPES, cartonsFromForm, sumCartons, cartonSummary } from '../lib/mutations.js'
+import { STICKER_COLORS, inventoryRangeError, overlappingUnits, inventoryRangeLabel, stickerHex, CARTON_TYPES, cartonsFromForm, sumCartons, cartonSummary, packingChecklist, packingProgress } from '../lib/mutations.js'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import ReportOverflowButton from '../components/ReportOverflowButton.jsx'
 
@@ -25,6 +25,10 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
   const [lightbox, setLightbox] = useState(null)
   const [form, setForm] = useState({})
   const [pending, setPending] = useState([])
+  // The front-door shot and the room walkthrough are two checklist items, so
+  // they are captured separately rather than as one undifferentiated pile.
+  const [pendingDoor, setPendingDoor] = useState([])
+  const [pendingRooms, setPendingRooms] = useState([])
   // Guards every dispatch below from a double-tap firing the same write
   // twice, and gates the confirm buttons while a write is in flight.
   const [busy, setBusy] = useState(false)
@@ -95,7 +99,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
   const crewName = (uid) => state.users.find((u) => u.id === uid)?.name
   const crewNames = (uids) => (uids || []).map(crewName).filter(Boolean).join(', ')
 
-  const openAction = () => { setForm({}); setPending([]); resetInventoryCapture(); setModal('action') }
+  const openAction = () => { setForm({}); setPending([]); setPendingDoor([]); setPendingRooms([]); resetInventoryCapture(); setModal('action') }
   const closeActionModal = () => { setModal(null); resetInventoryCapture() }
 
   const submitAction = async () => {
@@ -105,13 +109,13 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
     // with the unit number, then the rooms) and the packed-and-ready state
     // are the two halves of the evidence a damage claim turns on.
     const needsPhoto = ['startPacking', 'finishPacking', 'loadUnit', 'loadForReturn', 'unloadReturn', 'unpackUnit'].includes(action.key)
-    if (needsPhoto && !media.some((m) => m.kind === 'photo')) {
-      if (action.key === 'startPacking') return toast('Photograph the front door with the unit number, and the rooms, before anything moves.')
+    if (action.key === 'startPacking') {
+      if (!pendingDoor.some((m) => m.kind === 'photo')) return toast('Take the front door photo showing the unit number.')
+      if (pendingRooms.length === 0) return toast('Add photos or video of the rooms before anything moves.')
+      if (!form.stickerColor) return toast('Pick the inventory sticker colour for this unit.')
+    } else if (needsPhoto && !media.some((m) => m.kind === 'photo')) {
       if (action.key === 'finishPacking') return toast('Add at least one photo of the unit packed and ready.')
       return toast('At least one photo is required to complete this step, the photo record is the whole point.')
-    }
-    if (action.key === 'startPacking' && !form.stickerColor) {
-      return toast('Pick the inventory sticker colour for this unit.')
     }
     // Client-side validation up front, same as before: nothing here talks to
     // Firestore, so it stays outside the busy/try below.
@@ -138,12 +142,20 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
     setBusy(true)
     try {
       let status = 'synced'
-      if (action.key === 'startPacking') status = await submitWrite(dispatch({ type: 'startPacking', p: { unitId, stickerColor: form.stickerColor, media } }))
+      if (action.key === 'startPacking') {
+        // Phase-tagged so the checklist can tell a door shot from a room shot.
+        const beforeMedia = [
+          ...pendingDoor.map((m) => ({ ...m, phase: 'door', label: m.label || 'front door' })),
+          ...pendingRooms.map((m) => ({ ...m, phase: 'rooms', label: m.label || 'room' })),
+        ]
+        status = await submitWrite(dispatch({ type: 'startPacking', p: { unitId, stickerColor: form.stickerColor, media: beforeMedia } }))
+      }
       if (action.key === 'finishPacking') {
         const invMedia = [{ id: `inv-${Date.now()}`, kind: 'photo', url: invUrl, label: 'inventory', phase: 'inventory', uid: currentUser.uid, ts: Date.now() }]
         // The inventory sheet plus whatever the packer shot of the finished unit.
         status = await submitWrite(dispatch({ type: 'finishPacking', p: {
-          unitId, pieces: n, media: [...invMedia, ...media],
+          unitId, pieces: n,
+          media: [...invMedia, ...media.map((m) => ({ ...m, phase: 'packed' }))],
           inventoryFrom: parseInt(form.invFrom, 10), inventoryTo: parseInt(form.invTo, 10),
           materials: cartonsFromForm(form),
         } }))
@@ -242,6 +254,31 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
         </div>
 
         <div>
+          {/* The six things this unit needs, ticked off from what is actually
+              on the doc. Previously these existed only as validation messages
+              inside two modals, so a packer could not see what was still
+              outstanding without trying to submit and being told no. */}
+          <div className="card" style={{ padding: '16px 20px', marginBottom: 14 }}>
+            <div className="row" style={{ marginBottom: 6 }}>
+              <div className="section-title grow" style={{ margin: 0 }}>Packing checklist</div>
+              <span className="muted" style={{ fontWeight: 700 }}>
+                {packingProgress(unit).done}/{packingProgress(unit).total}
+              </span>
+            </div>
+            {packingChecklist(unit).map((step, i) => (
+              <div key={step.key} style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '5px 0', fontSize: 13.5 }}>
+                <span
+                  aria-hidden
+                  style={{
+                    flex: 'none', width: 20, textAlign: 'center', fontWeight: 800,
+                    color: step.done ? '#16a34a' : 'var(--ink-3, #9aa1ab)',
+                  }}
+                >{step.done ? '✓' : i + 1}</span>
+                <span style={{ color: step.done ? 'var(--ink-3, #6b7280)' : 'inherit' }}>{step.label}</span>
+              </div>
+            ))}
+          </div>
+
           <div className="card" style={{ padding: '16px 20px', marginBottom: 14 }}>
             <div className="row" style={{ marginBottom: 2 }}>
               <div className="section-title grow" style={{ margin: 0 }}>Details</div>
@@ -311,8 +348,23 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
       {modal === 'action' && action && (
         <Modal title={action.label} sub={`Unit ${unit.number} · ${unit.tenant}, logged as ${currentUser.name}, ${fmtTime(Date.now())}`} onClose={() => { if (!busy) closeActionModal() }}>
           {action.key === 'startPacking' && (
+            <>
             <div className="field">
-              <label>Inventory sticker colour for this unit</label>
+              <label>1. Front door, showing the unit number {pendingDoor.length > 0 && <span className="muted">✓ {pendingDoor.length}</span>}</label>
+              <Uploader
+                label={pendingDoor.length ? '📷 Retake or add another' : '📷 Photograph the front door'}
+                onFiles={async (files) => setPendingDoor([...pendingDoor, ...(await filesToMedia(files, 'front door'))])}
+              />
+            </div>
+            <div className="field">
+              <label>2. The rooms, before anything moves {pendingRooms.length > 0 && <span className="muted">✓ {pendingRooms.length}</span>}</label>
+              <Uploader
+                label={pendingRooms.length ? '📷 Add more rooms' : '📷 Photos or video of every room'}
+                onFiles={async (files) => setPendingRooms([...pendingRooms, ...(await filesToMedia(files, 'room'))])}
+              />
+            </div>
+            <div className="field">
+              <label>3. Inventory sticker colour for this unit</label>
               <div className="pick-list" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 {STICKER_COLORS.map((c) => (
                   <button
@@ -327,6 +379,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
                 ))}
               </div>
             </div>
+            </>
           )}
           {action.key === 'finishPacking' && (
             <>
@@ -348,7 +401,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
                 </div>
               </div>
               <div className="field">
-                <label>Photo of the paper inventory sheet (required)</label>
+                <label>4. Photo of the paper inventory sheet</label>
                 <label className="dropzone camera-capture" style={{ display: 'block' }}>
                   <input
                     type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
@@ -365,7 +418,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
                 </label>
               </div>
               <div className="field">
-                <label>Inventory sticker numbers{unit.stickerColor ? ` (${unit.stickerColor} roll)` : ''}</label>
+                <label>5. Inventory sticker numbers{unit.stickerColor ? ` (${unit.stickerColor} roll)` : ''}</label>
                 <div className="row" style={{ gap: 8, alignItems: 'center' }}>
                   <input className="input" type="number" min="1" inputMode="numeric" placeholder="first" style={{ flex: 1 }}
                     value={form.invFrom || ''} onChange={(e) => setForm({ ...form, invFrom: e.target.value })} />
@@ -439,14 +492,12 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
             <div className="field"><label>Pieces counted while unloading {unit.pieces != null && <span className="muted">(packed with {unit.pieces})</span>}</label>
               <input className="input" type="number" min="1" inputMode="numeric" autoFocus placeholder={unit.pieces ?? 'count'} value={form.pieces || ''} onChange={(e) => setForm({ ...form, pieces: e.target.value })} /></div>
           )}
-          {(
+          {action.key !== 'startPacking' && (
             <div className="field">
               <label>{
-                action.key === 'startPacking'
-                  ? 'Before photos: front door with the unit number, then the rooms (required, video encouraged)'
-                  : action.key === 'finishPacking'
-                    ? 'Packed and ready: photos of the finished unit (required, video encouraged)'
-                    : 'Photos required, video encouraged'
+                action.key === 'finishPacking'
+                  ? '6. Packed and ready: photos or video of the finished unit'
+                  : 'Photos required, video encouraged'
               }</label>
               <Uploader onFiles={async (files) => setPending([...pending, ...(await filesToMedia(files))])} />
               {pending.length > 0 && <div className="muted" style={{ marginTop: 6 }}>{pending.length} file{pending.length > 1 ? 's' : ''} attached</div>}

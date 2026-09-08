@@ -210,3 +210,39 @@ export function cartonSummary(materials) {
     .map((t) => `${Math.floor(Number(materials[t.key]))} ${t.label.toLowerCase()}`)
   return parts.length ? parts.join(', ') : null
 }
+
+// The six things a unit needs before it is genuinely packed, in the order a
+// packer does them. Casey's list, made visible: it was previously enforced
+// only as validation messages inside two separate modals, so a packer could
+// not see what was still outstanding without trying to submit.
+//
+// Each item is proved by something actually on the unit doc, never by a
+// "done" flag someone could tick. Media carries a `phase` so a front-door
+// shot is distinguishable from a room shot from the packed-and-ready shot.
+export const PACKING_STEPS = [
+  { key: 'door', label: 'Front door photo with the unit number' },
+  { key: 'rooms', label: 'Photos or video of the rooms' },
+  { key: 'sticker', label: 'Inventory sticker colour' },
+  { key: 'inventory', label: 'Inventory sheet photo' },
+  { key: 'numbers', label: 'Inventory numbers' },
+  { key: 'packed', label: 'Photos or video, packed and ready' },
+]
+
+export function packingChecklist(unit) {
+  const media = (unit && unit.media) || []
+  const hasPhase = (phase) => media.some((m) => m && m.phase === phase)
+  const done = {
+    door: hasPhase('door'),
+    rooms: hasPhase('rooms'),
+    sticker: !!(unit && unit.stickerColor),
+    inventory: hasPhase('inventory'),
+    numbers: Number.isFinite(unit && unit.inventoryFrom) && Number.isFinite(unit && unit.inventoryTo),
+    packed: hasPhase('packed'),
+  }
+  return PACKING_STEPS.map((s) => ({ ...s, done: !!done[s.key] }))
+}
+
+export function packingProgress(unit) {
+  const list = packingChecklist(unit)
+  return { done: list.filter((s) => s.done).length, total: list.length }
+}

@@ -6,6 +6,7 @@ import {
   matchContainerByNumber, surnameOf,
   STICKER_COLORS, stickerHex, inventoryRangeLabel, inventoryRangeError, overlappingUnits,
   CARTON_TYPES, sumCartons, cartonsFromForm, cartonSummary,
+  PACKING_STEPS, packingChecklist, packingProgress,
 } from '../mutations.js'
 
 describe('boxMismatch', () => {
@@ -251,5 +252,55 @@ describe('carton breakdown', () => {
     expect(cartonSummary({ small: 12, wardrobe: 2 })).toBe('12 small, 2 wardrobe')
     expect(cartonSummary({})).toBe(null)
     expect(cartonSummary(null)).toBe(null)
+  })
+})
+
+describe('packing checklist', () => {
+  const full = {
+    stickerColor: 'Blue',
+    inventoryFrom: 1,
+    inventoryTo: 42,
+    media: [
+      { phase: 'door', kind: 'photo' },
+      { phase: 'rooms', kind: 'video' },
+      { phase: 'inventory', kind: 'photo' },
+      { phase: 'packed', kind: 'photo' },
+    ],
+  }
+
+  it('is Casey\'s six items, in the order a packer does them', () => {
+    expect(PACKING_STEPS.map((s) => s.key)).toEqual(['door', 'rooms', 'sticker', 'inventory', 'numbers', 'packed'])
+  })
+
+  it('everything done on a finished unit', () => {
+    expect(packingChecklist(full).every((s) => s.done)).toBe(true)
+    expect(packingProgress(full)).toEqual({ done: 6, total: 6 })
+  })
+
+  it('nothing done on an untouched unit, and it does not crash', () => {
+    expect(packingChecklist({}).some((s) => s.done)).toBe(false)
+    expect(packingProgress({})).toEqual({ done: 0, total: 6 })
+    expect(packingProgress(null)).toEqual({ done: 0, total: 6 })
+    expect(packingProgress({ media: null })).toEqual({ done: 0, total: 6 })
+  })
+
+  it('tells the door shot apart from the room shot', () => {
+    // Both are "a photo taken before packing"; only the phase distinguishes
+    // them, which is the whole reason they are captured separately.
+    const doorOnly = { media: [{ phase: 'door', kind: 'photo' }] }
+    const list = packingChecklist(doorOnly)
+    expect(list.find((s) => s.key === 'door').done).toBe(true)
+    expect(list.find((s) => s.key === 'rooms').done).toBe(false)
+  })
+
+  it('needs both ends of the sticker range, not just one', () => {
+    expect(packingChecklist({ inventoryFrom: 1 }).find((s) => s.key === 'numbers').done).toBe(false)
+    expect(packingChecklist({ inventoryTo: 42 }).find((s) => s.key === 'numbers').done).toBe(false)
+    expect(packingChecklist({ inventoryFrom: 1, inventoryTo: 42 }).find((s) => s.key === 'numbers').done).toBe(true)
+  })
+
+  it('a half-packed unit reports honestly', () => {
+    const started = { stickerColor: 'Red', media: [{ phase: 'door' }, { phase: 'rooms' }] }
+    expect(packingProgress(started)).toEqual({ done: 3, total: 6 })
   })
 })
