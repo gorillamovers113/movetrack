@@ -111,3 +111,58 @@ export function surnameOf(tenant) {
   if (parts.length === 0) return '-'
   return parts[parts.length - 1]
 }
+
+// Inventory sticker colours. Each unit gets its own roll so a stray box found
+// in a stairwell can be traced to an apartment by colour alone, before anyone
+// reads a number. A fixed palette beats free text on a phone: one tap, no
+// spelling variants ("lt blue" vs "light blue") to reconcile in a report.
+export const STICKER_COLORS = [
+  { name: 'Red', hex: '#dc2626' },
+  { name: 'Orange', hex: '#ea580c' },
+  { name: 'Yellow', hex: '#eab308' },
+  { name: 'Green', hex: '#16a34a' },
+  { name: 'Blue', hex: '#2563eb' },
+  { name: 'Purple', hex: '#7c3aed' },
+  { name: 'Pink', hex: '#db2777' },
+  { name: 'White', hex: '#f8fafc' },
+]
+
+export function stickerHex(name) {
+  return STICKER_COLORS.find((c) => c.name === name)?.hex || null
+}
+
+// "1-42" for display, or null when the unit has no range recorded yet.
+export function inventoryRangeLabel(unit) {
+  const from = unit?.inventoryFrom
+  const to = unit?.inventoryTo
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return null
+  return from === to ? String(from) : `${from}-${to}`
+}
+
+// Validates the range a packer types when finishing a unit. Returns an error
+// string to show, or null when it is good.
+export function inventoryRangeError(from, to) {
+  const f = Number(from)
+  const t = Number(to)
+  if (!Number.isInteger(f) || !Number.isInteger(t)) return 'Enter the first and last inventory number.'
+  if (f < 1 || t < 1) return 'Inventory numbers start at 1.'
+  if (t < f) return 'The last number cannot be lower than the first.'
+  return null
+}
+
+// Ranges are meant to be unique per unit: two apartments sharing sticker
+// numbers is exactly the mix-up the numbers exist to prevent. Returns the
+// units whose recorded range overlaps this one, ignoring the unit being
+// edited. Colour is part of the identity, since the same numbers on a
+// different colour roll are not a collision.
+export function overlappingUnits(units, { unitId, stickerColor, from, to }) {
+  const f = Number(from)
+  const t = Number(to)
+  if (!Number.isInteger(f) || !Number.isInteger(t)) return []
+  return (units || []).filter((u) => {
+    if (!u || u.id === unitId) return false
+    if (!Number.isFinite(u.inventoryFrom) || !Number.isFinite(u.inventoryTo)) return false
+    if (stickerColor && u.stickerColor && u.stickerColor !== stickerColor) return false
+    return f <= u.inventoryTo && t >= u.inventoryFrom
+  })
+}

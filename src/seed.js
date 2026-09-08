@@ -57,7 +57,7 @@ export const ROLES = {
   packer: { label: 'Packer / prep', color: '#14b8a6' },
   mover: { label: 'Mover', color: '#8b5cf6' },
   warehouse: { label: 'Warehouse', color: '#3b82f6' },
-  driver: { label: 'Pickup & delivery (legacy)', color: '#f97316' },
+  driver: { label: 'Driver (pickup & delivery)', color: '#f97316' },
   viewer: { label: 'Viewer (read-only)', color: '#3b82f6' },
 }
 

@@ -4,6 +4,7 @@ import {
   nextReturnStage, nextReturnOverflowStage,
   nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction,
   matchContainerByNumber, surnameOf,
+  STICKER_COLORS, stickerHex, inventoryRangeLabel, inventoryRangeError, overlappingUnits,
 } from '../mutations.js'
 
 describe('boxMismatch', () => {
@@ -166,5 +167,47 @@ describe('surnameOf', () => {
     expect(surnameOf(undefined)).toBe('-')
     expect(surnameOf('   ')).toBe('-')
     expect(surnameOf('  Susan   Baker  ')).toBe('Baker')
+  })
+})
+
+describe('inventory stickers', () => {
+  it('offers a colour per unit with a swatch', () => {
+    expect(STICKER_COLORS.length).toBeGreaterThan(4)
+    expect(STICKER_COLORS.every((c) => c.name && /^#[0-9a-f]{6}$/i.test(c.hex))).toBe(true)
+    expect(stickerHex('Blue')).toBe('#2563eb')
+    expect(stickerHex('Chartreuse')).toBe(null)
+  })
+
+  it('labels a range, collapsing a single sticker', () => {
+    expect(inventoryRangeLabel({ inventoryFrom: 1, inventoryTo: 42 })).toBe('1-42')
+    expect(inventoryRangeLabel({ inventoryFrom: 7, inventoryTo: 7 })).toBe('7')
+    expect(inventoryRangeLabel({})).toBe(null)
+    expect(inventoryRangeLabel(null)).toBe(null)
+  })
+
+  it('rejects a range a packer could fat-finger', () => {
+    expect(inventoryRangeError(1, 42)).toBe(null)
+    expect(inventoryRangeError('1', '42')).toBe(null)
+    expect(inventoryRangeError('', '')).toBeTruthy()
+    expect(inventoryRangeError(0, 5)).toBeTruthy()      // stickers start at 1
+    expect(inventoryRangeError(42, 1)).toBeTruthy()     // backwards
+    expect(inventoryRangeError('abc', 5)).toBeTruthy()
+  })
+
+  it('spots two units claiming the same numbers on the same colour', () => {
+    const units = [
+      { id: 'a', number: '901', stickerColor: 'Blue', inventoryFrom: 1, inventoryTo: 40 },
+      { id: 'b', number: '902', stickerColor: 'Red', inventoryFrom: 1, inventoryTo: 40 },
+    ]
+    // Overlaps 901, same colour.
+    expect(overlappingUnits(units, { unitId: 'c', stickerColor: 'Blue', from: 30, to: 60 }).map((u) => u.number)).toEqual(['901'])
+    // Same numbers, different roll: not a collision.
+    expect(overlappingUnits(units, { unitId: 'c', stickerColor: 'Green', from: 1, to: 40 })).toEqual([])
+    // Clear of both.
+    expect(overlappingUnits(units, { unitId: 'c', stickerColor: 'Blue', from: 41, to: 80 })).toEqual([])
+    // Never flags the unit being edited against itself.
+    expect(overlappingUnits(units, { unitId: 'a', stickerColor: 'Blue', from: 1, to: 40 })).toEqual([])
+    // Units with no range recorded are ignored.
+    expect(overlappingUnits([{ id: 'z', number: '999' }], { unitId: 'c', stickerColor: 'Blue', from: 1, to: 5 })).toEqual([])
   })
 })

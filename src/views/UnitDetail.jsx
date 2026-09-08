@@ -3,6 +3,7 @@ import { STAGES, stageOf } from '../seed.js'
 import { useStore, canAct, filesToMedia, fmtTime, CONT_STATUS } from '../store.jsx'
 import { Modal, Lightbox, Uploader, EventRow, Avatar, StagePill } from '../ui.jsx'
 import { captureMedia } from '../lib/upload.js'
+import { STICKER_COLORS, inventoryRangeError, overlappingUnits, inventoryRangeLabel, stickerHex } from '../lib/mutations.js'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import ReportOverflowButton from '../components/ReportOverflowButton.jsx'
 
@@ -82,15 +83,31 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
   const crewName = (uid) => state.users.find((u) => u.id === uid)?.name
   const crewNames = (uids) => (uids || []).map(crewName).filter(Boolean).join(', ')
 
+  // Warn, never block: two units sharing sticker numbers on the same colour
+  // is the exact mix-up the numbers prevent, but the packer is standing in
+  // the apartment and knows better than we do.
+  const rangeClash = useMemo(
+    () => overlappingUnits(state.units, { unitId, stickerColor: unit?.stickerColor, from: form.invFrom, to: form.invTo }),
+    [state.units, unitId, unit?.stickerColor, form.invFrom, form.invTo],
+  )
+
   const openAction = () => { setForm({}); setPending([]); resetInventoryCapture(); setModal('action') }
   const closeActionModal = () => { setModal(null); resetInventoryCapture() }
 
   const submitAction = async () => {
     if (busy) return
     const media = pending
-    const needsPhoto = ['loadUnit', 'loadForReturn', 'unloadReturn', 'unpackUnit'].includes(action.key)
+    // Start and finish now carry photos too: the before record (front door
+    // with the unit number, then the rooms) and the packed-and-ready state
+    // are the two halves of the evidence a damage claim turns on.
+    const needsPhoto = ['startPacking', 'finishPacking', 'loadUnit', 'loadForReturn', 'unloadReturn', 'unpackUnit'].includes(action.key)
     if (needsPhoto && !media.some((m) => m.kind === 'photo')) {
+      if (action.key === 'startPacking') return toast('Photograph the front door with the unit number, and the rooms, before anything moves.')
+      if (action.key === 'finishPacking') return toast('Add at least one photo of the unit packed and ready.')
       return toast('At least one photo is required to complete this step, the photo record is the whole point.')
+    }
+    if (action.key === 'startPacking' && !form.stickerColor) {
+      return toast('Pick the inventory sticker colour for this unit.')
     }
     // Client-side validation up front, same as before: nothing here talks to
     // Firestore, so it stays outside the busy/try below.
@@ -99,6 +116,8 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
       if (!n || n < 1) return toast('Enter the total pieces packed.')
       if (invUploading) return toast('Still uploading the inventory sheet photo, wait a moment and try again.')
       if (!invUrl) return toast('Take a photo of the paper inventory sheet to finish packing.')
+      const rangeErr = inventoryRangeError(form.invFrom, form.invTo)
+      if (rangeErr) return toast(rangeErr)
     }
     if (action.key === 'loadUnit') {
       if (!form.containerId) return toast('Pick a container to load into.')
@@ -115,10 +134,14 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
     setBusy(true)
     try {
       let status = 'synced'
-      if (action.key === 'startPacking') status = await submitWrite(dispatch({ type: 'startPacking', p: { unitId } }))
+      if (action.key === 'startPacking') status = await submitWrite(dispatch({ type: 'startPacking', p: { unitId, stickerColor: form.stickerColor, media } }))
       if (action.key === 'finishPacking') {
         const invMedia = [{ id: `inv-${Date.now()}`, kind: 'photo', url: invUrl, label: 'inventory', phase: 'inventory', uid: currentUser.uid, ts: Date.now() }]
-        status = await submitWrite(dispatch({ type: 'finishPacking', p: { unitId, pieces: n, media: invMedia } }))
+        // The inventory sheet plus whatever the packer shot of the finished unit.
+        status = await submitWrite(dispatch({ type: 'finishPacking', p: {
+          unitId, pieces: n, media: [...invMedia, ...media],
+          inventoryFrom: parseInt(form.invFrom, 10), inventoryTo: parseInt(form.invTo, 10),
+        } }))
       }
       if (action.key === 'loadUnit') {
         // loadUnit can throw if the picked container was just filled or
@@ -173,6 +196,17 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
             <StagePill stage={unit.stage} />
           </div>
           <p>{unit.tenant || '-'} · Floor {unit.floor}{unit.pieces ? ` · ${unit.pieces} pieces` : ''}</p>
+          {(unit.stickerColor || inventoryRangeLabel(unit)) && (
+            <p style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+              {unit.stickerColor && (
+                <span className="badge" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: (stickerHex(unit.stickerColor) || '#888') + '22', color: 'var(--ink)' }}>
+                  <span style={{ width: 11, height: 11, borderRadius: 3, background: stickerHex(unit.stickerColor) || '#888', border: '1px solid rgba(0,0,0,.25)' }} />
+                  {unit.stickerColor} stickers
+                </span>
+              )}
+              {inventoryRangeLabel(unit) && <span className="muted">#{inventoryRangeLabel(unit)}</span>}
+            </p>
+          )}
         </div>
         <div className="row">
           {action && <button className="btn btn-primary btn-lg" onClick={openAction}>{action.label}</button>}
@@ -263,6 +297,24 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
 
       {modal === 'action' && action && (
         <Modal title={action.label} sub={`Unit ${unit.number} · ${unit.tenant}, logged as ${currentUser.name}, ${fmtTime(Date.now())}`} onClose={() => { if (!busy) closeActionModal() }}>
+          {action.key === 'startPacking' && (
+            <div className="field">
+              <label>Inventory sticker colour for this unit</label>
+              <div className="pick-list" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {STICKER_COLORS.map((c) => (
+                  <button
+                    key={c.name} type="button"
+                    className={`btn ${form.stickerColor === c.name ? 'btn-primary' : 'btn-ghost'}`}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8 }}
+                    onClick={() => setForm({ ...form, stickerColor: c.name })}
+                  >
+                    <span style={{ width: 14, height: 14, borderRadius: 4, background: c.hex, border: '1px solid rgba(0,0,0,.25)' }} />
+                    {c.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {action.key === 'finishPacking' && (
             <>
               <div className="field"><label>Total pieces packed</label>
@@ -283,6 +335,21 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
                     </div>
                   ) : <>📷 Tap to photograph the inventory sheet</>}
                 </label>
+              </div>
+              <div className="field">
+                <label>Inventory sticker numbers{unit.stickerColor ? ` (${unit.stickerColor} roll)` : ''}</label>
+                <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                  <input className="input" type="number" min="1" inputMode="numeric" placeholder="first" style={{ flex: 1 }}
+                    value={form.invFrom || ''} onChange={(e) => setForm({ ...form, invFrom: e.target.value })} />
+                  <span className="muted">to</span>
+                  <input className="input" type="number" min="1" inputMode="numeric" placeholder="last" style={{ flex: 1 }}
+                    value={form.invTo || ''} onChange={(e) => setForm({ ...form, invTo: e.target.value })} />
+                </div>
+                {rangeClash.length > 0 && (
+                  <div className="muted" style={{ marginTop: 6, color: 'var(--warn, #b45309)' }}>
+                    Heads up: {rangeClash.map((u) => `unit ${u.number}`).join(', ')} already used these numbers on the same colour.
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -344,9 +411,15 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
             <div className="field"><label>Pieces counted while unloading {unit.pieces != null && <span className="muted">(packed with {unit.pieces})</span>}</label>
               <input className="input" type="number" min="1" inputMode="numeric" autoFocus placeholder={unit.pieces ?? 'count'} value={form.pieces || ''} onChange={(e) => setForm({ ...form, pieces: e.target.value })} /></div>
           )}
-          {action.key !== 'startPacking' && action.key !== 'finishPacking' && (
+          {(
             <div className="field">
-              <label>Photos required, video encouraged</label>
+              <label>{
+                action.key === 'startPacking'
+                  ? 'Before photos: front door with the unit number, then the rooms (required, video encouraged)'
+                  : action.key === 'finishPacking'
+                    ? 'Packed and ready: photos of the finished unit (required, video encouraged)'
+                    : 'Photos required, video encouraged'
+              }</label>
               <Uploader onFiles={async (files) => setPending([...pending, ...(await filesToMedia(files))])} />
               {pending.length > 0 && <div className="muted" style={{ marginTop: 6 }}>{pending.length} file{pending.length > 1 ? 's' : ''} attached</div>}
             </div>

@@ -22,7 +22,10 @@ export default function Team({ toast }) {
   // this is what makes it possible to ever create a second admin from the
   // UI. Promoting to admin is gated by a confirm() at the call site below,
   // not by leaving it out of the list.
-  const ASSIGNABLE = Object.entries(ROLES).filter(([k]) => k !== 'driver')
+  // Every role is assignable, driver included: Casey assigns it (2026-09-07).
+  // Crew also swap roles between days, a mover on Monday packing on Tuesday,
+  // so this list is what he re-points people with each morning.
+  const ASSIGNABLE = Object.entries(ROLES)
   const pending = state.users.filter((u) => u.status === 'pending')
   const active = state.users.filter((u) => u.status === 'active')
   const activeAdmins = active.filter((u) => u.role === 'admin')

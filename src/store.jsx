@@ -131,8 +131,23 @@ export function StoreProvider({ children }) {
 
     switch (type) {
       case 'startPacking': {
-        await updateDoc(doc(db, 'units', p.unitId), { stage: 'packing', 'crew.packers': arrayUnion(currentUser.uid), 'times.packStart': Date.now() })
-        return ev('stage', `Started packing unit ${unit.number}`, { unitId: unit.id, from: unit.stage, to: 'packing' })
+        // The "before" record. Photos of the front door with the unit number
+        // and a walkthrough of the untouched apartment are what answer a
+        // damage claim weeks later, and they only exist if they are captured
+        // now, before anyone moves a box. p.stickerColor is the roll this
+        // unit gets, so a stray carton can be traced to an apartment by
+        // colour before anyone reads a number.
+        p.media = attributeMedia(p.media || [])
+        const patch = {
+          stage: 'packing',
+          'crew.packers': arrayUnion(currentUser.uid),
+          'times.packStart': Date.now(),
+        }
+        if (p.media.length) patch.media = arrayUnion(...p.media)
+        if (p.stickerColor) patch.stickerColor = p.stickerColor
+        await updateDoc(doc(db, 'units', p.unitId), patch)
+        const colourNote = p.stickerColor ? `, ${p.stickerColor} stickers` : ''
+        return ev('stage', `Started packing unit ${unit.number}${colourNote} (${p.media.length} before photo${p.media.length === 1 ? '' : 's'})`, { unitId: unit.id, from: unit.stage, to: 'packing', media: p.media })
       }
       case 'finishPacking': {
         // Packer captures a photo of the handwritten paper inventory sheet
@@ -141,8 +156,17 @@ export function StoreProvider({ children }) {
         // never fit; p.media carries the inventory photo (arrayUnion'd onto
         // the unit's media so it shows in the unit's photo record).
         p.media = attributeMedia(p.media)
-        await updateDoc(doc(db, 'units', p.unitId), { stage: 'packed', pieces: p.pieces, 'times.packEnd': Date.now(), media: arrayUnion(...p.media) })
-        return ev('stage', `Finished packing unit ${unit.number}, ${p.pieces} pieces inventoried (inventory photo attached)`, { unitId: unit.id, from: 'packing', to: 'packed', media: p.media })
+        const patch = { stage: 'packed', pieces: p.pieces, 'times.packEnd': Date.now(), media: arrayUnion(...p.media) }
+        // The sticker numbers this unit consumed, so a found box maps back to
+        // an apartment. Stored as two numbers rather than a typed string so a
+        // report can check for overlaps between units.
+        if (Number.isInteger(p.inventoryFrom)) patch.inventoryFrom = p.inventoryFrom
+        if (Number.isInteger(p.inventoryTo)) patch.inventoryTo = p.inventoryTo
+        await updateDoc(doc(db, 'units', p.unitId), patch)
+        const range = Number.isInteger(p.inventoryFrom) && Number.isInteger(p.inventoryTo)
+          ? `, stickers ${p.inventoryFrom}-${p.inventoryTo}` : ''
+        const shots = p.media.filter((m) => m.phase !== 'inventory').length
+        return ev('stage', `Finished packing unit ${unit.number}, ${p.pieces} pieces inventoried${range} (inventory photo + ${shots} packed photo${shots === 1 ? '' : 's'})`, { unitId: unit.id, from: 'packing', to: 'packed', media: p.media })
       }
       case 'logEmpties': {
         // BigBox drops off empty containers before any loading happens.
