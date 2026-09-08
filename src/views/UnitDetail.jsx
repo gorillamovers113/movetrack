@@ -262,11 +262,11 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
             <div className="row" style={{ marginBottom: 6 }}>
               <div className="section-title grow" style={{ margin: 0 }}>Packing checklist</div>
               <span className="muted" style={{ fontWeight: 700 }}>
-                {packingProgress(unit).done}/{packingProgress(unit).total}
+                {packingProgress(unit, events).done}/{packingProgress(unit, events).total}
               </span>
             </div>
-            {packingChecklist(unit).map((step, i) => (
-              <div key={step.key} style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '5px 0', fontSize: 13.5 }}>
+            {packingChecklist(unit, events).map((step, i) => (
+              <div key={step.key} style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '6px 0', fontSize: 13.5 }}>
                 <span
                   aria-hidden
                   style={{
@@ -274,7 +274,14 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
                     color: step.done ? '#16a34a' : 'var(--ink-3, #9aa1ab)',
                   }}
                 >{step.done ? '✓' : i + 1}</span>
-                <span style={{ color: step.done ? 'var(--ink-3, #6b7280)' : 'inherit' }}>{step.label}</span>
+                <span style={{ minWidth: 0 }}>
+                  <span style={{ color: step.done ? 'var(--ink-3, #6b7280)' : 'inherit' }}>{step.label}</span>
+                  {step.done && (step.by || step.at) && (
+                    <span style={{ display: 'block', fontSize: 12, color: 'var(--ink-3, #9aa1ab)' }}>
+                      {step.by || 'Crew'}{step.at ? ` · ${fmtTime(step.at)}` : ''}
+                    </span>
+                  )}
+                </span>
               </div>
             ))}
           </div>

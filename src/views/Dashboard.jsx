@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { STAGES, stageOf } from '../seed.js'
 import { surnameOf } from '../lib/mutations.js'
+import { activeCrew } from '../lib/reports.js'
 import { useStore } from '../store.jsx'
 import { todayKey, findScheduleDay, nextScheduleDay, fmtScheduleDate, progressForDay, scheduleForPhase, targetStageForWork } from '../lib/schedule.js'
 import BuildingView from './BuildingView.jsx'
@@ -95,6 +96,67 @@ function TodayBanner({ toast }) {
   )
 }
 
+// Who is signed in and what they are doing, for the people watching the
+// building rather than working it. Refreshes on its own so a "3 min ago"
+// does not sit there going stale while nobody touches the page.
+function OnTheFloor({ openUnit }) {
+  const { state, currentUser } = useStore()
+  const [now, setNow] = useState(() => Date.now())
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 30000)
+    return () => clearInterval(t)
+  }, [])
+
+  // Crew see their own queue; this is for the people overseeing the job.
+  if (!currentUser || !['admin', 'viewer'].includes(currentUser.role)) return null
+
+  const rows = activeCrew({ events: state.events, units: state.units }, now)
+  const ago = (ts) => {
+    const m = Math.max(0, Math.round((now - ts) / 60000))
+    if (m < 1) return 'just now'
+    if (m < 60) return `${m} min ago`
+    const h = Math.round(m / 60)
+    return `${h} hr ago`
+  }
+
+  return (
+    <div className="card" style={{ padding: '16px 20px', marginBottom: 14 }}>
+      <div className="section-title" style={{ marginTop: 0 }}>On the floor right now</div>
+      {rows.length === 0 ? (
+        <div className="muted">Nobody has logged anything in the last couple of hours.</div>
+      ) : rows.map((r) => (
+        <div
+          key={r.uid}
+          onClick={() => { if (r.openUnitNumber) { const u = state.units.find((x) => x.number === r.openUnitNumber); if (u) openUnit(u.id) } }}
+          style={{
+            display: 'flex', alignItems: 'flex-start', gap: 10, padding: '9px 0',
+            borderTop: '1px solid var(--line)', cursor: r.openUnitNumber ? 'pointer' : 'default',
+          }}
+        >
+          <Avatar name={r.name || '?'} />
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontWeight: 700 }}>
+              {r.name || 'Someone'}
+              {r.role && <span className="badge" style={{ marginLeft: 8, background: (ROLES[r.role]?.color || '#8a93a2') + '22', color: ROLES[r.role]?.color || '#8a93a2' }}>{ROLES[r.role]?.label || r.role}</span>}
+            </div>
+            {r.openUnitNumber ? (
+              <div style={{ fontSize: 13.5 }}>
+                Packing <b>unit {r.openUnitNumber}</b>{r.openUnitTenant ? ` · ${surnameOf(r.openUnitTenant)}` : ''}
+                <span className="muted"> · started {ago(r.ts)}</span>
+              </div>
+            ) : (
+              <div className="muted" style={{ fontSize: 13.5, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {r.action} · {ago(r.ts)}
+              </div>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export default function Dashboard({ openUnit, toast }) {
   const { state } = useStore()
   const [stageFilter, setStageFilter] = useState(null)
@@ -145,6 +207,8 @@ export default function Dashboard({ openUnit, toast }) {
       </div>
 
       <TodayBanner toast={toast} />
+
+      <OnTheFloor openUnit={openUnit} />
 
       <div className="kpis">
         {/* I6 fix: denominator/count come from live state.units, not a hardcoded 100 */}

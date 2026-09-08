@@ -228,21 +228,47 @@ export const PACKING_STEPS = [
   { key: 'packed', label: 'Photos or video, packed and ready' },
 ]
 
-export function packingChecklist(unit) {
+// Each item reports WHO completed it and WHEN, taken from the evidence
+// itself: media already carries uid/userName/ts, and the two stage events
+// carry it for the fields that are not media (sticker colour, numbers). So
+// attribution is a consequence of doing the work, not a separate thing
+// anyone has to record, and it cannot be ticked by someone who did not do it.
+export function packingChecklist(unit, events = []) {
   const media = (unit && unit.media) || []
-  const hasPhase = (phase) => media.some((m) => m && m.phase === phase)
-  const done = {
-    door: hasPhase('door'),
-    rooms: hasPhase('rooms'),
-    sticker: !!(unit && unit.stickerColor),
-    inventory: hasPhase('inventory'),
-    numbers: Number.isFinite(unit && unit.inventoryFrom) && Number.isFinite(unit && unit.inventoryTo),
-    packed: hasPhase('packed'),
+  const stageEvent = (to) => (events || [])
+    .filter((e) => e && e.type === 'stage' && e.to === to && typeof e.ts === 'number')
+    .sort((a, b) => a.ts - b.ts)[0] || null
+
+  // Earliest item of a phase: the moment the task was actually completed,
+  // not whenever someone last added another shot.
+  const firstOfPhase = (phase) => media
+    .filter((m) => m && m.phase === phase && typeof m.ts === 'number')
+    .sort((a, b) => a.ts - b.ts)[0]
+    || media.find((m) => m && m.phase === phase)
+    || null
+
+  const fromMedia = (phase) => {
+    const m = firstOfPhase(phase)
+    return m ? { done: true, by: m.userName || null, at: typeof m.ts === 'number' ? m.ts : null } : { done: false }
   }
-  return PACKING_STEPS.map((s) => ({ ...s, done: !!done[s.key] }))
+  const fromEvent = (to, done) => {
+    if (!done) return { done: false }
+    const e = stageEvent(to)
+    return { done: true, by: e ? e.userName || null : null, at: e ? e.ts : null }
+  }
+
+  const results = {
+    door: fromMedia('door'),
+    rooms: fromMedia('rooms'),
+    sticker: fromEvent('packing', !!(unit && unit.stickerColor)),
+    inventory: fromMedia('inventory'),
+    numbers: fromEvent('packed', Number.isFinite(unit && unit.inventoryFrom) && Number.isFinite(unit && unit.inventoryTo)),
+    packed: fromMedia('packed'),
+  }
+  return PACKING_STEPS.map((s) => ({ ...s, ...results[s.key] }))
 }
 
-export function packingProgress(unit) {
-  const list = packingChecklist(unit)
+export function packingProgress(unit, events = []) {
+  const list = packingChecklist(unit, events)
   return { done: list.filter((s) => s.done).length, total: list.length }
 }

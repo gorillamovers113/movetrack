@@ -304,3 +304,56 @@ describe('packing checklist', () => {
     expect(packingProgress(started)).toEqual({ done: 3, total: 6 })
   })
 })
+
+describe('checklist attribution', () => {
+  const events = [
+    { type: 'stage', to: 'packing', ts: 1000, userName: 'Liv Post' },
+    { type: 'stage', to: 'packed', ts: 5000, userName: 'Ana Ruiz' },
+  ]
+  const unit = {
+    stickerColor: 'Blue',
+    inventoryFrom: 1, inventoryTo: 42,
+    media: [
+      { phase: 'door', ts: 900, userName: 'Liv Post' },
+      { phase: 'rooms', ts: 950, userName: 'Liv Post' },
+      { phase: 'inventory', ts: 4900, userName: 'Ana Ruiz' },
+      { phase: 'packed', ts: 4950, userName: 'Ana Ruiz' },
+    ],
+  }
+
+  it('names who did each task and when', () => {
+    const by = Object.fromEntries(packingChecklist(unit, events).map((s) => [s.key, s]))
+    expect(by.door).toMatchObject({ done: true, by: 'Liv Post', at: 900 })
+    expect(by.rooms).toMatchObject({ done: true, by: 'Liv Post', at: 950 })
+    expect(by.sticker).toMatchObject({ done: true, by: 'Liv Post', at: 1000 })
+    expect(by.inventory).toMatchObject({ done: true, by: 'Ana Ruiz', at: 4900 })
+    expect(by.numbers).toMatchObject({ done: true, by: 'Ana Ruiz', at: 5000 })
+    expect(by.packed).toMatchObject({ done: true, by: 'Ana Ruiz', at: 4950 })
+  })
+
+  it('credits the person who first completed it, not whoever added another shot later', () => {
+    const u = { media: [
+      { phase: 'door', ts: 900, userName: 'Liv Post' },
+      { phase: 'door', ts: 9999, userName: 'Someone Else' },
+    ] }
+    expect(packingChecklist(u, []).find((s) => s.key === 'door')).toMatchObject({ by: 'Liv Post', at: 900 })
+  })
+
+  it('an incomplete item carries no attribution', () => {
+    const by = Object.fromEntries(packingChecklist({}, []).map((s) => [s.key, s]))
+    expect(by.door.done).toBe(false)
+    expect(by.door.by).toBeUndefined()
+  })
+
+  it('survives evidence with no name or timestamp', () => {
+    const u = { stickerColor: 'Red', media: [{ phase: 'door' }] }
+    const by = Object.fromEntries(packingChecklist(u, []).map((s) => [s.key, s]))
+    expect(by.door.done).toBe(true)
+    expect(by.door.by).toBe(null)
+    expect(by.sticker).toMatchObject({ done: true, by: null, at: null })
+  })
+
+  it('still counts progress with events missing', () => {
+    expect(packingProgress(unit)).toEqual({ done: 6, total: 6 })
+  })
+})

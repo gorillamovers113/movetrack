@@ -219,3 +219,65 @@ export function reportsToCSV(reports) {
   }
   return rows.join('\n')
 }
+
+// ── Live "who is on the floor right now" ────────────────────────────────
+//
+// Casey wants the building screen to answer, at a glance: who is signed in
+// and what are they doing. Built from the events log rather than from unit
+// stages, because a stage only captures packers (a unit sits at `packing`
+// while it is packed) and misses movers, drivers and warehouse entirely,
+// whose work is a moment, not a state.
+//
+// `now` is a parameter, not Date.now(), so this stays pure and testable in
+// line with the rest of this file.
+export function activeCrew({ events = [], units = [] } = {}, now = 0, windowMs = 2 * 60 * 60 * 1000) {
+  const latest = new Map()
+  for (const e of events) {
+    if (!e || !e.uid || typeof e.ts !== 'number') continue
+    if (now - e.ts > windowMs || e.ts > now) continue
+    const prev = latest.get(e.uid)
+    if (!prev || e.ts > prev.ts) latest.set(e.uid, e)
+  }
+
+  // A unit sitting at `packing` is work genuinely still open, so whoever is
+  // on it gets shown as busy even if their last tap was a while ago.
+  const openUnitFor = new Map()
+  for (const u of units) {
+    if (!u || u.stage !== 'packing') continue
+    for (const uid of (u.crew && u.crew.packers) || []) {
+      const prev = openUnitFor.get(uid)
+      const started = num(u.times && u.times.packStart)
+      if (!prev || started > prev.since) openUnitFor.set(uid, { unit: u, since: started })
+    }
+  }
+
+  const rows = []
+  const seen = new Set()
+  for (const [uid, e] of latest) {
+    seen.add(uid)
+    const open = openUnitFor.get(uid)
+    rows.push({
+      uid,
+      name: e.userName || 'Someone',
+      role: e.role || null,
+      action: e.action || '',
+      ts: e.ts,
+      // The unit they still have open, if any: that is the thing an admin
+      // actually wants to see, over whatever their last tap happened to be.
+      openUnitNumber: open ? open.unit.number : null,
+      openUnitTenant: open ? open.unit.tenant : null,
+    })
+  }
+  // Someone mid-unit who has not tapped anything inside the window still
+  // belongs on this list: they are the definition of currently working.
+  for (const [uid, open] of openUnitFor) {
+    if (seen.has(uid)) continue
+    rows.push({
+      uid, name: null, role: 'packer', action: null,
+      ts: open.since,
+      openUnitNumber: open.unit.number,
+      openUnitTenant: open.unit.tenant,
+    })
+  }
+  return rows.sort((a, b) => b.ts - a.ts)
+}
