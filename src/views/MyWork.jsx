@@ -1,5 +1,5 @@
 import React from 'react'
-import { stageOf } from '../seed.js'
+import { nextPackingStep, packingProgress, PACKING_STEPS } from '../lib/mutations.js'
 import { useStore, canAct, containerAction, CONT_STATUS } from '../store.jsx'
 import { StagePill } from '../ui.jsx'
 import FindUnitButton from '../components/FindUnitButton.jsx'
@@ -53,6 +53,17 @@ export default function MyWork({ openUnit, openContainer, toast }) {
   const ready = mine.filter((u) => u.stage !== 'packing')
   const myRecent = [...state.events].filter((e) => e.uid === currentUser.uid).sort((a, b) => b.ts - a.ts).slice(0, 5)
 
+  // A packer's queue names the next checklist item rather than "Finish
+  // packing", so someone glancing at their phone between apartments knows what
+  // the unit is actually waiting on without opening it.
+  const queueLabel = (u) => {
+    const onChecklist = role === 'packer' && (u.stage === 'not_started' || u.stage === 'packing')
+    if (!onChecklist) return canAct(currentUser, u, returnPhase).label
+    const next = nextPackingStep(u, state.events.filter((e) => e.unitId === u.id))
+    if (!next) return canAct(currentUser, u, returnPhase).label
+    return `${next.label} (${packingProgress(u, state.events.filter((e) => e.unitId === u.id)).done}/${PACKING_STEPS.length})`
+  }
+
   const Section = ({ title, units }) => units.length > 0 && (
     <>
       <div className="section-title">{title} · {units.length}</div>
@@ -65,7 +76,7 @@ export default function MyWork({ openUnit, openContainer, toast }) {
             </div>
             <div className="cont-units">{u.tenant || '-'} · Floor {u.floor}{u.pieces ? ` · ${u.pieces} pieces` : ''}</div>
             {u.note && <div className="muted" style={{ marginTop: 4 }}>⚠️ {u.note}</div>}
-            <button className="btn btn-primary btn-sm" style={{ marginTop: 10, width: '100%' }}>{canAct(currentUser, u, returnPhase).label} →</button>
+            <button className="btn btn-primary btn-sm" style={{ marginTop: 10, width: '100%' }}>{queueLabel(u)} →</button>
           </div>
         ))}
       </div>
