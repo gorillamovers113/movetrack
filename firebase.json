@@ -4,7 +4,19 @@
   "hosting": {
     "public": "dist",
     "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-    "rewrites": [{ "source": "**", "destination": "/index.html" }]
+    "rewrites": [{ "source": "**", "destination": "/index.html" }],
+    "headers": [
+      {
+        "//": "Everything defaults to revalidate-first. Firebase Hosting otherwise serves index.html with max-age=3600, so a crew phone could keep running an hour-old bundle after a deploy: the service worker's network-first navigation still answers from the browser's HTTP cache. During a live move a hotfix has to land in seconds, not within the hour.",
+        "source": "**",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache, max-age=0, must-revalidate" }]
+      },
+      {
+        "//": "Build assets carry a content hash in the filename, so a changed file is a changed URL. These are safe to cache hard and forever, which is what keeps the app fast on a phone in a stairwell. Listed after the catch-all so it wins for this path.",
+        "source": "/assets/**",
+        "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
+      }
+    ]
   },
   "emulators": {
     "firestore": { "port": 8080 },
