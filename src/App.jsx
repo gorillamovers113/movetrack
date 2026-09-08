@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { StoreProvider, useStore } from './store.jsx'
 import { ROLES } from './seed.js'
 import { Avatar, Toast, GorillaMark, GorillaWordmark } from './ui.jsx'
@@ -82,15 +82,50 @@ function Shell() {
     toast._t = setTimeout(() => setToastMsg(null), 2600)
   }
 
-  const openUnit = (unitId) => setView((v) => ({ name: 'unit', unitId, back: v.name === 'unit' ? v.back : v }))
+  // Opening a unit pushes a history entry so the phone's own back button
+  // returns to the list instead of leaving the app. The app has no router
+  // and never touched history, so on an installed PWA a crew member's
+  // instinctive back press dropped them out of MoveTrack entirely, mid-unit.
+  const openUnit = (unitId) => {
+    setView((v) => {
+      if (v.name !== 'unit') {
+        try { window.history.pushState({ mtUnit: true }, '') } catch { /* history unavailable */ }
+        return { name: 'unit', unitId, back: v }
+      }
+      // Already on a unit (e.g. jumped from one to another): replace rather
+      // than stack, so one back press still returns to the list.
+      return { name: 'unit', unitId, back: v.back }
+    })
+  }
   const openContainer = (containerId) => setView({ name: 'containers', focusId: containerId })
+
+  // A back press while on a unit returns to wherever they came from. Anywhere
+  // else, let the browser do its normal thing (leave the app).
+  useEffect(() => {
+    const onPop = () => {
+      setView((v) => (v.name === 'unit' ? (v.back || { name: first }) : v))
+    }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [first])
+
+  // The in-app Back button consumes the same history entry, so the two stay
+  // in step: tapping Back then pressing the phone's back button doesn't
+  // replay the unit screen.
+  const goBackFromUnit = () => {
+    if (window.history.state && window.history.state.mtUnit) {
+      window.history.back()   // popstate handler above restores the parent view
+      return
+    }
+    setView(view.back || { name: first })
+  }
   const pendingCount = state.users.filter((u) => u.status === 'pending').length
 
   const page = () => {
     switch (view.name) {
       case 'dashboard': return <Dashboard openUnit={openUnit} toast={toast} />
       case 'schedule': return <Schedule toast={toast} />
-      case 'unit': return <UnitDetail unitId={view.unitId} goBack={() => setView(view.back || { name: first })} openContainer={openContainer} toast={toast} />
+      case 'unit': return <UnitDetail unitId={view.unitId} goBack={goBackFromUnit} openContainer={openContainer} toast={toast} />
       case 'containers': return <Containers openUnit={openUnit} focusId={view.focusId} clearFocus={() => setView((v) => ({ ...v, focusId: null }))} toast={toast} />
       case 'overflow': return <Overflow openUnit={openUnit} focusId={view.focusId} clearFocus={() => setView((v) => ({ ...v, focusId: null }))} toast={toast} />
       case 'team': return <Team toast={toast} />

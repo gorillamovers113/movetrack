@@ -225,6 +225,7 @@ export const PACKING_STEPS = [
   { key: 'sticker', label: 'Inventory sticker colour' },
   { key: 'inventory', label: 'Inventory sheet photo' },
   { key: 'numbers', label: 'Inventory numbers' },
+  { key: 'materials', label: 'Packing materials used' },
   { key: 'packed', label: 'Photos or video, packed and ready' },
 ]
 
@@ -263,6 +264,7 @@ export function packingChecklist(unit, events = []) {
     sticker: fromEvent('packing', !!(unit && unit.stickerColor)),
     inventory: fromMedia('inventory'),
     numbers: fromEvent('packed', Number.isFinite(unit && unit.inventoryFrom) && Number.isFinite(unit && unit.inventoryTo)),
+    materials: fromEvent('packed', sumCartons(unit && unit.materials) > 0),
     packed: fromMedia('packed'),
   }
   return PACKING_STEPS.map((s) => ({ ...s, ...results[s.key] }))

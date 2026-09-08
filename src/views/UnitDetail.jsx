@@ -126,6 +126,9 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
       if (!invUrl) return toast('Take a photo of the paper inventory sheet to finish packing.')
       const rangeErr = inventoryRangeError(form.invFrom, form.invTo)
       if (rangeErr) return toast(rangeErr)
+      // Required, otherwise a finished unit sits at 6 of 7 on the checklist
+      // forever and the materials record has a hole in it.
+      if (cartonTotal < 1) return toast('Enter how many of each carton you used.')
     }
     if (action.key === 'loadUnit') {
       if (!form.containerId) return toast('Pick a container to load into.')
@@ -393,21 +396,6 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
               <div className="field"><label>Total pieces packed</label>
                 <input className="input" type="number" min="1" inputMode="numeric" autoFocus placeholder="e.g. 42" value={form.pieces || ''} onChange={(e) => setForm({ ...form, pieces: e.target.value })} /></div>
               <div className="field">
-                <label>Cartons packed{cartonTotal > 0 ? ` · ${cartonTotal} total` : ''}</label>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(132px, 1fr))', gap: 8 }}>
-                  {CARTON_TYPES.map((t) => (
-                    <label key={t.key} style={{ display: 'block' }}>
-                      <span className="muted" style={{ display: 'block', fontSize: 12.5, marginBottom: 3 }}>{t.label}</span>
-                      <input
-                        className="input" type="number" min="0" inputMode="numeric" placeholder="0"
-                        value={form[`carton_${t.key}`] || ''}
-                        onChange={(e) => setForm({ ...form, [`carton_${t.key}`]: e.target.value })}
-                      />
-                    </label>
-                  ))}
-                </div>
-              </div>
-              <div className="field">
                 <label>4. Photo of the paper inventory sheet</label>
                 <label className="dropzone camera-capture" style={{ display: 'block' }}>
                   <input
@@ -438,6 +426,21 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
                     Heads up: {rangeClash.map((u) => `unit ${u.number}`).join(', ')} already used these numbers on the same colour.
                   </div>
                 )}
+              </div>
+              <div className="field">
+                <label>6. Packing materials used{cartonTotal > 0 ? ` · ${cartonTotal} cartons` : ''}</label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(132px, 1fr))', gap: 8 }}>
+                  {CARTON_TYPES.map((t) => (
+                    <label key={t.key} style={{ display: 'block' }}>
+                      <span className="muted" style={{ display: 'block', fontSize: 12.5, marginBottom: 3 }}>{t.label}</span>
+                      <input
+                        className="input" type="number" min="0" inputMode="numeric" placeholder="0"
+                        value={form[`carton_${t.key}`] || ''}
+                        onChange={(e) => setForm({ ...form, [`carton_${t.key}`]: e.target.value })}
+                      />
+                    </label>
+                  ))}
+                </div>
               </div>
             </>
           )}
@@ -503,7 +506,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
             <div className="field">
               <label>{
                 action.key === 'finishPacking'
-                  ? '6. Packed and ready: photos or video of the finished unit'
+                  ? '7. Packed and ready: photos or video of the finished unit'
                   : 'Photos required, video encouraged'
               }</label>
               <Uploader onFiles={async (files) => setPending([...pending, ...(await filesToMedia(files))])} />

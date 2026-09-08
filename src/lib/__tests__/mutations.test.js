@@ -260,6 +260,7 @@ describe('packing checklist', () => {
     stickerColor: 'Blue',
     inventoryFrom: 1,
     inventoryTo: 42,
+    materials: { small: 12, medium: 8 },
     media: [
       { phase: 'door', kind: 'photo' },
       { phase: 'rooms', kind: 'video' },
@@ -269,19 +270,19 @@ describe('packing checklist', () => {
   }
 
   it('is Casey\'s six items, in the order a packer does them', () => {
-    expect(PACKING_STEPS.map((s) => s.key)).toEqual(['door', 'rooms', 'sticker', 'inventory', 'numbers', 'packed'])
+    expect(PACKING_STEPS.map((s) => s.key)).toEqual(['door', 'rooms', 'sticker', 'inventory', 'numbers', 'materials', 'packed'])
   })
 
   it('everything done on a finished unit', () => {
     expect(packingChecklist(full).every((s) => s.done)).toBe(true)
-    expect(packingProgress(full)).toEqual({ done: 6, total: 6 })
+    expect(packingProgress(full)).toEqual({ done: 7, total: 7 })
   })
 
   it('nothing done on an untouched unit, and it does not crash', () => {
     expect(packingChecklist({}).some((s) => s.done)).toBe(false)
-    expect(packingProgress({})).toEqual({ done: 0, total: 6 })
-    expect(packingProgress(null)).toEqual({ done: 0, total: 6 })
-    expect(packingProgress({ media: null })).toEqual({ done: 0, total: 6 })
+    expect(packingProgress({})).toEqual({ done: 0, total: 7 })
+    expect(packingProgress(null)).toEqual({ done: 0, total: 7 })
+    expect(packingProgress({ media: null })).toEqual({ done: 0, total: 7 })
   })
 
   it('tells the door shot apart from the room shot', () => {
@@ -301,7 +302,7 @@ describe('packing checklist', () => {
 
   it('a half-packed unit reports honestly', () => {
     const started = { stickerColor: 'Red', media: [{ phase: 'door' }, { phase: 'rooms' }] }
-    expect(packingProgress(started)).toEqual({ done: 3, total: 6 })
+    expect(packingProgress(started)).toEqual({ done: 3, total: 7 })
   })
 })
 
@@ -313,6 +314,7 @@ describe('checklist attribution', () => {
   const unit = {
     stickerColor: 'Blue',
     inventoryFrom: 1, inventoryTo: 42,
+    materials: { small: 12 },
     media: [
       { phase: 'door', ts: 900, userName: 'Liv Post' },
       { phase: 'rooms', ts: 950, userName: 'Liv Post' },
@@ -354,6 +356,28 @@ describe('checklist attribution', () => {
   })
 
   it('still counts progress with events missing', () => {
-    expect(packingProgress(unit)).toEqual({ done: 6, total: 6 })
+    expect(packingProgress(unit)).toEqual({ done: 7, total: 7 })
+  })
+})
+
+describe('materials as its own checklist item', () => {
+  it('is separate from the packed photos', () => {
+    // Photographed but no materials recorded: 'packed' done, 'materials' not.
+    const u = { media: [{ phase: 'packed', ts: 1, userName: 'Liv Post' }] }
+    const by = Object.fromEntries(packingChecklist(u, []).map((s) => [s.key, s]))
+    expect(by.packed.done).toBe(true)
+    expect(by.materials.done).toBe(false)
+  })
+
+  it('ticks once cartons are recorded, and is attributed', () => {
+    const u = { materials: { small: 12 } }
+    const evs = [{ type: 'stage', to: 'packed', ts: 5000, userName: 'Ana Ruiz' }]
+    expect(packingChecklist(u, evs).find((s) => s.key === 'materials'))
+      .toMatchObject({ done: true, by: 'Ana Ruiz', at: 5000 })
+  })
+
+  it('an all-zero breakdown does not count as recorded', () => {
+    expect(packingChecklist({ materials: {} }, []).find((s) => s.key === 'materials').done).toBe(false)
+    expect(packingChecklist({ materials: { small: 0 } }, []).find((s) => s.key === 'materials').done).toBe(false)
   })
 })
