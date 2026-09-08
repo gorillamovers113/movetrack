@@ -3,7 +3,7 @@ import {
   makeEvent, boxMismatch, nextStage, nextOverflowStage,
   nextReturnStage, nextReturnOverflowStage,
   nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction,
-  matchContainerByNumber,
+  matchContainerByNumber, surnameOf,
 } from '../mutations.js'
 
 describe('boxMismatch', () => {
@@ -143,5 +143,28 @@ describe('matchContainerByNumber', () => {
     ]
     expect(matchContainerByNumber(outbound, 'bb-2001', 'picked_up')).toEqual(outbound[0])
     expect(matchContainerByNumber(outbound, 'BB-2002', 'picked_up')).toBe(null)
+  })
+})
+
+describe('surnameOf', () => {
+  // These are the real tenant strings from the Trinity Manor phase-1 list.
+  it('takes the family name, not the second word', () => {
+    expect(surnameOf('Bobbye Ellis')).toBe('Ellis')
+    expect(surnameOf('Wendell P. Round')).toBe('Round')          // was "P."
+    expect(surnameOf('Jerilyn E. "HEATHER" Millard')).toBe('Millard') // was "E."
+    expect(surnameOf('Gloria Perez Nunez')).toBe('Nunez')        // was "Perez"
+    expect(surnameOf('Tayebeh Tafaghodi Timachi')).toBe('Timachi')
+    expect(surnameOf('Fang Jing Yang')).toBe('Yang')             // was "Jing"
+  })
+  it('passes a single-word entry through', () => {
+    expect(surnameOf('VACANT')).toBe('VACANT')
+    expect(surnameOf('goblot')).toBe('goblot')
+  })
+  it('never renders blank for missing or messy input', () => {
+    expect(surnameOf('')).toBe('-')
+    expect(surnameOf(null)).toBe('-')
+    expect(surnameOf(undefined)).toBe('-')
+    expect(surnameOf('   ')).toBe('-')
+    expect(surnameOf('  Susan   Baker  ')).toBe('Baker')
   })
 })

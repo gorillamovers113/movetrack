@@ -98,3 +98,16 @@ export function matchContainerByNumber(containers, typedNumber, expectedStatus) 
   if (!typed) return null
   return (containers || []).find((c) => c.status === expectedStatus && String(c.number ?? '').trim().toLowerCase() === typed) || null
 }
+
+// The surname to show on a unit tile. The tile is small, so it carries one
+// word, and the crew reads it against a door: it has to be the family name.
+//
+// This takes the LAST word, not the second. Real tenant lists carry middle
+// initials and multi-word names, and taking word two rendered "Wendell P.
+// Round" as "P." and "Fang Jing Yang" as "Jing". A single-word entry (a
+// placeholder like VACANT) falls through to itself.
+export function surnameOf(tenant) {
+  const parts = String(tenant || '').trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return '-'
+  return parts[parts.length - 1]
+}

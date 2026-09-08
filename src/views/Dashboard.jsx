@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import { STAGES, stageOf } from '../seed.js'
+import { surnameOf } from '../lib/mutations.js'
 import { useStore } from '../store.jsx'
 import { todayKey, findScheduleDay, nextScheduleDay, fmtScheduleDate, progressForDay, scheduleForPhase, targetStageForWork } from '../lib/schedule.js'
 import BuildingView from './BuildingView.jsx'
@@ -214,7 +215,13 @@ export default function Dashboard({ openUnit, toast }) {
                         title={`Unit ${u.number} · ${tenant || 'no tenant on file'} · ${stageOf(u.stage).label}`}
                       >
                         {u.number}
-                        <small>{tenant.split(' ')[1] || tenant || '-'}</small>
+                        {/* Surname is the LAST word, not the second. Real
+                            tenants have middle initials and multi-word
+                            surnames, and taking word two showed "Wendell P.
+                            Round" as "P." and "Gloria Perez Nunez" as
+                            "Perez". A one-word entry (VACANT) falls through
+                            to itself. */}
+                        <small>{surnameOf(tenant)}</small>
                         {u.flag?.open && <span className="flagdot" />}
                       </button>
                     )
