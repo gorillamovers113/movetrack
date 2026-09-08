@@ -2,6 +2,25 @@ rules_version = "2";
 service firebase.storage {
   match /b/{bucket}/o {
 
+    // KNOWN BROKEN, 2026-09-07: every read and write below is currently
+    // DENIED, including for the admin. isActive() does a firestore.get(),
+    // which is a cross-service rule, and that only works once the Firebase
+    // Storage service agent has been granted read access to Firestore. That
+    // grant was never made on this project, so firestore.get() fails and
+    // every rule here evaluates false.
+    //
+    // It went unnoticed because captureMedia() (src/lib/upload.js) catches an
+    // upload failure and embeds the photo in the Firestore document as a
+    // base64 data URL instead. Photos kept appearing to work while quietly
+    // filling a document that has a hard 1 MiB ceiling: unit 906 reached
+    // 866 KB on four photos, and the fifth would have been rejected.
+    //
+    // THE FIX (Google Cloud Console, a couple of minutes):
+    //   IAM & Admin -> Grant access
+    //   Principal: service-167045504697@gcp-sa-firebasestorage.iam.gserviceaccount.com
+    //   Role:      Cloud Datastore Viewer
+    // Then re-test an upload. Nothing in this file needs to change.
+    //
     // ---- helpers ----
     function isSignedIn() {
       return request.auth != null;
