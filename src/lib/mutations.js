@@ -229,13 +229,26 @@ export const PACKING_STEPS = [
   { key: 'packed', label: 'Photos or video, packed and ready' },
 ]
 
-// Each item reports WHO completed it and WHEN, taken from the evidence
-// itself: media already carries uid/userName/ts, and the two stage events
-// carry it for the fields that are not media (sticker colour, numbers). So
-// attribution is a consequence of doing the work, not a separate thing
-// anyone has to record, and it cannot be ticked by someone who did not do it.
+// Each item reports WHO completed it and WHEN.
+//
+// The primary source is unit.steps, written by the packer as each item is
+// ticked off: one write per item, so each carries the name and time of the
+// person who actually did that item, not of whoever happened to finish the
+// unit. A packer who shoots the door at 8:10 and a mate who shoots the packed
+// rooms at 11:40 each show against their own line.
+//
+// Everything below unit.steps is a fallback for units packed before per-item
+// ticking existed, where the only evidence is the media (which carries
+// uid/userName/ts) and the two stage events. Those units still read correctly
+// instead of showing an empty checklist.
 export function packingChecklist(unit, events = []) {
   const media = (unit && unit.media) || []
+  const steps = (unit && unit.steps) || {}
+  const recorded = (key) => {
+    const s = steps[key]
+    if (!s) return null
+    return { done: true, by: s.userName || null, at: typeof s.at === 'number' ? s.at : null }
+  }
   const stageEvent = (to) => (events || [])
     .filter((e) => e && e.type === 'stage' && e.to === to && typeof e.ts === 'number')
     .sort((a, b) => a.ts - b.ts)[0] || null
@@ -259,15 +272,29 @@ export function packingChecklist(unit, events = []) {
   }
 
   const results = {
-    door: fromMedia('door'),
-    rooms: fromMedia('rooms'),
-    sticker: fromEvent('packing', !!(unit && unit.stickerColor)),
-    inventory: fromMedia('inventory'),
-    numbers: fromEvent('packed', Number.isFinite(unit && unit.inventoryFrom) && Number.isFinite(unit && unit.inventoryTo)),
-    materials: fromEvent('packed', sumCartons(unit && unit.materials) > 0),
-    packed: fromMedia('packed'),
+    door: recorded('door') || fromMedia('door'),
+    rooms: recorded('rooms') || fromMedia('rooms'),
+    sticker: recorded('sticker') || fromEvent('packing', !!(unit && unit.stickerColor)),
+    inventory: recorded('inventory') || fromMedia('inventory'),
+    numbers: recorded('numbers') || fromEvent('packed', Number.isFinite(unit && unit.inventoryFrom) && Number.isFinite(unit && unit.inventoryTo)),
+    materials: recorded('materials') || fromEvent('packed', sumCartons(unit && unit.materials) > 0),
+    packed: recorded('packed') || fromMedia('packed'),
   }
   return PACKING_STEPS.map((s) => ({ ...s, ...results[s.key] }))
+}
+
+// The item a packer should do next: the first one still outstanding, in
+// checklist order. Drives the big primary button on the unit page, so a packer
+// standing in a doorway is told the next thing rather than having to choose.
+export function nextPackingStep(unit, events = []) {
+  return packingChecklist(unit, events).find((s) => !s.done) || null
+}
+
+// True once every item is ticked. This is what promotes the unit to "packed":
+// the unit is finished because the checklist is finished, not because someone
+// pressed a separate Finish button that could disagree with it.
+export function packingComplete(unit, events = []) {
+  return packingChecklist(unit, events).every((s) => s.done)
 }
 
 export function packingProgress(unit, events = []) {

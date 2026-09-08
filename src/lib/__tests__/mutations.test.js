@@ -6,7 +6,7 @@ import {
   matchContainerByNumber, surnameOf,
   STICKER_COLORS, stickerHex, inventoryRangeLabel, inventoryRangeError, overlappingUnits,
   CARTON_TYPES, sumCartons, cartonsFromForm, cartonSummary,
-  PACKING_STEPS, packingChecklist, packingProgress,
+  PACKING_STEPS, packingChecklist, packingProgress, nextPackingStep, packingComplete,
 } from '../mutations.js'
 
 describe('boxMismatch', () => {
@@ -379,5 +379,65 @@ describe('materials as its own checklist item', () => {
   it('an all-zero breakdown does not count as recorded', () => {
     expect(packingChecklist({ materials: {} }, []).find((s) => s.key === 'materials').done).toBe(false)
     expect(packingChecklist({ materials: { small: 0 } }, []).find((s) => s.key === 'materials').done).toBe(false)
+  })
+})
+
+// Each item is ticked off by its own write, so each carries the name and time
+// of whoever did THAT item. This is the whole point of splitting the seven:
+// two packers can share a unit and the record shows honestly who did which.
+describe('per-item ticks', () => {
+  const step = (name, at) => ({ uid: 'u', userName: name, at })
+
+  it('an item reports the person who ticked it, not whoever finished the unit', () => {
+    const unit = {
+      steps: {
+        door: step('Liv Post', 1000),
+        rooms: step('Ana Ruiz', 2000),
+      },
+    }
+    const by = Object.fromEntries(packingChecklist(unit, []).map((s) => [s.key, s]))
+    expect(by.door).toMatchObject({ done: true, by: 'Liv Post', at: 1000 })
+    expect(by.rooms).toMatchObject({ done: true, by: 'Ana Ruiz', at: 2000 })
+    expect(by.sticker.done).toBe(false)
+  })
+
+  it('an explicit tick wins over evidence derived from media', () => {
+    const unit = {
+      steps: { door: step('Ana Ruiz', 9000) },
+      media: [{ phase: 'door', kind: 'photo', userName: 'Liv Post', ts: 1000 }],
+    }
+    expect(packingChecklist(unit, []).find((s) => s.key === 'door'))
+      .toMatchObject({ by: 'Ana Ruiz', at: 9000 })
+  })
+
+  it('a unit packed under the old combined flow still reads its evidence', () => {
+    const unit = { media: [{ phase: 'door', kind: 'photo', userName: 'Liv Post', ts: 500 }] }
+    expect(packingChecklist(unit, []).find((s) => s.key === 'door'))
+      .toMatchObject({ done: true, by: 'Liv Post', at: 500 })
+  })
+
+  it('nextPackingStep walks the list in order and ends at null', () => {
+    expect(nextPackingStep({}, []).key).toBe('door')
+    expect(nextPackingStep({ steps: { door: step('Liv', 1) } }, []).key).toBe('rooms')
+
+    const all = { steps: Object.fromEntries(PACKING_STEPS.map((s) => [s.key, step('Liv', 1)])) }
+    expect(nextPackingStep(all, [])).toBe(null)
+    expect(packingComplete(all, [])).toBe(true)
+  })
+
+  it('a unit is not complete until every one of the seven is ticked', () => {
+    const six = { steps: Object.fromEntries(PACKING_STEPS.slice(0, 6).map((s) => [s.key, step('Liv', 1)])) }
+    expect(packingComplete(six, [])).toBe(false)
+    expect(packingProgress(six, []).done).toBe(6)
+    expect(nextPackingStep(six, []).key).toBe('packed')
+  })
+
+  it('items may be ticked out of order', () => {
+    const unit = { steps: { materials: step('Liv', 1), packed: step('Liv', 2) } }
+    const by = Object.fromEntries(packingChecklist(unit, []).map((s) => [s.key, s]))
+    expect(by.materials.done).toBe(true)
+    expect(by.packed.done).toBe(true)
+    expect(nextPackingStep(unit, []).key).toBe('door')
+    expect(packingProgress(unit, []).done).toBe(2)
   })
 })

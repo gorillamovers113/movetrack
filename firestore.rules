@@ -62,6 +62,24 @@ service cloud.firestore {
               && before == 'picked_up' && after == 'at_warehouse')  // warehouseReceive
           || unitReturnTransitionOK(role, before, after);
     }
+    // The seven packing checklist items are ticked off one at a time, each as
+    // its own write so each carries its own name and timestamp. The first tick
+    // moves not_started -> packing and the last moves packing -> packed, so
+    // those two go through unitTransitionOK above; the five in between change
+    // no stage at all, and without this a packer would be denied.
+    //
+    // Deliberately narrow: only a packer, only while the unit is mid-packing,
+    // and only the fields a checklist item can produce. Everything else on the
+    // doc (stage, crew, flag, containerIds, times, identity, custody) is
+    // untouchable on this path, so it cannot be used to skip a stage, claim
+    // someone else's work, or clear a flag.
+    function unitStepWriteOK() {
+      return hasRole('packer')
+          && resource.data.stage == 'packing'
+          && request.resource.data.stage == 'packing'
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['steps', 'media', 'stickerColor', 'inventoryFrom', 'inventoryTo', 'materials', 'pieces']);
+    }
     function unitReturnTransitionOK(role, before, after) {
       return (role == 'warehouse'
               && ((before == 'at_warehouse' && after == 'return_loaded' && returnPhaseOn())  // loadForReturn (entry)
@@ -226,11 +244,13 @@ service cloud.firestore {
         && request.resource.data.stage == 'not_started';
 
       // admin may edit/fix/adjust anything; a crew member may only advance
-      // the doc through the one transition their role owns, and may not
-      // touch the unit's identity fields while doing so.
+      // the doc through the one transition their role owns, or tick off one
+      // packing checklist item mid-packing, and may not touch the unit's
+      // identity fields while doing either.
       allow update: if isAdmin()
         || (isCrew()
-            && unitTransitionOK(me().role, resource.data.stage, request.resource.data.stage)
+            && (unitTransitionOK(me().role, resource.data.stage, request.resource.data.stage)
+                || unitStepWriteOK())
             && unitIdentityUnchanged()
             && custodyFieldsOK());
 

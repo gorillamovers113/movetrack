@@ -148,6 +148,148 @@ describe('units — packer', () => {
     await seed('units', 'u1', baseUnit({ stage: 'packed' }))
     await assertFails(updateDoc(doc(dbAs(PACKER), 'units', 'u1'), { tenant: 'New Name' }))
   })
+
+  // Per-item checklist ticks (completeStep). Each of the seven items is its own
+  // write carrying its own name and timestamp, so the five that neither open
+  // nor close the unit change no stage at all and need unitStepWriteOK.
+  describe('checklist items, one write each', () => {
+    it('sticker colour mid-packing allowed', async () => {
+      await seed('units', 'u1', baseUnit({ stage: 'packing' }))
+      await assertSucceeds(
+        updateDoc(doc(dbAs(PACKER), 'units', 'u1'), {
+          'steps.sticker': { uid: PACKER, userName: 'Test packer-1', at: 1 },
+          stickerColor: 'Blue',
+        })
+      )
+    })
+
+    it('inventory photo mid-packing allowed', async () => {
+      await seed('units', 'u1', baseUnit({ stage: 'packing' }))
+      await assertSucceeds(
+        updateDoc(doc(dbAs(PACKER), 'units', 'u1'), {
+          'steps.inventory': { uid: PACKER, userName: 'Test packer-1', at: 1 },
+          media: arrayUnion({ id: 'm1', kind: 'photo', url: 'x', phase: 'inventory' }),
+        })
+      )
+    })
+
+    it('sticker numbers and piece count mid-packing allowed', async () => {
+      await seed('units', 'u1', baseUnit({ stage: 'packing' }))
+      await assertSucceeds(
+        updateDoc(doc(dbAs(PACKER), 'units', 'u1'), {
+          'steps.numbers': { uid: PACKER, userName: 'Test packer-1', at: 1 },
+          inventoryFrom: 100, inventoryTo: 142, pieces: 42,
+        })
+      )
+    })
+
+    it('materials used mid-packing allowed', async () => {
+      await seed('units', 'u1', baseUnit({ stage: 'packing' }))
+      await assertSucceeds(
+        updateDoc(doc(dbAs(PACKER), 'units', 'u1'), {
+          'steps.materials': { uid: PACKER, userName: 'Test packer-1', at: 1 },
+          materials: { small: 10, medium: 6, large: 2, wardrobe: 3 },
+        })
+      )
+    })
+
+    it('a second packer may tick an item on a unit someone else started', async () => {
+      await seed('units', 'u1', baseUnit({ stage: 'packing', crew: { packers: [PACKER], movers: [] } }))
+      await assertSucceeds(
+        updateDoc(doc(dbAs(OTHER_PACKER), 'units', 'u1'), {
+          'steps.materials': { uid: OTHER_PACKER, userName: 'Test packer-2', at: 1 },
+          materials: { small: 4 },
+        })
+      )
+    })
+
+    // The narrowness of unitStepWriteOK is the point: it exists to let a packer
+    // record their own work mid-packing, and must not become a general-purpose
+    // write hole into the unit doc.
+    it('ticking an item may not also change the stage', async () => {
+      await seed('units', 'u1', baseUnit({ stage: 'packing' }))
+      await assertFails(
+        updateDoc(doc(dbAs(PACKER), 'units', 'u1'), {
+          'steps.materials': { uid: PACKER, userName: 'Test packer-1', at: 1 },
+          materials: { small: 4 },
+          stage: 'loaded',
+        })
+      )
+    })
+
+    it('ticking an item may not also rename the tenant', async () => {
+      await seed('units', 'u1', baseUnit({ stage: 'packing' }))
+      await assertFails(
+        updateDoc(doc(dbAs(PACKER), 'units', 'u1'), {
+          'steps.sticker': { uid: PACKER, userName: 'Test packer-1', at: 1 },
+          stickerColor: 'Blue',
+          tenant: 'Someone Else',
+        })
+      )
+    })
+
+    it('ticking an item may not also clear an open flag', async () => {
+      await seed('units', 'u1', baseUnit({ stage: 'packing', flag: { message: 'x', ts: 1, by: 'admin', open: true } }))
+      await assertFails(
+        updateDoc(doc(dbAs(PACKER), 'units', 'u1'), {
+          'steps.materials': { uid: PACKER, userName: 'Test packer-1', at: 1 },
+          materials: { small: 4 },
+          'flag.open': false,
+        })
+      )
+    })
+
+    it('ticking an item may not also claim the unit as a mover', async () => {
+      await seed('units', 'u1', baseUnit({ stage: 'packing' }))
+      await assertFails(
+        updateDoc(doc(dbAs(PACKER), 'units', 'u1'), {
+          'steps.materials': { uid: PACKER, userName: 'Test packer-1', at: 1 },
+          materials: { small: 4 },
+          'crew.movers': arrayUnion(PACKER),
+        })
+      )
+    })
+
+    it('a mover may not tick a packing checklist item', async () => {
+      await seed('units', 'u1', baseUnit({ stage: 'packing' }))
+      await assertFails(
+        updateDoc(doc(dbAs(MOVER), 'units', 'u1'), {
+          'steps.materials': { uid: MOVER, userName: 'Test mover-1', at: 1 },
+          materials: { small: 4 },
+        })
+      )
+    })
+
+    it('a viewer may not tick a packing checklist item', async () => {
+      await seed('units', 'u1', baseUnit({ stage: 'packing' }))
+      await assertFails(
+        updateDoc(doc(dbAs(VIEWER), 'units', 'u1'), {
+          'steps.materials': { uid: VIEWER, userName: 'Test viewer-1', at: 1 },
+          materials: { small: 4 },
+        })
+      )
+    })
+
+    it('a packer may not tick an item on a unit already handed to the movers', async () => {
+      await seed('units', 'u1', baseUnit({ stage: 'packed' }))
+      await assertFails(
+        updateDoc(doc(dbAs(PACKER), 'units', 'u1'), {
+          'steps.materials': { uid: PACKER, userName: 'Test packer-1', at: 1 },
+          materials: { small: 4 },
+        })
+      )
+    })
+
+    it('a packer may not tick an item on a unit at the warehouse', async () => {
+      await seed('units', 'u1', baseUnit({ stage: 'at_warehouse' }))
+      await assertFails(
+        updateDoc(doc(dbAs(PACKER), 'units', 'u1'), {
+          'steps.materials': { uid: PACKER, userName: 'Test packer-1', at: 1 },
+          materials: { small: 4 },
+        })
+      )
+    })
+  })
 })
 
 // =====================================================================

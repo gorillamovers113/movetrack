@@ -119,7 +119,7 @@ export function Uploader({ onFiles, label = 'Tap to add photos or videos' }) {
 }
 
 export function EventRow({ e, onOpenMedia, linkUnit, linkContainer, showTarget = true }) {
-  const icon = { stage: '⬢', media: '📷', note: '📝', flag: '⚑', system: '⚙️' }[e.type] || '•'
+  const icon = { stage: '⬢', step: '✓', media: '📷', note: '📝', flag: '⚑', system: '⚙️' }[e.type] || '•'
   const iconColor = e.type === 'flag' ? '#ef4444' : e.to ? stageOf(e.to)?.color : '#8a93a2'
   return (
     <div className="tl-item">

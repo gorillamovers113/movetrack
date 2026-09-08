@@ -3,7 +3,7 @@ import { STAGES, stageOf } from '../seed.js'
 import { useStore, canAct, filesToMedia, fmtTime, CONT_STATUS } from '../store.jsx'
 import { Modal, Lightbox, Uploader, EventRow, Avatar, StagePill } from '../ui.jsx'
 import { captureMedia } from '../lib/upload.js'
-import { STICKER_COLORS, inventoryRangeError, overlappingUnits, inventoryRangeLabel, stickerHex, CARTON_TYPES, cartonsFromForm, sumCartons, cartonSummary, packingChecklist, packingProgress } from '../lib/mutations.js'
+import { surnameOf, STICKER_COLORS, inventoryRangeError, overlappingUnits, inventoryRangeLabel, stickerHex, CARTON_TYPES, cartonsFromForm, sumCartons, cartonSummary, packingChecklist, packingProgress, nextPackingStep, PACKING_STEPS } from '../lib/mutations.js'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import ReportOverflowButton from '../components/ReportOverflowButton.jsx'
 
@@ -22,6 +22,9 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
   const { state, dispatch, currentUser } = useStore()
   const unit = state.units.find((u) => u.id === unitId)
   const [modal, setModal] = useState(null) // 'action' | 'media' | 'note' | 'resolve'
+  // Which single packing checklist item is open, if any. Separate from `modal`
+  // because it is a different flow: one item, one save, one event.
+  const [stepKey, setStepKey] = useState(null)
   const [lightbox, setLightbox] = useState(null)
   const [form, setForm] = useState({})
   const [pending, setPending] = useState([])
@@ -101,6 +104,76 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
 
   const openAction = () => { setForm({}); setPending([]); setPendingDoor([]); setPendingRooms([]); resetInventoryCapture(); setModal('action') }
   const closeActionModal = () => { setModal(null); resetInventoryCapture() }
+
+  // Packing is driven by the checklist, one item at a time, rather than by two
+  // big all-or-nothing modals. Each item is a separate tap, a separate save,
+  // and a separate line in the activity feed carrying the name and time of
+  // whoever did it. Every other stage (loading, warehouse, the return leg)
+  // keeps the single-action flow it already had.
+  const onChecklist = (currentUser.role === 'packer' || currentUser.role === 'admin')
+    && (unit.stage === 'not_started' || unit.stage === 'packing')
+  const checklist = packingChecklist(unit, events)
+  const progress = packingProgress(unit, events)
+  const upNext = onChecklist ? nextPackingStep(unit, events) : null
+
+  const openStep = (key) => { setForm({}); setPending([]); resetInventoryCapture(); setStepKey(key) }
+  const closeStep = () => { setStepKey(null); resetInventoryCapture() }
+  const openStepLabel = stepKey ? (PACKING_STEPS.find((s) => s.key === stepKey) || {}).label : ''
+
+  const submitStep = async () => {
+    if (busy || !stepKey) return
+    const p = { unitId, key: stepKey }
+
+    // Each item validates only its own evidence. A packer is never blocked on
+    // something belonging to a different item, which is the whole point of
+    // splitting them: the door photo saves at the door, not at the end.
+    if (stepKey === 'door') {
+      if (!pending.some((m) => m.kind === 'photo')) return toast('Take the front door photo showing the unit number.')
+      p.media = pending.map((m) => ({ ...m, phase: 'door', label: m.label || 'front door' }))
+    }
+    if (stepKey === 'rooms') {
+      if (pending.length === 0) return toast('Add photos or video of the rooms before anything moves.')
+      p.media = pending.map((m) => ({ ...m, phase: 'rooms', label: m.label || 'room' }))
+    }
+    if (stepKey === 'sticker') {
+      if (!form.stickerColor) return toast('Pick the inventory sticker colour for this unit.')
+      p.stickerColor = form.stickerColor
+    }
+    if (stepKey === 'inventory') {
+      if (invUploading) return toast('Still uploading the inventory sheet photo, wait a moment and try again.')
+      if (!invUrl) return toast('Take a photo of the paper inventory sheet.')
+      p.media = [{ id: `inv-${Date.now()}`, kind: 'photo', url: invUrl, label: 'inventory', phase: 'inventory' }]
+    }
+    if (stepKey === 'numbers') {
+      const rangeErr = inventoryRangeError(form.invFrom, form.invTo)
+      if (rangeErr) return toast(rangeErr)
+      const n = parseInt(form.pieces, 10)
+      if (!n || n < 1) return toast('Enter the total pieces packed.')
+      p.inventoryFrom = parseInt(form.invFrom, 10)
+      p.inventoryTo = parseInt(form.invTo, 10)
+      p.pieces = n
+    }
+    if (stepKey === 'materials') {
+      if (cartonTotal < 1) return toast('Enter how many of each carton you used.')
+      p.materials = cartonsFromForm(form)
+    }
+    if (stepKey === 'packed') {
+      if (!pending.some((m) => m.kind === 'photo')) return toast('Add at least one photo of the unit packed and ready.')
+      p.media = pending.map((m) => ({ ...m, phase: 'packed', label: m.label || 'packed' }))
+    }
+
+    setBusy(true)
+    try {
+      const status = await submitWrite(dispatch({ type: 'completeStep', p }))
+      const label = openStepLabel
+      closeStep()
+      toast(status === 'queued' ? QUEUED_MESSAGE : `${label} ✓ logged under your name`)
+    } catch (err) {
+      toast(err.message || SAVE_ERROR)
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const submitAction = async () => {
     if (busy) return
@@ -229,8 +302,13 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
           )}
         </div>
         <div className="row">
-          {action && <button className="btn btn-primary btn-lg" onClick={openAction}>{action.label}</button>}
-          {!action && WAIT_HINTS[unit.stage] && <span className="muted" style={{ maxWidth: 300, textAlign: 'right' }}>{WAIT_HINTS[unit.stage]}</span>}
+          {onChecklist && upNext && (
+            <button className="btn btn-primary btn-lg" onClick={() => openStep(upNext.key)}>
+              Next: {upNext.label}
+            </button>
+          )}
+          {!onChecklist && action && <button className="btn btn-primary btn-lg" onClick={openAction}>{action.label}</button>}
+          {!onChecklist && !action && WAIT_HINTS[unit.stage] && <span className="muted" style={{ maxWidth: 300, textAlign: 'right' }}>{WAIT_HINTS[unit.stage]}</span>}
         </div>
       </div>
 
@@ -265,28 +343,57 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
             <div className="row" style={{ marginBottom: 6 }}>
               <div className="section-title grow" style={{ margin: 0 }}>Packing checklist</div>
               <span className="muted" style={{ fontWeight: 700 }}>
-                {packingProgress(unit, events).done}/{packingProgress(unit, events).total}
+                {progress.done}/{progress.total}
               </span>
             </div>
-            {packingChecklist(unit, events).map((step, i) => (
-              <div key={step.key} style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '6px 0', fontSize: 13.5 }}>
-                <span
-                  aria-hidden
+            {checklist.map((step, i) => {
+              // Every outstanding item is its own tap target, in any order:
+              // whatever the packer is standing in front of is the one they
+              // can do. A finished item stops being a button so it cannot be
+              // re-ticked, overwriting someone else's name on it.
+              const tappable = onChecklist && !step.done
+              const Row = tappable ? 'button' : 'div'
+              return (
+                <Row
+                  key={step.key}
+                  type={tappable ? 'button' : undefined}
+                  onClick={tappable ? () => openStep(step.key) : undefined}
                   style={{
-                    flex: 'none', width: 20, textAlign: 'center', fontWeight: 800,
-                    color: step.done ? '#16a34a' : 'var(--ink-3, #9aa1ab)',
+                    display: 'flex', alignItems: 'center', gap: 9, width: '100%', textAlign: 'left',
+                    padding: tappable ? '10px 10px' : '8px 10px',
+                    marginBottom: 4, borderRadius: 10, fontFamily: 'inherit', fontSize: 13.5,
+                    background: tappable ? 'var(--card-2, rgba(127,127,127,.07))' : 'transparent',
+                    border: tappable ? '1px solid var(--border, rgba(127,127,127,.22))' : '1px solid transparent',
+                    cursor: tappable ? 'pointer' : 'default',
+                    color: 'inherit',
                   }}
-                >{step.done ? '✓' : i + 1}</span>
-                <span style={{ minWidth: 0 }}>
-                  <span style={{ color: step.done ? 'var(--ink-3, #6b7280)' : 'inherit' }}>{step.label}</span>
-                  {step.done && (step.by || step.at) && (
-                    <span style={{ display: 'block', fontSize: 12, color: 'var(--ink-3, #9aa1ab)' }}>
-                      {step.by || 'Crew'}{step.at ? ` · ${fmtTime(step.at)}` : ''}
-                    </span>
-                  )}
-                </span>
+                >
+                  <span
+                    aria-hidden
+                    style={{
+                      flex: 'none', width: 22, textAlign: 'center', fontWeight: 800,
+                      color: step.done ? '#16a34a' : 'var(--ink-3, #9aa1ab)',
+                    }}
+                  >{step.done ? '✓' : i + 1}</span>
+                  <span style={{ minWidth: 0, flex: 1 }}>
+                    <span style={{ color: step.done ? 'var(--ink-3, #6b7280)' : 'inherit', fontWeight: tappable ? 600 : 400 }}>{step.label}</span>
+                    {step.done && (step.by || step.at) && (
+                      <span style={{ display: 'block', fontSize: 12, color: 'var(--ink-3, #9aa1ab)' }}>
+                        {step.by || 'Crew'}{step.at ? ` · ${fmtTime(step.at)}` : ''}
+                      </span>
+                    )}
+                  </span>
+                  {tappable && <span aria-hidden style={{ flex: 'none', color: 'var(--ink-3, #9aa1ab)', fontWeight: 700 }}>›</span>}
+                </Row>
+              )
+            })}
+            {onChecklist && (
+              <div className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>
+                {upNext
+                  ? 'Tap any item as you do it. Each one saves on its own under your name.'
+                  : 'All seven done. This unit is packed and ready for the movers.'}
               </div>
-            ))}
+            )}
           </div>
 
           <div className="card" style={{ padding: '16px 20px', marginBottom: 14 }}>
@@ -354,6 +461,145 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
           )}
         </div>
       </div>
+
+      {/* One checklist item at a time. The modal asks for exactly the evidence
+          that item needs and nothing else, so a packer is never made to hold
+          six things in their head to save one of them. */}
+      {stepKey && (
+        <Modal
+          title={openStepLabel}
+          sub={`Unit ${unit.number} · ${surnameOf(unit.tenant)}, logged as ${currentUser.name}, ${fmtTime(Date.now())}`}
+          onClose={() => { if (!busy) closeStep() }}
+        >
+          {stepKey === 'door' && (
+            <div className="field">
+              <label>Front door, showing the unit number {pending.length > 0 && <span className="muted">✓ {pending.length}</span>}</label>
+              <Uploader
+                label={pending.length ? '📷 Retake or add another' : '📷 Photograph the front door'}
+                onFiles={async (files) => setPending([...pending, ...(await filesToMedia(files, 'front door'))])}
+              />
+            </div>
+          )}
+
+          {stepKey === 'rooms' && (
+            <div className="field">
+              <label>The rooms, before anything moves {pending.length > 0 && <span className="muted">✓ {pending.length}</span>}</label>
+              <Uploader
+                label={pending.length ? '📷 Add another room' : '📷 Photos or video of every room'}
+                onFiles={async (files) => setPending([...pending, ...(await filesToMedia(files, 'room'))])}
+              />
+            </div>
+          )}
+
+          {stepKey === 'sticker' && (
+            <div className="field">
+              <label>Which sticker roll is this unit on?</label>
+              <div className="pick-list" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {STICKER_COLORS.map((c) => (
+                  <button
+                    key={c.name} type="button"
+                    className={`btn ${form.stickerColor === c.name ? 'btn-primary' : 'btn-ghost'}`}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8 }}
+                    onClick={() => setForm({ ...form, stickerColor: c.name })}
+                  >
+                    <span style={{ width: 14, height: 14, borderRadius: 4, background: c.hex, border: '1px solid rgba(0,0,0,.25)' }} />
+                    {c.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {stepKey === 'inventory' && (
+            <div className="field">
+              <label>Photo of the paper inventory sheet</label>
+              <label className="dropzone camera-capture" style={{ display: 'block' }}>
+                <input
+                  type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
+                  onChange={(e) => { const f = e.target.files[0]; if (f) captureInventoryPhoto(f); e.target.value = '' }}
+                />
+                {invPreview ? (
+                  <div className="inv-preview">
+                    <img src={invPreview} alt="Inventory sheet" className="inv-thumb" />
+                    <div className="muted" style={{ marginTop: 8 }}>
+                      {invUploading ? 'Saving…' : invUrl ? '✓ Photo saved, tap to retake' : invError || 'Tap to retake'}
+                    </div>
+                  </div>
+                ) : <>📷 Tap to photograph the inventory sheet</>}
+              </label>
+            </div>
+          )}
+
+          {stepKey === 'numbers' && (
+            <>
+              <div className="field">
+                <label>Sticker numbers used{unit.stickerColor ? ` (${unit.stickerColor} roll)` : ''}</label>
+                <div className="row" style={{ gap: 8, alignItems: 'center' }}>
+                  <input className="input" type="number" min="1" inputMode="numeric" autoFocus placeholder="first" style={{ flex: 1 }}
+                    value={form.invFrom || ''} onChange={(e) => setForm({ ...form, invFrom: e.target.value })} />
+                  <span className="muted">to</span>
+                  <input className="input" type="number" min="1" inputMode="numeric" placeholder="last" style={{ flex: 1 }}
+                    value={form.invTo || ''} onChange={(e) => setForm({ ...form, invTo: e.target.value })} />
+                </div>
+                {rangeClash.length > 0 && (
+                  <div className="muted" style={{ marginTop: 6, color: 'var(--warn, #b45309)' }}>
+                    Heads up: {rangeClash.map((u) => `unit ${u.number}`).join(', ')} already used these numbers on the same colour.
+                  </div>
+                )}
+              </div>
+              <div className="field">
+                <label>Total pieces packed</label>
+                <input className="input" type="number" min="1" inputMode="numeric" placeholder="e.g. 42"
+                  value={form.pieces || ''} onChange={(e) => setForm({ ...form, pieces: e.target.value })} />
+              </div>
+            </>
+          )}
+
+          {stepKey === 'materials' && (
+            <div className="field">
+              <label>How many of each did you use?{cartonTotal > 0 ? ` · ${cartonTotal} cartons` : ''}</label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(132px, 1fr))', gap: 8 }}>
+                {CARTON_TYPES.map((t) => (
+                  <label key={t.key} style={{ display: 'block' }}>
+                    <span className="muted" style={{ display: 'block', fontSize: 12.5, marginBottom: 3 }}>{t.label}</span>
+                    <input
+                      className="input" type="number" min="0" inputMode="numeric" placeholder="0"
+                      value={form[`carton_${t.key}`] || ''}
+                      onChange={(e) => setForm({ ...form, [`carton_${t.key}`]: e.target.value })}
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {stepKey === 'packed' && (
+            <div className="field">
+              <label>Everything packed and ready to go {pending.length > 0 && <span className="muted">✓ {pending.length}</span>}</label>
+              <Uploader
+                label={pending.length ? '📷 Add another' : '📷 Photos or video, packed and ready'}
+                onFiles={async (files) => setPending([...pending, ...(await filesToMedia(files, 'packed'))])}
+              />
+              {progress.done === PACKING_STEPS.length - 1 && (
+                <div className="muted" style={{ marginTop: 8 }}>
+                  Last item. Saving this marks unit {unit.number} packed and hands it to the movers.
+                </div>
+              )}
+            </div>
+          )}
+
+          <button
+            className="btn btn-primary btn-lg" style={{ width: '100%', marginTop: 6 }}
+            disabled={busy || (stepKey === 'inventory' && invUploading)}
+            onClick={submitStep}
+          >
+            {busy ? 'Saving…' : 'Save this step ✓'}
+          </button>
+          <div className="muted" style={{ fontSize: 12.5, marginTop: 8, textAlign: 'center' }}>
+            Saves on its own, under {currentUser.name}, timestamped.
+          </div>
+        </Modal>
+      )}
 
       {modal === 'action' && action && (
         <Modal title={action.label} sub={`Unit ${unit.number} · ${unit.tenant}, logged as ${currentUser.name}, ${fmtTime(Date.now())}`} onClose={() => { if (!busy) closeActionModal() }}>

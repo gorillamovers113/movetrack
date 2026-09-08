@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
 import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, signOut, updateProfile } from 'firebase/auth'
 import { doc, setDoc, updateDoc, deleteDoc, addDoc, arrayUnion, onSnapshot, collection, query, orderBy, serverTimestamp, writeBatch } from 'firebase/firestore'
 import { app, auth, db } from './firebase.js'
-import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction, sumCartons } from './lib/mutations.js'
+import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction, sumCartons, PACKING_STEPS, packingChecklist } from './lib/mutations.js'
 import { DEFAULT_SCHEDULE, DEFAULT_RETURN_SCHEDULE, scheduleDocId } from './lib/schedule.js'
 import { stageOf } from './seed.js'
 
@@ -163,6 +163,70 @@ export function StoreProvider({ children }) {
     const day0 = p.dateId ? state.schedule.find((d) => d.id === p.dateId) : null
 
     switch (type) {
+      case 'completeStep': {
+        // One packing checklist item, ticked off on its own. Each item is its
+        // own write and its own event, so each carries the name and time of
+        // whoever actually did that item. Two packers can split a unit and the
+        // record shows honestly who did which part.
+        //
+        // The stage follows the checklist rather than being driven separately:
+        // the first item ticked claims the unit and starts it, the last item
+        // ticked finishes it. So there is no way to end up with a unit marked
+        // packed while items are outstanding, or a fully ticked unit still
+        // sitting in the packing queue.
+        const key = p.key
+        const step = PACKING_STEPS.find((s) => s.key === key)
+        if (!step) throw new Error('Unknown checklist item.')
+
+        const now = Date.now()
+        p.media = attributeMedia(p.media || [])
+        const patch = { [`steps.${key}`]: { uid: currentUser.uid, userName: currentUser.name, at: now } }
+        if (p.media.length) patch.media = arrayUnion(...p.media)
+        if (p.stickerColor) patch.stickerColor = p.stickerColor
+        if (Number.isInteger(p.inventoryFrom)) patch.inventoryFrom = p.inventoryFrom
+        if (Number.isInteger(p.inventoryTo)) patch.inventoryTo = p.inventoryTo
+        if (Number.isInteger(p.pieces)) patch.pieces = p.pieces
+        if (p.materials && Object.keys(p.materials).length) patch.materials = p.materials
+
+        // Which items are done once this one lands. Built from the checklist
+        // rather than from the raw steps map so a unit part-packed under the
+        // old start/finish flow still counts its existing evidence.
+        const unitEvents = state.events.filter((e) => e.unitId === p.unitId)
+        const done = new Set(packingChecklist(unit, unitEvents).filter((s) => s.done).map((s) => s.key))
+        done.add(key)
+
+        const starting = unit.stage === 'not_started'
+        const finishing = unit.stage === 'packing' && PACKING_STEPS.every((s) => done.has(s.key))
+        if (starting) {
+          patch.stage = 'packing'
+          patch['crew.packers'] = arrayUnion(currentUser.uid)
+          patch['times.packStart'] = now
+        }
+        if (finishing) {
+          patch.stage = 'packed'
+          patch['times.packEnd'] = now
+        }
+
+        await updateDoc(doc(db, 'units', p.unitId), patch)
+
+        // One event per item, never two: the item that happens to open or
+        // close the unit carries the stage change itself, so the activity feed
+        // reads as seven lines for seven items rather than seven plus two.
+        const progress = `${done.size} of ${PACKING_STEPS.length}`
+        const extra = { unitId: unit.id, step: key, media: p.media }
+        let text = `Unit ${unit.number} · ${step.label} ✓ (${progress})`
+        if (starting) {
+          extra.from = 'not_started'
+          extra.to = 'packing'
+          text = `Started unit ${unit.number} · ${step.label} ✓ (${progress})`
+        }
+        if (finishing) {
+          extra.from = 'packing'
+          extra.to = 'packed'
+          text = `Unit ${unit.number} fully packed · ${step.label} ✓ (all ${PACKING_STEPS.length} items complete)`
+        }
+        return ev(starting || finishing ? 'stage' : 'step', text, extra)
+      }
       case 'startPacking': {
         // The "before" record. Photos of the front door with the unit number
         // and a walkthrough of the untouched apartment are what answer a
