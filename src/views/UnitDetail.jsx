@@ -254,6 +254,14 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
               <dt>Phone</dt><dd>{unit.phone}</dd>
               <dt>Floor</dt><dd>{unit.floor}</dd>
               <dt>Pieces packed</dt><dd>{unit.pieces ?? '-'}</dd>
+              <dt>Cartons</dt>
+              <dd>{cartonSummary(unit.materials)
+                ? `${sumCartons(unit.materials)} · ${cartonSummary(unit.materials)}`
+                : '-'}</dd>
+              <dt>Stickers</dt>
+              <dd>{unit.stickerColor
+                ? `${unit.stickerColor}${inventoryRangeLabel(unit) ? ` · #${inventoryRangeLabel(unit)}` : ''}`
+                : '-'}</dd>
               <dt>Container</dt>
               <dd>
                 {conts.length === 0 && '-'}
