@@ -64,6 +64,14 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
   }
 
   const events = useMemo(() => state.events.filter((e) => e.unitId === unitId).sort((a, b) => b.ts - a.ts), [state.events, unitId])
+  // Warn, never block: two units sharing sticker numbers on the same colour
+  // is the exact mix-up the numbers prevent, but the packer is standing in
+  // the apartment and knows better than we do. Declared above the !unit
+  // guard: a hook after an early return changes hook order between renders.
+  const rangeClash = useMemo(
+    () => overlappingUnits(state.units, { unitId, stickerColor: unit?.stickerColor, from: form.invFrom, to: form.invTo }),
+    [state.units, unitId, unit?.stickerColor, form.invFrom, form.invTo],
+  )
   if (!unit) return null
 
   const action = canAct(currentUser, unit, state.project?.returnPhase)
@@ -82,14 +90,6 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
   const stepperStages = STAGES.slice(1).filter((s) => state.project?.returnPhase || s.step <= 5)
   const crewName = (uid) => state.users.find((u) => u.id === uid)?.name
   const crewNames = (uids) => (uids || []).map(crewName).filter(Boolean).join(', ')
-
-  // Warn, never block: two units sharing sticker numbers on the same colour
-  // is the exact mix-up the numbers prevent, but the packer is standing in
-  // the apartment and knows better than we do.
-  const rangeClash = useMemo(
-    () => overlappingUnits(state.units, { unitId, stickerColor: unit?.stickerColor, from: form.invFrom, to: form.invTo }),
-    [state.units, unitId, unit?.stickerColor, form.invFrom, form.invTo],
-  )
 
   const openAction = () => { setForm({}); setPending([]); resetInventoryCapture(); setModal('action') }
   const closeActionModal = () => { setModal(null); resetInventoryCapture() }

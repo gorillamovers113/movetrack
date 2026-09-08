@@ -20,7 +20,11 @@ import Reports from './views/Reports.jsx'
 // (read-only for non-admins) since the crew needs to know today's floor.
 const NAV = {
   admin: [['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['containers', '📦', 'Containers'], ['overflow', '🛋️', 'Overflow'], ['team', '👥', 'Team'], ['reports', '📊', 'Reports'], ['activity', '🕘', 'Activity']],
-  packer: [['mywork', '✓', 'My queue'], ['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['activity', '🕘', 'Activity']],
+  // Packers deliberately have no Dashboard or Activity: both list every
+  // apartment and tenant in the building, and a packer needs the one door
+  // they are standing at (reached by number from My queue). Their own recent
+  // actions are shown inside My queue.
+  packer: [['mywork', '✓', 'My queue'], ['schedule', '📅', 'Schedule']],
   mover: [['mywork', '✓', 'My queue'], ['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['containers', '📦', 'Containers'], ['overflow', '🛋️', 'Overflow'], ['activity', '🕘', 'Activity']],
   driver: [['mywork', '✓', 'My queue'], ['containers', '📦', 'Containers'], ['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['activity', '🕘', 'Activity']],
   warehouse: [['containers', '📦', 'Containers'], ['overflow', '🛋️', 'Overflow'], ['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['activity', '🕘', 'Activity']],

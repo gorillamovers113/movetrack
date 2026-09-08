@@ -2,7 +2,7 @@ import React from 'react'
 import { stageOf } from '../seed.js'
 import { useStore, canAct, containerAction, CONT_STATUS } from '../store.jsx'
 import { StagePill } from '../ui.jsx'
-import NewUnitButton from '../components/NewUnitModal.jsx'
+import FindUnitButton from '../components/FindUnitButton.jsx'
 
 export default function MyWork({ openUnit, openContainer, toast }) {
   const { state, currentUser } = useStore()
@@ -37,7 +37,18 @@ export default function MyWork({ openUnit, openContainer, toast }) {
     )
   }
 
-  const mine = state.units.filter((u) => canAct(currentUser, u, returnPhase))
+  // Packers see the units they personally have open, not the whole building:
+  // canAct() is true for every not-yet-packed unit, so listing it verbatim
+  // put all fifty apartments and their tenants' names in front of someone who
+  // needs one door at a time. They reach any other unit by typing its number.
+  //
+  // Movers are NOT narrowed this way. A mover has not touched a unit before
+  // they load it, so the same filter would empty their queue: seeing what is
+  // packed and waiting IS their job.
+  const actionable = state.units.filter((u) => canAct(currentUser, u, returnPhase))
+  const mine = role === 'packer'
+    ? actionable.filter((u) => (u.crew?.packers || []).includes(currentUser.uid))
+    : actionable
   const inProgress = mine.filter((u) => u.stage === 'packing')
   const ready = mine.filter((u) => u.stage !== 'packing')
   const myRecent = [...state.events].filter((e) => e.uid === currentUser.uid).sort((a, b) => b.ts - a.ts).slice(0, 5)
@@ -65,9 +76,14 @@ export default function MyWork({ openUnit, openContainer, toast }) {
     <>
       <div className="page-head">
         <div><h1>My queue</h1><p>Units waiting on you, {currentUser.name.split(' ')[0]}</p></div>
-        <NewUnitButton toast={toast} />
+        <FindUnitButton openUnit={openUnit} toast={toast} />
       </div>
-      {mine.length === 0 && <div className="card empty"><div className="big">☕</div>Nothing waiting on you right now. Nice work.</div>}
+      {mine.length === 0 && (
+        <div className="card empty">
+          <div className="big">🚪</div>
+          Nothing open right now. Walk up to a unit and tap <b>Start a unit</b>, then type the number on the door.
+        </div>
+      )}
       <Section title="In progress: finish these" units={inProgress} />
       <Section title="Ready to start" units={ready} />
       {myRecent.length > 0 && (

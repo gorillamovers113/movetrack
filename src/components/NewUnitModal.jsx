@@ -9,14 +9,16 @@ const FLOORS = Array.from({ length: 9 }, (_, i) => i + 1)
 // and the packer's My queue, the only two landing views for roles that can
 // create units. Self-hides for any other role, so callers don't need to gate.
 export default function NewUnitButton({ toast }) {
-  const { currentUser, dispatch } = useStore()
+  const { state, currentUser, dispatch } = useStore()
   const [open, setOpen] = useState(false)
   const [form, setForm] = useState({ number: '', tenant: '', floor: '' })
   const [busy, setBusy] = useState(false)
 
-  if (!currentUser || !['admin', 'packer'].includes(currentUser.role)) return null
+  if (!currentUser || currentUser.role !== 'admin') return null
 
-  const ready = form.number.trim() && form.tenant.trim() && form.floor
+  const trimmed = form.number.trim()
+  const clash = trimmed ? state.units.find((u) => String(u.number).trim() === trimmed) : null
+  const ready = trimmed && form.tenant.trim() && form.floor && !clash
 
   const openModal = () => { setForm({ number: '', tenant: '', floor: '' }); setOpen(true) }
   const close = () => { if (!busy) setOpen(false) }
@@ -47,6 +49,11 @@ export default function NewUnitButton({ toast }) {
           <div className="field">
             <label>Unit number</label>
             <input className="input" autoFocus placeholder="e.g. 5B" value={form.number} onChange={(e) => setForm({ ...form, number: e.target.value })} />
+            {clash && (
+              <div className="muted" style={{ marginTop: 6, color: 'var(--warn, #b45309)' }}>
+                Unit {clash.number} is already on the board ({clash.tenant}). Open it from the board instead of creating a second one.
+              </div>
+            )}
           </div>
           <div className="field">
             <label>Tenant last name</label>
