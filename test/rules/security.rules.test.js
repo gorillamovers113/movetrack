@@ -153,6 +153,31 @@ describe('units — packer', () => {
   // write carrying its own name and timestamp, so the five that neither open
   // nor close the unit change no stage at all and need unitStepWriteOK.
   describe('checklist items, one write each', () => {
+    it('the first tick both records the item and claims the unit', async () => {
+      await seed('units', 'u1', baseUnit({ stage: 'not_started' }))
+      await assertSucceeds(
+        updateDoc(doc(dbAs(PACKER), 'units', 'u1'), {
+          'steps.door': { uid: PACKER, userName: 'Test packer-1', at: 1 },
+          media: arrayUnion({ id: 'm1', kind: 'photo', url: 'x', phase: 'door' }),
+          stage: 'packing',
+          'crew.packers': arrayUnion(PACKER),
+          'times.packStart': 1,
+        })
+      )
+    })
+
+    it('the last tick both records the item and finishes the unit', async () => {
+      await seed('units', 'u1', baseUnit({ stage: 'packing' }))
+      await assertSucceeds(
+        updateDoc(doc(dbAs(PACKER), 'units', 'u1'), {
+          'steps.packed': { uid: PACKER, userName: 'Test packer-1', at: 1 },
+          media: arrayUnion({ id: 'm2', kind: 'photo', url: 'x', phase: 'packed' }),
+          stage: 'packed',
+          'times.packEnd': 1,
+        })
+      )
+    })
+
     it('sticker colour mid-packing allowed', async () => {
       await seed('units', 'u1', baseUnit({ stage: 'packing' }))
       await assertSucceeds(
