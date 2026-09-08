@@ -1,5 +1,5 @@
 import React from 'react'
-import { nextPackingStep, packingProgress } from '../lib/mutations.js'
+import { nextPackingStep, packingProgress, loadingChecklist, loadingProgress } from '../lib/mutations.js'
 import { useStore, canAct, containerAction, CONT_STATUS } from '../store.jsx'
 import { StagePill } from '../ui.jsx'
 import FindUnitButton from '../components/FindUnitButton.jsx'
@@ -49,8 +49,13 @@ export default function MyWork({ openUnit, openContainer, toast }) {
   const mine = role === 'packer'
     ? actionable.filter((u) => (u.crew?.packers || []).includes(currentUser.uid))
     : actionable
-  const inProgress = mine.filter((u) => u.stage === 'packing')
-  const ready = mine.filter((u) => u.stage !== 'packing')
+  // "In progress" means something different per role: a packer's own open
+  // apartments, and for a mover any packed unit they have already started
+  // loading. Without this a mover's half-loaded unit sits in "Ready to start"
+  // looking untouched.
+  const started = (u) => (role === 'mover' ? loadingProgress(u).done > 0 : u.stage === 'packing')
+  const inProgress = mine.filter(started)
+  const ready = mine.filter((u) => !started(u))
 
   // Units this packer has already finished. They drop out of the queue above
   // the moment they are packed (canAct stops being true), which left no way
@@ -66,6 +71,11 @@ export default function MyWork({ openUnit, openContainer, toast }) {
   // packing", so someone glancing at their phone between apartments knows what
   // the unit is actually waiting on without opening it.
   const queueLabel = (u) => {
+    if (role === 'mover' && u.stage === 'packed') {
+      const next = loadingChecklist(u).find((s) => !s.done)
+      const p = loadingProgress(u)
+      return next ? `${next.label} (${p.done}/${p.total})` : `Close out unit ${u.number}`
+    }
     const onChecklist = role === 'packer' && (u.stage === 'not_started' || u.stage === 'packing')
     if (!onChecklist) return canAct(currentUser, u, returnPhase).label
     const unitEvents = state.events.filter((e) => e.unitId === u.id)
@@ -110,11 +120,13 @@ export default function MyWork({ openUnit, openContainer, toast }) {
       {mine.length === 0 && finishedByMe.length === 0 && (
         <div className="card empty">
           <div className="big">🚪</div>
-          Nothing open right now. Walk up to a unit and tap <b>Start a unit</b>, then type the number on the door.
+          {role === 'mover'
+            ? <>No units are packed and waiting yet. They turn green on the board the moment the packers finish one.</>
+            : <>Nothing open right now. Walk up to a unit and tap <b>Start a unit</b>, then type the number on the door.</>}
         </div>
       )}
       <Section title="In progress: finish these" units={inProgress} />
-      <Section title="Ready to start" units={ready} />
+      <Section title={role === 'mover' ? 'Packed and ready to load' : 'Ready to start'} units={ready} />
       <Section title="Finished by you · view only" units={finishedByMe} done />
       {myRecent.length > 0 && (
         <>

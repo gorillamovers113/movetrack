@@ -329,3 +329,116 @@ export function packingProgress(unit, events = []) {
   const list = packingChecklist(unit, events).filter((s) => !s.optional)
   return { done: list.filter((s) => s.done).length, total: list.length }
 }
+
+// ---------------------------------------------------------------------------
+// Mover load-out
+// ---------------------------------------------------------------------------
+
+// What a mover records against one apartment. Same shape as the packing
+// checklist so the unit page reads the same way for both roles, with one
+// difference that matters: the boxes item is not one task, it is a repeatable
+// one. A unit averages about two and a half BigBoxes, so "log the box" happens
+// more than once and cannot be a single tick.
+export const LOADING_STEPS = [
+  { key: 'load_unit_photo', label: 'Photo of the unit, fully packed' },
+  { key: 'load_sticker', label: 'Inventory sticker colour' },
+  { key: 'load_number', label: 'Unit number' },
+  { key: 'load_boxes', label: 'Boxes loaded, logged and photographed', repeatable: true },
+]
+
+// The colour and the number are entered by the mover and checked against what
+// the packer recorded, rather than shown for them to agree with. A mover who
+// is handed the wrong apartment's boxes types the colour they can actually
+// see on the cartons, and the mismatch surfaces there and then, at the last
+// moment anyone is standing in front of both the boxes and the door.
+//
+// A mismatch warns and flags, it never blocks. The mover is on site and the
+// app is not: they may well be right and the packer wrong.
+export function stickerMismatch(unit, entered) {
+  const recorded = unit && unit.stickerColor
+  const typed = String(entered || '').trim()
+  if (!recorded || !typed) return null
+  return recorded.toLowerCase() === typed.toLowerCase() ? null : { recorded, entered: typed }
+}
+
+export function unitNumberMismatch(unit, entered) {
+  const recorded = normalizeBoxNumber(unit && unit.number)
+  const typed = normalizeBoxNumber(entered)
+  if (!recorded || !typed) return null
+  return recorded === typed ? null : { recorded, entered: typed }
+}
+
+// One BigBox as the mover records it: the number off the side of the box, a
+// shot with the door open showing what went in, and a shot with it closed.
+// Both photos are required before the box counts, because the open-door shot
+// is the only record of what is inside and the closed-door shot is what shows
+// it was sealed in that state.
+export function boxComplete(box) {
+  return !!(box && String(box.number || '').trim() && box.openUrl && box.closedUrl)
+}
+
+export function boxesOf(unit) {
+  return ((unit && unit.boxes) || []).filter(Boolean)
+}
+
+export function completeBoxes(unit) {
+  return boxesOf(unit).filter(boxComplete)
+}
+
+// A box number is written on the side of a physical container, so it is
+// matched the way a person would read it: case and surrounding space are not
+// part of the identity. "bb-1007 " and "BB-1007" are the same box.
+export function normalizeBoxNumber(n) {
+  return String(n ?? '').trim().toUpperCase()
+}
+
+export function boxNumberError(n, unit) {
+  const v = normalizeBoxNumber(n)
+  if (!v) return 'Enter the number on the side of the box.'
+  if (v.length < 2) return 'That looks too short to be a box number.'
+  if (boxesOf(unit).some((b) => normalizeBoxNumber(b.number) === v)) {
+    return `Box ${v} is already logged on this unit.`
+  }
+  return null
+}
+
+// The mover's checklist, mirroring packingChecklist: done, by whom, when.
+// The photo item comes from unit.steps like every packer item. The boxes item
+// is done once at least one box is fully logged, and reports the person and
+// time of the FIRST completed box, since that is the moment the item was
+// genuinely satisfied.
+export function loadingChecklist(unit) {
+  const steps = (unit && unit.steps) || {}
+  const recorded = (key) => {
+    const s = steps[key]
+    return s ? { done: true, by: s.userName || null, at: typeof s.at === 'number' ? s.at : null } : { done: false }
+  }
+  const boxes = completeBoxes(unit).slice().sort((a, b) => (a.at || 0) - (b.at || 0))
+  const first = boxes[0]
+  return LOADING_STEPS.map((s) => {
+    if (s.key === 'load_boxes') {
+      return {
+        ...s,
+        done: boxes.length > 0,
+        by: first ? first.userName || null : null,
+        at: first ? first.at || null : null,
+        count: boxes.length,
+      }
+    }
+    const r = recorded(s.key)
+    const raw = steps[s.key]
+    return { ...s, ...r, value: raw ? raw.value : undefined, matched: raw ? raw.matched : undefined }
+  })
+}
+
+export function loadingProgress(unit) {
+  const list = loadingChecklist(unit)
+  return { done: list.filter((s) => s.done).length, total: list.length }
+}
+
+// A unit is ready to hand to the driver once the photo is taken and at least
+// one box is fully logged. The mover still says when they are finished, since
+// only they know whether another box is coming.
+export function loadingComplete(unit) {
+  return loadingChecklist(unit).every((s) => s.done)
+}

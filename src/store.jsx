@@ -4,7 +4,7 @@ import { doc, setDoc, updateDoc, deleteDoc, addDoc, arrayUnion, onSnapshot, coll
 import { app, auth, db } from './firebase.js'
 import { captureMedia, uploadFile } from './lib/upload.js'
 import { stepRow, pushRows } from './lib/sheetBackup.js'
-import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction, sumCartons, PACKING_STEPS, REQUIRED_STEPS, packingChecklist, wouldCompletePacking } from './lib/mutations.js'
+import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction, sumCartons, PACKING_STEPS, REQUIRED_STEPS, packingChecklist, wouldCompletePacking, LOADING_STEPS, loadingComplete, normalizeBoxNumber } from './lib/mutations.js'
 import { DEFAULT_SCHEDULE, DEFAULT_RETURN_SCHEDULE, scheduleDocId } from './lib/schedule.js'
 import { stageOf } from './seed.js'
 
@@ -350,6 +350,90 @@ export function StoreProvider({ children }) {
         const boxes = sumCartons(p.materials)
         const boxNote = boxes > 0 ? `, ${boxes} carton${boxes === 1 ? '' : 's'}` : ''
         return ev('stage', `Finished packing unit ${unit.number}, ${p.pieces} pieces inventoried${boxNote}${range} (inventory photo + ${shots} packed photo${shots === 1 ? '' : 's'})`, { unitId: unit.id, from: 'packing', to: 'packed', media: p.media })
+      }
+      case 'completeLoadStep': {
+        // One item on the mover's checklist, ticked on its own with its own
+        // name and time, exactly like the packer flow. Runs while the unit
+        // sits at 'packed': the stage only moves when the mover says they are
+        // finished loading, because only they know if another box is coming.
+        const step = LOADING_STEPS.find((s) => s.key === p.key)
+        if (!step || step.repeatable) throw new Error('Unknown load step.')
+
+        const now = Date.now()
+        const entry = { uid: currentUser.uid, userName: currentUser.name, at: now }
+        if (p.value != null) entry.value = p.value
+        if (p.matched != null) entry.matched = p.matched
+
+        p.media = attributeMedia(p.media || [])
+        const patch = { [`steps.${p.key}`]: entry, 'crew.movers': arrayUnion(currentUser.uid) }
+        if (p.media.length) patch.media = arrayUnion(...p.media)
+        await updateDoc(doc(db, 'units', p.unitId), patch)
+
+        // A mismatch is logged as a flag event immediately rather than held
+        // until the unit is finished. If a mover is standing at the wrong
+        // apartment, that needs to reach the office now, not later.
+        if (p.matched === false) {
+          return ev('flag', `MISMATCH on unit ${unit.number}: mover entered "${p.value}" for ${step.label.toLowerCase()}, packer recorded "${p.expected}"`, { unitId: unit.id, step: p.key })
+        }
+        return ev('step', `Unit ${unit.number} · ${step.label} ✓${p.value ? ` (${p.value})` : ''}`, { unitId: unit.id, step: p.key, media: p.media })
+      }
+      case 'logBox': {
+        // One BigBox, with the number read off its side and the two photos
+        // that make it a record: doors open showing what went in, doors closed
+        // showing it sealed that way. Repeatable, because a unit averages
+        // about two and a half boxes.
+        const number = normalizeBoxNumber(p.number)
+        const now = Date.now()
+
+        // The box may already be on site and part-loaded with another
+        // apartment, or it may be one the mover is opening now. Either way the
+        // mover types the number rather than picking from a list, so a box
+        // nobody logged in advance still works.
+        let cont = state.containers.find((c) => normalizeBoxNumber(c.number) === number)
+        if (cont && cont.status !== 'empty' && cont.status !== 'filling') {
+          throw new Error(`Box ${number} has already left the site. Check the number and try again.`)
+        }
+        let containerId = cont ? cont.id : null
+        if (!containerId) {
+          const ref = await addDoc(collection(db, 'containers'), { number, status: 'empty', unitIds: [], deliveredAt: now })
+          containerId = ref.id
+        }
+        await updateDoc(doc(db, 'containers', containerId), { status: 'filling', unitIds: arrayUnion(p.unitId) })
+
+        const media = attributeMedia([
+          { id: `box-open-${now}`, kind: 'photo', url: p.openUrl, label: `box ${number} open`, phase: 'box_open' },
+          { id: `box-closed-${now}`, kind: 'photo', url: p.closedUrl, label: `box ${number} closed`, phase: 'box_closed' },
+        ])
+        await updateDoc(doc(db, 'units', p.unitId), {
+          boxes: arrayUnion({ number, containerId, openUrl: p.openUrl, closedUrl: p.closedUrl, uid: currentUser.uid, userName: currentUser.name, at: now }),
+          containerIds: arrayUnion(containerId),
+          'crew.movers': arrayUnion(currentUser.uid),
+          media: arrayUnion(...media),
+        })
+        return ev('step', `Unit ${unit.number} · loaded into box ${number}`, { unitId: unit.id, containerId, step: 'load_boxes', media })
+      }
+      case 'finishLoading': {
+        // The mover says the unit is fully loaded. Everything on the checklist
+        // has to be there first, including at least one complete box.
+        if (!loadingComplete(unit)) throw new Error('Finish the checklist first: the photo, both confirmations, and at least one box.')
+        const patch = { stage: 'loaded', 'crew.movers': arrayUnion(currentUser.uid) }
+
+        // Carry any confirmation mismatch forward as an open flag, so a unit
+        // that went out with the wrong colour or number on it cannot quietly
+        // become somebody's problem at the warehouse. Only raised when there
+        // isn't an open flag already, so an earlier one is never overwritten.
+        const wrong = LOADING_STEPS
+          .filter((s) => unit.steps && unit.steps[s.key] && unit.steps[s.key].matched === false)
+          .map((s) => s.label.toLowerCase())
+        if (wrong.length && !unit.flag?.open) {
+          patch.flag = { message: `Loaded with a mismatch on ${wrong.join(' and ')}. Verify against the packer's record before it leaves site.`, ts: Date.now(), by: currentUser.name, open: true }
+        }
+        await updateDoc(doc(db, 'units', p.unitId), patch)
+
+        const boxes = (unit.boxes || []).map((b) => b.number).join(', ')
+        await ev('stage', `Unit ${unit.number} fully loaded into ${(unit.boxes || []).length} box${(unit.boxes || []).length === 1 ? '' : 'es'} (${boxes})`, { unitId: unit.id, from: 'packed', to: 'loaded' })
+        if (wrong.length) await ev('flag', `FLAG raised on unit ${unit.number}: ${wrong.join(' and ')} did not match the packer's record`, { unitId: unit.id })
+        return
       }
       case 'logEmpties': {
         // BigBox drops off empty containers before any loading happens.

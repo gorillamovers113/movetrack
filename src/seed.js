@@ -34,7 +34,7 @@ export function photoThumb(label, sub = '') {
 export const STAGES = [
   { key: 'not_started', label: 'Not started', short: 'Not started', color: '#8a93a2', step: 0 },
   { key: 'packing', label: 'Packing & prep', short: 'Packing', color: '#14b8a6', step: 1 },
-  { key: 'packed', label: 'Packed, ready to load', short: 'Packed', color: '#0d9488', step: 2 },
+  { key: 'packed', label: 'Packed, ready to load', short: 'Ready to load', color: '#16a34a', step: 2 },
   { key: 'loaded', label: 'Loaded in container on site', short: 'Loaded', color: '#8b5cf6', step: 3 },
   { key: 'picked_up', label: 'Picked up, en route to warehouse', short: 'Picked up', color: '#f97316', step: 4 },
   { key: 'at_warehouse', label: 'In warehouse', short: 'Warehouse', color: '#3b82f6', step: 5 },

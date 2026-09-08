@@ -104,6 +104,35 @@ service cloud.firestore {
               && request.resource.data.crew.packers.hasAll(resource.data.crew.packers)
               && request.resource.data.crew.packers.hasOnly(resource.data.crew.packers.concat([request.auth.uid])));
     }
+    // The mover's load-out mirrors the packer's checklist: a photo of the
+    // packed apartment, the sticker colour and unit number confirmed by hand,
+    // then one entry per BigBox with its number and its open and closed door
+    // photos. All of it happens while the unit sits at 'packed', because the
+    // stage only moves once the mover says the unit is fully loaded, and only
+    // they know whether another box is still coming.
+    //
+    // Same shape of guard as unitStepWriteOK, and just as narrow. Note `flag`
+    // is deliberately NOT here: a mismatch is recorded on the step itself and
+    // raised as a flag during the packed -> loaded transition, so this path
+    // can never be used to clear somebody else's open flag.
+    function unitLoadWriteOK() {
+      return hasRole('mover')
+          && resource.data.stage == 'packed'
+          && request.resource.data.stage == 'packed'
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['steps', 'media', 'boxes', 'containerIds', 'crew'])
+          && moverCrewChangeOK();
+    }
+
+    // Mirrors crewChangeOK for the mover side: a mover may add THEMSELVES to
+    // crew.movers and nothing else. Packers and unpackers are untouchable,
+    // nobody already credited can be removed, and no other uid can be added.
+    function moverCrewChangeOK() {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['crew'])
+          || (request.resource.data.crew.diff(resource.data.crew).affectedKeys().hasOnly(['movers'])
+              && request.resource.data.crew.movers.hasAll(resource.data.crew.movers)
+              && request.resource.data.crew.movers.hasOnly(resource.data.crew.movers.concat([request.auth.uid])));
+    }
     function unitReturnTransitionOK(role, before, after) {
       return (role == 'warehouse'
               && ((before == 'at_warehouse' && after == 'return_loaded' && returnPhaseOn())  // loadForReturn (entry)
@@ -274,7 +303,8 @@ service cloud.firestore {
       allow update: if isAdmin()
         || (isCrew()
             && (unitTransitionOK(me().role, resource.data.stage, request.resource.data.stage)
-                || unitStepWriteOK())
+                || unitStepWriteOK()
+                || unitLoadWriteOK())
             && unitIdentityUnchanged()
             && custodyFieldsOK());
 

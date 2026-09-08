@@ -402,6 +402,117 @@ describe('units — packer', () => {
   })
 })
 
+describe('units — mover load-out', () => {
+  // The mover records the load against a packed unit one item at a time, the
+  // same way a packer works the packing checklist. The stage only moves when
+  // they say the unit is fully loaded.
+  it('photo of the packed unit allowed', async () => {
+    await seed('units', 'u1', baseUnit({ stage: 'packed' }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(MOVER), 'units', 'u1'), {
+        'steps.load_unit_photo': { uid: MOVER, userName: 'Test mover-1', at: 1 },
+        media: arrayUnion({ id: 'm1', kind: 'photo', url: 'x', phase: 'load_unit_photo' }),
+        'crew.movers': arrayUnion(MOVER),
+      })
+    )
+  })
+
+  it('sticker colour and unit number confirmations allowed', async () => {
+    await seed('units', 'u1', baseUnit({ stage: 'packed' }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(MOVER), 'units', 'u1'), {
+        'steps.load_sticker': { uid: MOVER, userName: 'Test mover-1', at: 1, value: 'Pink', matched: true },
+        'steps.load_number': { uid: MOVER, userName: 'Test mover-1', at: 2, value: '906', matched: true },
+      })
+    )
+  })
+
+  it('logging a box allowed, and repeatable', async () => {
+    await seed('units', 'u1', baseUnit({ stage: 'packed' }))
+    const box = (n) => ({ number: n, containerId: 'c1', openUrl: 'o', closedUrl: 'c', uid: MOVER, userName: 'Test mover-1', at: 1 })
+    await assertSucceeds(
+      updateDoc(doc(dbAs(MOVER), 'units', 'u1'), {
+        boxes: arrayUnion(box('BB-1')),
+        containerIds: arrayUnion('c1'),
+        'crew.movers': arrayUnion(MOVER),
+      })
+    )
+    await assertSucceeds(
+      updateDoc(doc(dbAs(MOVER), 'units', 'u1'), { boxes: arrayUnion(box('BB-2')) })
+    )
+  })
+
+  it('a mover may not record a load on a unit the packers have not finished', async () => {
+    for (const stage of ['not_started', 'packing']) {
+      await seed('units', 'u1', baseUnit({ stage }))
+      await assertFails(
+        updateDoc(doc(dbAs(MOVER), 'units', 'u1'), {
+          'steps.load_unit_photo': { uid: MOVER, userName: 'Test mover-1', at: 1 },
+        })
+      )
+    }
+  })
+
+  it('a packer may not record a mover load-out', async () => {
+    await seed('units', 'u1', baseUnit({ stage: 'packed' }))
+    await assertFails(
+      updateDoc(doc(dbAs(PACKER), 'units', 'u1'), {
+        'steps.load_unit_photo': { uid: PACKER, userName: 'Test packer-1', at: 1 },
+      })
+    )
+  })
+
+  it('logging a box may not also advance the stage', async () => {
+    await seed('units', 'u1', baseUnit({ stage: 'packed' }))
+    await assertFails(
+      updateDoc(doc(dbAs(MOVER), 'units', 'u1'), {
+        boxes: arrayUnion({ number: 'BB-1', openUrl: 'o', closedUrl: 'c' }),
+        stage: 'picked_up',
+      })
+    )
+  })
+
+  it('a mover may not clear an open flag while logging a box', async () => {
+    await seed('units', 'u1', baseUnit({ stage: 'packed', flag: { message: 'x', ts: 1, by: 'admin', open: true } }))
+    await assertFails(
+      updateDoc(doc(dbAs(MOVER), 'units', 'u1'), {
+        boxes: arrayUnion({ number: 'BB-1', openUrl: 'o', closedUrl: 'c' }),
+        'flag.open': false,
+      })
+    )
+  })
+
+  it('a mover may not put another mover on the unit', async () => {
+    await seed('units', 'u1', baseUnit({ stage: 'packed' }))
+    await assertFails(
+      updateDoc(doc(dbAs(MOVER), 'units', 'u1'), {
+        'steps.load_unit_photo': { uid: MOVER, userName: 'Test mover-1', at: 1 },
+        'crew.movers': arrayUnion('someone-else'),
+      })
+    )
+  })
+
+  it('a mover may not credit themselves as a packer', async () => {
+    await seed('units', 'u1', baseUnit({ stage: 'packed' }))
+    await assertFails(
+      updateDoc(doc(dbAs(MOVER), 'units', 'u1'), {
+        'steps.load_unit_photo': { uid: MOVER, userName: 'Test mover-1', at: 1 },
+        'crew.packers': arrayUnion(MOVER),
+      })
+    )
+  })
+
+  it('a mover may not rename the unit while loading it', async () => {
+    await seed('units', 'u1', baseUnit({ stage: 'packed' }))
+    await assertFails(
+      updateDoc(doc(dbAs(MOVER), 'units', 'u1'), {
+        boxes: arrayUnion({ number: 'BB-1' }),
+        tenant: 'Someone Else',
+      })
+    )
+  })
+})
+
 // =====================================================================
 // 2. mover: load/markFull/swap allowed on right stages; warehouse receive
 //    denied; editing a picked_up unit denied.

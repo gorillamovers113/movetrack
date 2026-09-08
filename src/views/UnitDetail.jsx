@@ -6,6 +6,7 @@ import { captureMedia } from '../lib/upload.js'
 import { surnameOf, STICKER_COLORS, inventoryRangeError, overlappingUnits, inventoryRangeLabel, stickerHex, CARTON_TYPES, cartonsFromForm, sumCartons, cartonSummary, packingChecklist, packingProgress, packingComplete, nextPackingStep, PACKING_STEPS } from '../lib/mutations.js'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import ReportOverflowButton from '../components/ReportOverflowButton.jsx'
+import LoadOutCard from '../components/LoadOutCard.jsx'
 import { crewOnUnit } from '../lib/reports.js'
 
 const WAIT_HINTS = {
@@ -126,6 +127,10 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
   // keeps the single-action flow it already had.
   const onChecklist = (currentUser.role === 'packer' || currentUser.role === 'admin')
     && (unit.stage === 'not_started' || unit.stage === 'packing')
+  // The mover's equivalent, on a unit the packers have finished. Same one
+  // item, one save, one name-and-time shape as the packing checklist.
+  const onLoadOut = (currentUser.role === 'mover' || currentUser.role === 'admin')
+    && unit.stage === 'packed'
   const checklist = packingChecklist(unit, events)
   const progress = packingProgress(unit, events)
   const upNext = onChecklist ? nextPackingStep(unit, events) : null
@@ -137,7 +142,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
   // already what the security rules enforce, so offering an upload button here
   // only produced a permission error after the photo had been taken. An admin
   // is never view-only; they can correct anything at any stage.
-  const viewOnly = currentUser.role !== 'admin' && !onChecklist && !action
+  const viewOnly = currentUser.role !== 'admin' && !onChecklist && !onLoadOut && !action
   const canContribute = currentUser.role !== 'viewer' && !viewOnly
   // A viewer is view-only on every unit by design and knows it, so the lock
   // banner would be noise. It is for crew, who could edit this unit until
@@ -340,8 +345,8 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
               {upNext.label}
             </button>
           )}
-          {!onChecklist && action && <button className="btn btn-primary btn-lg" onClick={openAction}>{action.label}</button>}
-          {!onChecklist && !action && WAIT_HINTS[unit.stage] && <span className="muted" style={{ maxWidth: 300, textAlign: 'right' }}>{WAIT_HINTS[unit.stage]}</span>}
+          {!onChecklist && !onLoadOut && action && <button className="btn btn-primary btn-lg" onClick={openAction}>{action.label}</button>}
+          {!onChecklist && !onLoadOut && !action && WAIT_HINTS[unit.stage] && <span className="muted" style={{ maxWidth: 300, textAlign: 'right' }}>{WAIT_HINTS[unit.stage]}</span>}
         </div>
       </div>
 
@@ -409,6 +414,8 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
               </div>
             </div>
           )}
+
+          {onLoadOut && <LoadOutCard unit={unit} toast={toast} />}
 
           <div className="card" style={{ padding: '16px 20px', marginBottom: 14 }}>
             <div className="row" style={{ marginBottom: 6 }}>

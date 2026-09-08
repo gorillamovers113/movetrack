@@ -28,8 +28,16 @@ export default function FindUnitButton({ openUnit, toast, fullWidth }) {
   // full unit number, so the form isn't red while they're still typing.
   const noMatch = typed.length >= 3 && !match
 
+  // A mover loads what the packers have finished, and nothing else. Without
+  // this they could check in to an apartment still being packed, take a photo
+  // of a half-packed room, and find every write refused by the rules. Better
+  // to say so at the door than to let them start.
+  const tooEarly = !!match && currentUser.role === 'mover'
+    && (match.stage === 'not_started' || match.stage === 'packing')
+  const canOpen = !!match && !tooEarly
+
   const go = () => {
-    if (!match) return
+    if (!canOpen) return
     setOpen(false)
     setNumber('')
     openUnit(match.id)
@@ -87,6 +95,16 @@ export default function FindUnitButton({ openUnit, toast, fullWidth }) {
             </div>
           )}
 
+          {tooEarly && (
+            <div className="card" style={{ padding: '14px 16px', marginBottom: 12, borderLeft: '3px solid var(--brand)' }}>
+              <b>Unit {match.number} is not ready yet.</b>
+              <div className="muted" style={{ marginTop: 4 }}>
+                The packers are still on it{match.stage === 'not_started' ? ', they have not started' : ''}. It turns green
+                on the board the moment it is ready to load.
+              </div>
+            </div>
+          )}
+
           {noMatch && (
             <div className="card" style={{ padding: '14px 16px', marginBottom: 12 }}>
               <b>No unit {typed} on this project.</b>
@@ -99,10 +117,10 @@ export default function FindUnitButton({ openUnit, toast, fullWidth }) {
           <button
             className="btn btn-primary btn-lg"
             style={{ width: '100%' }}
-            disabled={!match}
+            disabled={!canOpen}
             onClick={go}
           >
-            {match ? `Open unit ${match.number}` : 'Enter a unit number'}
+            {tooEarly ? 'Still being packed' : match ? `Open unit ${match.number}` : 'Enter a unit number'}
           </button>
         </Modal>
       )}
