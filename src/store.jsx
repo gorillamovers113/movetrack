@@ -3,6 +3,7 @@ import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndP
 import { doc, setDoc, updateDoc, deleteDoc, addDoc, arrayUnion, onSnapshot, collection, query, orderBy, serverTimestamp, writeBatch } from 'firebase/firestore'
 import { app, auth, db } from './firebase.js'
 import { captureMedia, uploadFile } from './lib/upload.js'
+import { stepRow, pushRows } from './lib/sheetBackup.js'
 import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction, sumCartons, PACKING_STEPS, REQUIRED_STEPS, packingChecklist } from './lib/mutations.js'
 import { DEFAULT_SCHEDULE, DEFAULT_RETURN_SCHEDULE, scheduleDocId } from './lib/schedule.js'
 import { stageOf } from './seed.js'
@@ -249,7 +250,37 @@ export function StoreProvider({ children }) {
           extra.to = 'packed'
           text = `Unit ${unit.number} fully packed · ${step.label} ✓ (all ${REQUIRED_STEPS.length} items complete)`
         }
-        return ev(step.optional ? 'note' : (starting || finishing ? 'stage' : 'step'), text, extra)
+        const written = await ev(step.optional ? 'note' : (starting || finishing ? 'stage' : 'step'), text, extra)
+
+        // Mirror the completed item into the backup sheet, if one is
+        // configured. Deliberately after the Firestore write and deliberately
+        // not awaited into the packer's path: the record is already safe, and
+        // a slow spreadsheet must never hold up someone standing in a doorway
+        // or make a saved step look failed.
+        const backupUrl = state.project && state.project.sheetBackupUrl
+        if (backupUrl) {
+          const patched = {
+            ...unit,
+            stage: patch.stage || unit.stage,
+            stickerColor: patch.stickerColor || unit.stickerColor,
+            inventoryFrom: patch.inventoryFrom != null ? patch.inventoryFrom : unit.inventoryFrom,
+            inventoryTo: patch.inventoryTo != null ? patch.inventoryTo : unit.inventoryTo,
+            pieces: patch.pieces != null ? patch.pieces : unit.pieces,
+            materials: patch.materials || unit.materials,
+            media: [...((unit && unit.media) || []), ...p.media],
+            steps: { ...((unit && unit.steps) || {}), [key]: { uid: currentUser.uid, userName: currentUser.name, at: now } },
+          }
+          pushRows(backupUrl, [stepRow({
+            unit: patched,
+            stepKey: key,
+            userName: currentUser.name,
+            role: currentUser.role,
+            ts: now,
+            noteText: step.optional ? p.text : '',
+            events: unitEvents,
+          })])
+        }
+        return written
       }
       case 'startPacking': {
         // The "before" record. Photos of the front door with the unit number
@@ -393,6 +424,15 @@ export function StoreProvider({ children }) {
       // reverse of their outbound step, back into the same apartment. See
       // §3's mirror table for which outbound action each one undoes.
 
+      case 'setSheetBackup': {
+        // The Apps Script web app URL that mirrors completed items into
+        // Casey's Google Sheet. Stored on the project doc rather than baked
+        // into the build so it can be changed, or turned off, without a
+        // deploy. Empty string turns the mirror off.
+        const cur = state.project
+        await setDoc(doc(db, 'meta', 'project'), { sheetBackupUrl: p.url || '', name: cur.name, address: cur.address }, { merge: true })
+        return ev('system', p.url ? 'Connected the Google Sheet backup' : 'Disconnected the Google Sheet backup')
+      }
       case 'setReturnPhase': {
         // Admin toggle. Preserve name/address on the write (not just merge)
         // so a first-ever toggle doesn't create a meta/project doc missing

@@ -138,7 +138,7 @@ function Shell() {
       case 'containers': return <Containers openUnit={openUnit} focusId={view.focusId} clearFocus={() => setView((v) => ({ ...v, focusId: null }))} toast={toast} />
       case 'overflow': return <Overflow openUnit={openUnit} focusId={view.focusId} clearFocus={() => setView((v) => ({ ...v, focusId: null }))} toast={toast} />
       case 'team': return <Team toast={toast} />
-      case 'reports': return <Reports openUnit={openUnit} openContainer={openContainer} />
+      case 'reports': return <Reports openUnit={openUnit} openContainer={openContainer} toast={toast} />
       case 'activity': return <Activity openUnit={openUnit} openContainer={openContainer} />
       case 'mywork': return <MyWork openUnit={openUnit} openContainer={openContainer} toast={toast} />
       default: return null

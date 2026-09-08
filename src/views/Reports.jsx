@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { ROLES } from '../seed.js'
 import { useStore, fmtTime, fmtAgo } from '../store.jsx'
+import { allRows, pushRows } from '../lib/sheetBackup.js'
 import { Avatar, EventRow, Lightbox } from '../ui.jsx'
 import { computeAllReports, summarizeRoster, fmtDuration, reportsToCSV } from '../lib/reports.js'
 
@@ -98,10 +99,12 @@ function UserDetail({ r, events, openUnit, openContainer }) {
   )
 }
 
-export default function Reports({ openUnit, openContainer }) {
-  const { state } = useStore()
+export default function Reports({ openUnit, openContainer, toast }) {
+  const { state, dispatch, currentUser } = useStore()
   const [sortBy, setSortBy] = useState('totalActions')
   const [expanded, setExpanded] = useState(null)
+  const [sheetUrl, setSheetUrl] = useState(state.project?.sheetBackupUrl || '')
+  const [syncing, setSyncing] = useState(false)
 
   const reports = useMemo(() => computeAllReports(state, state.users), [state])
   const sorted = useMemo(() => [...reports].sort((a, b) => (b[sortBy] || 0) - (a[sortBy] || 0)), [reports, sortBy])
@@ -122,6 +125,54 @@ export default function Reports({ openUnit, openContainer }) {
           onClick={() => downloadCSV(reportsToCSV(sorted), `movetrack-reports-${new Date().toISOString().slice(0, 10)}.csv`)}
         >⬇ Export CSV</button>
       </div>
+
+      {currentUser.role === 'admin' && (
+        <div className="card" style={{ padding: '16px 20px', marginBottom: 16 }}>
+          <div className="section-title" style={{ marginTop: 0 }}>Google Sheet backup</div>
+          <p className="muted" style={{ marginBottom: 10, fontSize: 13.5 }}>
+            Every completed checklist item is mirrored into a Google Sheet as it happens. Firestore stays the
+            record of truth, so if a row ever fails to send, nothing is lost: rebuild the whole sheet below.
+          </p>
+          <div className="field">
+            <label>Apps Script web app URL</label>
+            <input
+              className="input" type="url" placeholder="https://script.google.com/macros/s/..."
+              value={sheetUrl} onChange={(e) => setSheetUrl(e.target.value)}
+            />
+          </div>
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+            <button
+              className="btn btn-dark"
+              onClick={async () => {
+                try {
+                  await dispatch({ type: 'setSheetBackup', p: { url: sheetUrl.trim() } })
+                  toast(sheetUrl.trim() ? 'Sheet backup connected ✓' : 'Sheet backup turned off')
+                } catch (err) {
+                  toast(err.message || "Couldn't save that.")
+                }
+              }}
+            >Save</button>
+            <button
+              className="btn btn-ghost"
+              disabled={!state.project?.sheetBackupUrl || syncing}
+              onClick={async () => {
+                setSyncing(true)
+                const rows = allRows(state.units, state.events)
+                const res = await pushRows(state.project.sheetBackupUrl, rows)
+                setSyncing(false)
+                toast(res.sent
+                  ? `Sent ${rows.length} completed item${rows.length === 1 ? '' : 's'} to the sheet ✓`
+                  : 'Could not reach the sheet. Check the URL and your connection.')
+              }}
+            >{syncing ? 'Sending…' : '⤴ Back up everything now'}</button>
+          </div>
+          {!state.project?.sheetBackupUrl && (
+            <div className="muted" style={{ marginTop: 10, fontSize: 12.5 }}>
+              Not connected yet. Nothing is being mirrored, and nothing is at risk: every item is still recorded in the app.
+            </div>
+          )}
+        </div>
+      )}
 
       {reports.length === 0 ? (
         <div className="card"><div className="empty"><div className="big">📊</div>No team members yet. Reports will fill in once the roster is active.</div></div>
