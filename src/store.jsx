@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
 import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, signOut, updateProfile } from 'firebase/auth'
 import { doc, setDoc, updateDoc, deleteDoc, addDoc, arrayUnion, onSnapshot, collection, query, orderBy, serverTimestamp, writeBatch } from 'firebase/firestore'
 import { app, auth, db } from './firebase.js'
+import { captureMedia, uploadFile } from './lib/upload.js'
 import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction, sumCartons, PACKING_STEPS, REQUIRED_STEPS, packingChecklist } from './lib/mutations.js'
 import { DEFAULT_SCHEDULE, DEFAULT_RETURN_SCHEDULE, scheduleDocId } from './lib/schedule.js'
 import { stageOf } from './seed.js'
@@ -208,6 +209,19 @@ export function StoreProvider({ children }) {
         if (finishing) {
           patch.stage = 'packed'
           patch['times.packEnd'] = now
+        }
+
+        // Backstop. Storage keeps media out of the document, but photos taken
+        // with no signal fall back to an embedded copy, and enough of those
+        // in one apartment could still push the document past Firestore's
+        // 1 MiB ceiling, where the write is rejected outright. Refuse early
+        // with something a packer can act on rather than letting them lose
+        // the step they just completed.
+        const incoming = p.media.reduce(
+          (n, m) => n + (m && typeof m.url === 'string' && m.url.startsWith('data:') ? m.url.length : 0), 0,
+        )
+        if (embeddedMediaBytes(unit) + incoming > 700000) {
+          throw new Error('This unit is holding a lot of photos taken with no signal. Move to where you have a bar or two so they upload, then add this step again.')
         }
 
         await updateDoc(doc(db, 'units', p.unitId), patch)
@@ -899,30 +913,48 @@ export const OVERFLOW_STATUS = {
   returned: { label: 'Returned', color: '#15803d' },
 }
 
-export async function filesToMedia(fileList, labelPrefix = '') {
+// Turns picked/captured files into media objects for a unit, container or
+// overflow item.
+//
+// These go to Firebase Storage and the doc keeps only a URL. They used to be
+// embedded in the Firestore document as base64 data URLs, which is a hard
+// dead end: a Firestore document cannot exceed 1 MiB, base64 inflates bytes
+// by a third, and a resized photo is ~200 KB embedded. Unit 906 reached
+// 866 KB on four photos, so the fifth would have been rejected outright, and
+// a room walkthrough of a real apartment is a dozen. Videos were worse
+// still: a 12 MB clip is ~16 MB encoded and could never have saved at all,
+// on a checklist item that explicitly asks for video.
+//
+// captureMedia still falls back to a (smaller) embedded copy when Storage is
+// unreachable, so a packer with no signal is never blocked. Video has no
+// such fallback because none is possible, and says so plainly.
+export async function filesToMedia(fileList, labelPrefix = '', pathPrefix = 'units/loose') {
+  const uid = auth.currentUser ? auth.currentUser.uid : 'anon'
   const files = Array.from(fileList)
   const out = []
   for (const f of files) {
+    const stamp = `${Date.now()}-${out.length}`
     if (f.type.startsWith('video')) {
-      if (f.size > 12 * 1024 * 1024) { alert(`${f.name} is over 12 MB, so it was skipped. Photos and shorter clips upload fine.`); continue }
-      out.push({ id: `up-${Date.now()}-${out.length}`, kind: 'video', label: labelPrefix || f.name, url: await readAsDataURL(f) })
+      if (f.size > 15 * 1024 * 1024) {
+        alert(`${f.name} is over 15 MB, so it was skipped. Shorter clips and photos upload fine.`)
+        continue
+      }
+      const url = await uploadFile(f, `${pathPrefix}/${stamp}-${uid}.mp4`)
+      out.push({ id: `up-${stamp}`, kind: 'video', label: labelPrefix || f.name, url, storage: true })
     } else if (f.type.startsWith('image')) {
-      out.push({ id: `up-${Date.now()}-${out.length}`, kind: 'photo', label: labelPrefix || f.name, url: await resizeImage(f) })
+      const { url, storage } = await captureMedia(f, `${pathPrefix}/${stamp}-${uid}.jpg`)
+      out.push({ id: `up-${stamp}`, kind: 'photo', label: labelPrefix || f.name, url, storage })
     }
   }
   return out
 }
-const readAsDataURL = (f) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f) })
-async function resizeImage(file, max = 1400) {
-  const url = await readAsDataURL(file)
-  const img = await new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url })
-  const scale = Math.min(1, max / Math.max(img.width, img.height))
-  if (scale === 1 && file.size < 400000) return url
-  const canvas = document.createElement('canvas')
-  canvas.width = Math.round(img.width * scale)
-  canvas.height = Math.round(img.height * scale)
-  canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
-  return canvas.toDataURL('image/jpeg', 0.82)
+
+// Bytes a unit's media currently occupies inside its own Firestore document.
+// Only embedded (data:) URLs count: a Storage URL is a couple of hundred
+// characters no matter how big the photo is.
+export function embeddedMediaBytes(unit) {
+  return ((unit && unit.media) || [])
+    .reduce((n, m) => n + (m && typeof m.url === 'string' && m.url.startsWith('data:') ? m.url.length : 0), 0)
 }
 
 export function exportActivityCSV(events, units, containers) {

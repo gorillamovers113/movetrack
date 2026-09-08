@@ -458,7 +458,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
             <div className="card" style={{ padding: '16px 20px' }}>
               <div className="section-title" style={{ marginTop: 0 }}>Add to the record</div>
               <Uploader onFiles={async (files) => {
-                const media = await filesToMedia(files)
+                const media = await filesToMedia(files, '', `units/${unitId}/added`)
                 if (!media.length) return
                 try {
                   const status = await submitWrite(dispatch({ type: 'addMedia', p: { unitId, media } }))
@@ -490,7 +490,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
               <label>Front door, showing the unit number {pending.length > 0 && <span className="muted">✓ {pending.length}</span>}</label>
               <Uploader
                 label={pending.length ? 'Retake or add another' : 'Photograph the front door'}
-                onFiles={async (files) => setPending([...pending, ...(await filesToMedia(files, 'front door'))])}
+                onFiles={async (files) => setPending([...pending, ...(await filesToMedia(files, 'front door', `units/${unitId}/door`))])}
               />
             </div>
           )}
@@ -500,7 +500,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
               <label>The rooms, before anything moves {pending.length > 0 && <span className="muted">✓ {pending.length}</span>}</label>
               <Uploader
                 label={pending.length ? 'Add another room' : 'Photos or video of every room'}
-                onFiles={async (files) => setPending([...pending, ...(await filesToMedia(files, 'room'))])}
+                onFiles={async (files) => setPending([...pending, ...(await filesToMedia(files, 'room', `units/${unitId}/rooms`))])}
               />
             </div>
           )}
@@ -592,7 +592,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
               <label>Everything packed and ready to go {pending.length > 0 && <span className="muted">✓ {pending.length}</span>}</label>
               <Uploader
                 label={pending.length ? 'Add another' : 'Photos or video, packed and ready'}
-                onFiles={async (files) => setPending([...pending, ...(await filesToMedia(files, 'packed'))])}
+                onFiles={async (files) => setPending([...pending, ...(await filesToMedia(files, 'packed', `units/${unitId}/packed`))])}
               />
               {progress.done === PACKING_STEPS.length - 1 && (
                 <div className="muted" style={{ marginTop: 8 }}>
@@ -638,14 +638,14 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
               <label>1. Front door, showing the unit number {pendingDoor.length > 0 && <span className="muted">✓ {pendingDoor.length}</span>}</label>
               <Uploader
                 label={pendingDoor.length ? 'Retake or add another' : 'Photograph the front door'}
-                onFiles={async (files) => setPendingDoor([...pendingDoor, ...(await filesToMedia(files, 'front door'))])}
+                onFiles={async (files) => setPendingDoor([...pendingDoor, ...(await filesToMedia(files, 'front door', `units/${unitId}/door`))])}
               />
             </div>
             <div className="field">
               <label>2. The rooms, before anything moves {pendingRooms.length > 0 && <span className="muted">✓ {pendingRooms.length}</span>}</label>
               <Uploader
                 label={pendingRooms.length ? 'Add more rooms' : 'Photos or video of every room'}
-                onFiles={async (files) => setPendingRooms([...pendingRooms, ...(await filesToMedia(files, 'room'))])}
+                onFiles={async (files) => setPendingRooms([...pendingRooms, ...(await filesToMedia(files, 'room', `units/${unitId}/rooms`))])}
               />
             </div>
             <div className="field">
@@ -784,7 +784,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
                   ? '7. Packed and ready: photos or video of the finished unit'
                   : 'Photos required, video encouraged'
               }</label>
-              <Uploader onFiles={async (files) => setPending([...pending, ...(await filesToMedia(files))])} />
+              <Uploader onFiles={async (files) => setPending([...pending, ...(await filesToMedia(files, '', `units/${unitId}/added`))])} />
               {pending.length > 0 && <div className="muted" style={{ marginTop: 6 }}>{pending.length} file{pending.length > 1 ? 's' : ''} attached</div>}
             </div>
           )}

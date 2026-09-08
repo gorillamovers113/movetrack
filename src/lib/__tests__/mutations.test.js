@@ -483,3 +483,29 @@ describe('optional Notes item', () => {
     expect(packingChecklist({}, []).find((s) => s.key === 'notes').done).toBe(false)
   })
 })
+
+// The 1 MiB Firestore document ceiling is the constraint that made unit 906's
+// fifth photo impossible, so the accounting behind the guard is worth pinning.
+describe('embedded media accounting', () => {
+  const dataUrl = (kb) => 'data:image/jpeg;base64,' + 'A'.repeat(kb * 1024)
+
+  it('counts only embedded photos, never Storage URLs', async () => {
+    const { embeddedMediaBytes } = await import('../../store.jsx')
+    const unit = {
+      media: [
+        { url: 'https://firebasestorage.googleapis.com/v0/b/x/o/units%2Fa.jpg?alt=media' },
+        { url: dataUrl(60) },
+      ],
+    }
+    // The Storage URL contributes nothing regardless of the photo behind it.
+    expect(embeddedMediaBytes(unit)).toBeGreaterThan(60 * 1024)
+    expect(embeddedMediaBytes(unit)).toBeLessThan(62 * 1024)
+  })
+
+  it('is zero for a unit with no media, and does not crash on a bare object', async () => {
+    const { embeddedMediaBytes } = await import('../../store.jsx')
+    expect(embeddedMediaBytes({})).toBe(0)
+    expect(embeddedMediaBytes(null)).toBe(0)
+    expect(embeddedMediaBytes({ media: [null, {}, { url: null }] })).toBe(0)
+  })
+})

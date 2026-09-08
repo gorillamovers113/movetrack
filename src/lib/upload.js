@@ -104,6 +104,41 @@ export async function captureMedia(file, path) {
     ])
     return { url, storage: true }
   } catch {
-    return { url: canvas.toDataURL('image/jpeg', 0.82), storage: false }
+    // Storage is unreachable, so this photo has to ride inside the Firestore
+    // document itself. That document has a hard 1 MiB ceiling and base64
+    // inflates bytes by a third, so the fallback is deliberately rendered
+    // smaller and harder-compressed than the copy we would have uploaded.
+    // A legible 900px record of every room beats four pristine photos and a
+    // rejected write.
+    return { url: await smallDataUrl(file), storage: false }
+  }
+}
+
+// The offline-only variant: ~900px, quality 0.6. Roughly 60 KB as base64
+// against ~200 KB for the full-size version, which is the difference between
+// a dozen photos fitting on a unit and five of them failing the write.
+async function smallDataUrl(file) {
+  try {
+    const c = await resizeToCanvas(file, 900)
+    return c.toDataURL('image/jpeg', 0.6)
+  } catch {
+    return readAsDataURL(file)
+  }
+}
+
+// Videos are never resized or embedded: a 12 MB clip is ~16 MB as base64 and
+// cannot fit in a Firestore document at all, so there is no fallback to offer.
+// This uploads the file as-is and throws a plain-language error if it cannot,
+// which is the honest outcome: the clip did not save, and the packer needs to
+// know that standing in the apartment rather than discovering it later.
+export async function uploadFile(file, path) {
+  if (!file) throw new Error('uploadFile: no file provided.')
+  if (!path) throw new Error('uploadFile: no destination path provided.')
+  try {
+    const objRef = ref(storage, path)
+    await uploadBytes(objRef, file)
+    return await getDownloadURL(objRef)
+  } catch {
+    throw new Error('That video needs a connection to save. Move to where you have signal and add it again, or take photos instead.')
   }
 }
