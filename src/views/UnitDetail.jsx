@@ -161,6 +161,11 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
       if (!pending.some((m) => m.kind === 'photo')) return toast('Add at least one photo of the unit packed and ready.')
       p.media = pending.map((m) => ({ ...m, phase: 'packed', label: m.label || 'packed' }))
     }
+    if (stepKey === 'notes') {
+      const text = (form.note || '').trim()
+      if (!text) return toast('Type the note, or close this if there is nothing to add.')
+      p.text = text
+    }
 
     setBusy(true)
     try {
@@ -351,7 +356,11 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
               // whatever the packer is standing in front of is the one they
               // can do. A finished item stops being a button so it cannot be
               // re-ticked, overwriting someone else's name on it.
-              const tappable = onChecklist && !step.done
+              // Optional items stay tappable after they are done: a packer may
+              // have a second thing to report about the same apartment. The
+              // seven required ones lock once complete so nobody re-ticks an
+              // item and overwrites the name of whoever actually did it.
+              const tappable = onChecklist && (!step.done || step.optional)
               const Row = tappable ? 'button' : 'div'
               return (
                 <Row
@@ -376,7 +385,12 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
                     }}
                   >{step.done ? '✓' : i + 1}</span>
                   <span style={{ minWidth: 0, flex: 1 }}>
-                    <span style={{ color: step.done ? 'var(--ink-3, #6b7280)' : 'inherit', fontWeight: tappable ? 600 : 400 }}>{step.label}</span>
+                    <span style={{ color: step.done ? 'var(--ink-3, #6b7280)' : 'inherit', fontWeight: tappable && !step.done ? 600 : 400 }}>
+                      {step.label}
+                      {step.optional && (
+                        <span className="muted" style={{ fontWeight: 600, fontSize: 11.5, marginLeft: 7, opacity: 0.85 }}>OPTIONAL</span>
+                      )}
+                    </span>
                     {step.done && (step.by || step.at) && (
                       <span style={{ display: 'block', fontSize: 12, color: 'var(--ink-3, #9aa1ab)' }}>
                         {step.by || 'Crew'}{step.at ? ` · ${fmtTime(step.at)}` : ''}
@@ -475,7 +489,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
             <div className="field">
               <label>Front door, showing the unit number {pending.length > 0 && <span className="muted">✓ {pending.length}</span>}</label>
               <Uploader
-                label={pending.length ? '📷 Retake or add another' : '📷 Photograph the front door'}
+                label={pending.length ? 'Retake or add another' : 'Photograph the front door'}
                 onFiles={async (files) => setPending([...pending, ...(await filesToMedia(files, 'front door'))])}
               />
             </div>
@@ -485,7 +499,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
             <div className="field">
               <label>The rooms, before anything moves {pending.length > 0 && <span className="muted">✓ {pending.length}</span>}</label>
               <Uploader
-                label={pending.length ? '📷 Add another room' : '📷 Photos or video of every room'}
+                label={pending.length ? 'Add another room' : 'Photos or video of every room'}
                 onFiles={async (files) => setPending([...pending, ...(await filesToMedia(files, 'room'))])}
               />
             </div>
@@ -577,7 +591,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
             <div className="field">
               <label>Everything packed and ready to go {pending.length > 0 && <span className="muted">✓ {pending.length}</span>}</label>
               <Uploader
-                label={pending.length ? '📷 Add another' : '📷 Photos or video, packed and ready'}
+                label={pending.length ? 'Add another' : 'Photos or video, packed and ready'}
                 onFiles={async (files) => setPending([...pending, ...(await filesToMedia(files, 'packed'))])}
               />
               {progress.done === PACKING_STEPS.length - 1 && (
@@ -588,12 +602,27 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
             </div>
           )}
 
+          {stepKey === 'notes' && (
+            <div className="field">
+              <label>Anything the office should know about this apartment?</label>
+              <textarea
+                className="input" rows={4} autoFocus
+                placeholder="Tenant not home, piano in the back bedroom, lift out of service..."
+                value={form.note || ''}
+                onChange={(e) => setForm({ ...form, note: e.target.value })}
+              />
+              <div className="muted" style={{ marginTop: 6, fontSize: 12.5 }}>
+                Optional. The unit is finished without it, and the note goes straight into this unit's activity log.
+              </div>
+            </div>
+          )}
+
           <button
             className="btn btn-primary btn-lg" style={{ width: '100%', marginTop: 6 }}
             disabled={busy || (stepKey === 'inventory' && invUploading)}
             onClick={submitStep}
           >
-            {busy ? 'Saving…' : 'Save this step ✓'}
+            {busy ? 'Saving…' : stepKey === 'notes' ? 'Save note ✓' : 'Save this step ✓'}
           </button>
           <div className="muted" style={{ fontSize: 12.5, marginTop: 8, textAlign: 'center' }}>
             Saves on its own, under {currentUser.name}, timestamped.
@@ -608,14 +637,14 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
             <div className="field">
               <label>1. Front door, showing the unit number {pendingDoor.length > 0 && <span className="muted">✓ {pendingDoor.length}</span>}</label>
               <Uploader
-                label={pendingDoor.length ? '📷 Retake or add another' : '📷 Photograph the front door'}
+                label={pendingDoor.length ? 'Retake or add another' : 'Photograph the front door'}
                 onFiles={async (files) => setPendingDoor([...pendingDoor, ...(await filesToMedia(files, 'front door'))])}
               />
             </div>
             <div className="field">
               <label>2. The rooms, before anything moves {pendingRooms.length > 0 && <span className="muted">✓ {pendingRooms.length}</span>}</label>
               <Uploader
-                label={pendingRooms.length ? '📷 Add more rooms' : '📷 Photos or video of every room'}
+                label={pendingRooms.length ? 'Add more rooms' : 'Photos or video of every room'}
                 onFiles={async (files) => setPendingRooms([...pendingRooms, ...(await filesToMedia(files, 'room'))])}
               />
             </div>

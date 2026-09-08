@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
 import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, signOut, updateProfile } from 'firebase/auth'
 import { doc, setDoc, updateDoc, deleteDoc, addDoc, arrayUnion, onSnapshot, collection, query, orderBy, serverTimestamp, writeBatch } from 'firebase/firestore'
 import { app, auth, db } from './firebase.js'
-import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction, sumCartons, PACKING_STEPS, packingChecklist } from './lib/mutations.js'
+import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction, sumCartons, PACKING_STEPS, REQUIRED_STEPS, packingChecklist } from './lib/mutations.js'
 import { DEFAULT_SCHEDULE, DEFAULT_RETURN_SCHEDULE, scheduleDocId } from './lib/schedule.js'
 import { stageOf } from './seed.js'
 
@@ -195,8 +195,11 @@ export function StoreProvider({ children }) {
         const done = new Set(packingChecklist(unit, unitEvents).filter((s) => s.done).map((s) => s.key))
         done.add(key)
 
-        const starting = unit.stage === 'not_started'
-        const finishing = unit.stage === 'packing' && PACKING_STEPS.every((s) => done.has(s.key))
+        // An optional item never moves the unit. Jotting a note about an
+        // apartment nobody has touched yet must not claim it and put it in
+        // the packing queue, and a note is not what finishes a unit either.
+        const starting = unit.stage === 'not_started' && !step.optional
+        const finishing = unit.stage === 'packing' && REQUIRED_STEPS.every((s) => done.has(s.key))
         if (starting) {
           patch.stage = 'packing'
           patch['crew.packers'] = arrayUnion(currentUser.uid)
@@ -212,9 +215,16 @@ export function StoreProvider({ children }) {
         // One event per item, never two: the item that happens to open or
         // close the unit carries the stage change itself, so the activity feed
         // reads as seven lines for seven items rather than seven plus two.
-        const progress = `${done.size} of ${PACKING_STEPS.length}`
+        const requiredDone = REQUIRED_STEPS.filter((s) => done.has(s.key)).length
+        const progress = `${requiredDone} of ${REQUIRED_STEPS.length}`
         const extra = { unitId: unit.id, step: key, media: p.media }
         let text = `Unit ${unit.number} · ${step.label} ✓ (${progress})`
+        if (step.optional) {
+          // Optional items carry no progress count: they are not part of the
+          // seven, and showing "7 of 7" against a note would misread as the
+          // note having completed the unit.
+          text = `Unit ${unit.number} · note: ${p.text}`
+        }
         if (starting) {
           extra.from = 'not_started'
           extra.to = 'packing'
@@ -223,9 +233,9 @@ export function StoreProvider({ children }) {
         if (finishing) {
           extra.from = 'packing'
           extra.to = 'packed'
-          text = `Unit ${unit.number} fully packed · ${step.label} ✓ (all ${PACKING_STEPS.length} items complete)`
+          text = `Unit ${unit.number} fully packed · ${step.label} ✓ (all ${REQUIRED_STEPS.length} items complete)`
         }
-        return ev(starting || finishing ? 'stage' : 'step', text, extra)
+        return ev(step.optional ? 'note' : (starting || finishing ? 'stage' : 'step'), text, extra)
       }
       case 'startPacking': {
         // The "before" record. Photos of the front door with the unit number

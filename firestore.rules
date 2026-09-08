@@ -73,10 +73,14 @@ service cloud.firestore {
     // doc (stage, crew, flag, containerIds, times, identity, custody) is
     // untouchable on this path, so it cannot be used to skip a stage, claim
     // someone else's work, or clear a flag.
+    // not_started is allowed as well as packing, because the optional Notes
+    // item deliberately does NOT start a unit: a packer must be able to record
+    // "tenant not home, come back after 2" against an apartment nobody has
+    // opened yet, without that note claiming the unit into the packing queue.
     function unitStepWriteOK() {
       return hasRole('packer')
-          && resource.data.stage == 'packing'
-          && request.resource.data.stage == 'packing'
+          && resource.data.stage == request.resource.data.stage
+          && (resource.data.stage == 'packing' || resource.data.stage == 'not_started')
           && request.resource.data.diff(resource.data).affectedKeys()
                .hasOnly(['steps', 'media', 'stickerColor', 'inventoryFrom', 'inventoryTo', 'materials', 'pieces']);
     }

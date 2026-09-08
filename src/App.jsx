@@ -109,6 +109,15 @@ function Shell() {
     return () => window.removeEventListener('popstate', onPop)
   }, [first])
 
+  // Every screen change starts at the top. Without this the browser keeps the
+  // scroll position across a view swap, so a packer who taps a unit from
+  // halfway down the board lands halfway down the unit page, below the
+  // checklist they opened it for. On a phone that reads as the tap having
+  // done nothing.
+  useEffect(() => {
+    window.scrollTo(0, 0)
+  }, [view.name, view.unitId])
+
   // The in-app Back button consumes the same history entry, so the two stay
   // in step: tapping Back then pressing the phone's back button doesn't
   // replay the unit screen.

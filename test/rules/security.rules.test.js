@@ -295,6 +295,34 @@ describe('units — packer', () => {
       )
     })
 
+    it('an optional note may be recorded before the unit is started', async () => {
+      await seed('units', 'u1', baseUnit({ stage: 'not_started' }))
+      await assertSucceeds(
+        updateDoc(doc(dbAs(PACKER), 'units', 'u1'), {
+          'steps.notes': { uid: PACKER, userName: 'Test packer-1', at: 1 },
+        })
+      )
+    })
+
+    it('recording a note on an unstarted unit may not also start it', async () => {
+      await seed('units', 'u1', baseUnit({ stage: 'not_started' }))
+      await assertFails(
+        updateDoc(doc(dbAs(PACKER), 'units', 'u1'), {
+          'steps.notes': { uid: PACKER, userName: 'Test packer-1', at: 1 },
+          stage: 'packed',
+        })
+      )
+    })
+
+    it('a mover may not record a note on an unstarted unit', async () => {
+      await seed('units', 'u1', baseUnit({ stage: 'not_started' }))
+      await assertFails(
+        updateDoc(doc(dbAs(MOVER), 'units', 'u1'), {
+          'steps.notes': { uid: MOVER, userName: 'Test mover-1', at: 1 },
+        })
+      )
+    })
+
     it('a packer may not tick an item on a unit already handed to the movers', async () => {
       await seed('units', 'u1', baseUnit({ stage: 'packed' }))
       await assertFails(

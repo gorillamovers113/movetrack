@@ -370,6 +370,12 @@ a.linkish, .linkish { color: #b45309; font-weight: 600; cursor: pointer; text-de
     padding: 16px max(14px, env(safe-area-inset-right)) calc(104px + env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
   }
   .detail-grid { grid-template-columns: 1fr; }
+  /* On a phone the two columns stack, and the activity log is first in the
+     DOM because on a desktop it belongs on the left. Stacked, that buries the
+     packing checklist under the unit's whole history: the packer has to
+     scroll past what already happened to reach what they came to do. Put the
+     work first and the record second, on small screens only. */
+  .detail-grid > :last-child { order: -1; }
   .login { grid-template-columns: 1fr; }
   .login-hero { padding: calc(28px + env(safe-area-inset-top)) 22px 26px; min-height: 34vh; }
   .login-hero h1 { font-size: 30px; margin-top: 10px; }

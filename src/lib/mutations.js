@@ -227,7 +227,16 @@ export const PACKING_STEPS = [
   { key: 'numbers', label: 'Inventory numbers' },
   { key: 'materials', label: 'Packing materials used' },
   { key: 'packed', label: 'Photos or video, packed and ready' },
+  // Optional, and deliberately last: anything worth telling the office about
+  // this apartment. A unit is finished without it, so it never blocks a
+  // packer, but when it is filled in it is attributed and timed like the
+  // rest. Its text lives in the activity log as a note event.
+  { key: 'notes', label: 'Notes', optional: true },
 ]
+
+// The seven that actually have to happen. Optional items are shown on the
+// checklist and attributed when done, but never gate a unit's progress.
+export const REQUIRED_STEPS = PACKING_STEPS.filter((s) => !s.optional)
 
 // Each item reports WHO completed it and WHEN.
 //
@@ -279,25 +288,31 @@ export function packingChecklist(unit, events = []) {
     numbers: recorded('numbers') || fromEvent('packed', Number.isFinite(unit && unit.inventoryFrom) && Number.isFinite(unit && unit.inventoryTo)),
     materials: recorded('materials') || fromEvent('packed', sumCartons(unit && unit.materials) > 0),
     packed: recorded('packed') || fromMedia('packed'),
+    // Notes has no evidence to derive from: it is done when a packer says it
+    // is, which is exactly what the recorded tick means.
+    notes: recorded('notes'),
   }
-  return PACKING_STEPS.map((s) => ({ ...s, ...results[s.key] }))
+  return PACKING_STEPS.map((s) => ({ ...s, ...(results[s.key] || { done: false }) }))
 }
 
 // The item a packer should do next: the first one still outstanding, in
 // checklist order. Drives the big primary button on the unit page, so a packer
 // standing in a doorway is told the next thing rather than having to choose.
 export function nextPackingStep(unit, events = []) {
-  return packingChecklist(unit, events).find((s) => !s.done) || null
+  return packingChecklist(unit, events).find((s) => !s.done && !s.optional) || null
 }
 
 // True once every item is ticked. This is what promotes the unit to "packed":
 // the unit is finished because the checklist is finished, not because someone
 // pressed a separate Finish button that could disagree with it.
 export function packingComplete(unit, events = []) {
-  return packingChecklist(unit, events).every((s) => s.done)
+  return packingChecklist(unit, events).every((s) => s.done || s.optional)
 }
 
+// Progress counts only the required items, so a unit reads 7/7 when it is
+// genuinely finished rather than 7/8 forever because nobody had anything to
+// say about it.
 export function packingProgress(unit, events = []) {
-  const list = packingChecklist(unit, events)
+  const list = packingChecklist(unit, events).filter((s) => !s.optional)
   return { done: list.filter((s) => s.done).length, total: list.length }
 }

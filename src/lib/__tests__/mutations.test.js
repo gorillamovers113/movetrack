@@ -6,7 +6,7 @@ import {
   matchContainerByNumber, surnameOf,
   STICKER_COLORS, stickerHex, inventoryRangeLabel, inventoryRangeError, overlappingUnits,
   CARTON_TYPES, sumCartons, cartonsFromForm, cartonSummary,
-  PACKING_STEPS, packingChecklist, packingProgress, nextPackingStep, packingComplete,
+  PACKING_STEPS, REQUIRED_STEPS, packingChecklist, packingProgress, nextPackingStep, packingComplete,
 } from '../mutations.js'
 
 describe('boxMismatch', () => {
@@ -269,12 +269,12 @@ describe('packing checklist', () => {
     ],
   }
 
-  it('is Casey\'s six items, in the order a packer does them', () => {
-    expect(PACKING_STEPS.map((s) => s.key)).toEqual(['door', 'rooms', 'sticker', 'inventory', 'numbers', 'materials', 'packed'])
+  it('is Casey\'s items, in the order a packer does them, with the note last', () => {
+    expect(PACKING_STEPS.map((s) => s.key)).toEqual(['door', 'rooms', 'sticker', 'inventory', 'numbers', 'materials', 'packed', 'notes'])
   })
 
-  it('everything done on a finished unit', () => {
-    expect(packingChecklist(full).every((s) => s.done)).toBe(true)
+  it('every required item done on a finished unit', () => {
+    expect(packingChecklist(full).every((s) => s.done || s.optional)).toBe(true)
     expect(packingProgress(full)).toEqual({ done: 7, total: 7 })
   })
 
@@ -439,5 +439,47 @@ describe('per-item ticks', () => {
     expect(by.packed.done).toBe(true)
     expect(nextPackingStep(unit, []).key).toBe('door')
     expect(packingProgress(unit, []).done).toBe(2)
+  })
+})
+
+// Notes is item 8 and optional: it is attributed like the rest when someone
+// fills it in, but a unit is finished without it.
+describe('optional Notes item', () => {
+  const step = (name, at) => ({ uid: 'u', userName: name, at })
+  const allSeven = () => Object.fromEntries(REQUIRED_STEPS.map((s) => [s.key, step('Liv', 1)]))
+
+  it('is the eighth item and the only optional one', () => {
+    expect(PACKING_STEPS).toHaveLength(8)
+    expect(PACKING_STEPS[7].key).toBe('notes')
+    expect(REQUIRED_STEPS).toHaveLength(7)
+    expect(PACKING_STEPS.filter((s) => s.optional).map((s) => s.key)).toEqual(['notes'])
+  })
+
+  it('does not block a unit from being complete', () => {
+    const u = { steps: allSeven() }
+    expect(packingComplete(u, [])).toBe(true)
+    expect(nextPackingStep(u, [])).toBe(null)
+  })
+
+  it('is never offered as the next thing to do', () => {
+    expect(nextPackingStep({ steps: {} }, []).key).toBe('door')
+    const sixDone = { steps: Object.fromEntries(REQUIRED_STEPS.slice(0, 6).map((s) => [s.key, step('Liv', 1)])) }
+    expect(nextPackingStep(sixDone, []).key).toBe('packed')
+  })
+
+  it('progress counts the seven required items, never the note', () => {
+    expect(packingProgress({ steps: allSeven() }, [])).toEqual({ done: 7, total: 7 })
+    const noteOnly = { steps: { notes: step('Liv', 1) } }
+    expect(packingProgress(noteOnly, [])).toEqual({ done: 0, total: 7 })
+  })
+
+  it('records who wrote the note and when, like every other item', () => {
+    const u = { steps: { notes: step('Ana Ruiz', 4242) } }
+    const notes = packingChecklist(u, []).find((s) => s.key === 'notes')
+    expect(notes).toMatchObject({ done: true, by: 'Ana Ruiz', at: 4242, optional: true })
+  })
+
+  it('is not done until someone actually writes one', () => {
+    expect(packingChecklist({}, []).find((s) => s.key === 'notes').done).toBe(false)
   })
 })
