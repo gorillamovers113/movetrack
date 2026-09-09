@@ -89,7 +89,7 @@ service cloud.firestore {
           && resource.data.stage == request.resource.data.stage
           && (resource.data.stage == 'packing' || resource.data.stage == 'not_started')
           && request.resource.data.diff(resource.data).affectedKeys()
-               .hasOnly(['steps', 'media', 'stickerColor', 'inventoryFrom', 'inventoryTo', 'materials', 'pieces', 'crew'])
+               .hasOnly(['steps', 'media', 'stickerColor', 'inventoryFrom', 'inventoryTo', 'materials', 'supplies', 'pieces', 'crew'])
           && crewChangeOK();
     }
 

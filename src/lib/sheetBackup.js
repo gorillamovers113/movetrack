@@ -18,7 +18,7 @@
  * Script does not answer.
  */
 
-import { PACKING_STEPS, packingChecklist, packingProgress, cartonSummary, sumCartons, inventoryRangeLabel } from './mutations.js'
+import { PACKING_STEPS, packingChecklist, packingProgress, cartonSummary, sumCartons, supplySummary, sumSupplies, inventoryRangeLabel } from './mutations.js'
 
 // Column order for the sheet. Kept explicit and stable: someone will build a
 // filter or a formula against these, and silently reordering them later would
@@ -26,7 +26,7 @@ import { PACKING_STEPS, packingChecklist, packingProgress, cartonSummary, sumCar
 export const SHEET_COLUMNS = [
   'When', 'Unit', 'Tenant', 'Floor', 'Item', 'Done by', 'Role',
   'Stage', 'Progress', 'Sticker colour', 'Sticker numbers',
-  'Pieces', 'Cartons', 'Carton breakdown', 'Photos', 'Note', 'Unit ID',
+  'Pieces', 'Boxes', 'Box breakdown', 'Materials', 'Material breakdown', 'Photos', 'Note', 'Unit ID',
 ]
 
 function isoLocal(ts) {
@@ -60,6 +60,8 @@ export function stepRow({ unit, stepKey, userName, role, ts, noteText, events = 
     (unit && unit.pieces) != null ? unit.pieces : '',
     sumCartons(unit && unit.materials) || '',
     cartonSummary(unit && unit.materials) || '',
+    sumSupplies(unit && unit.supplies) || '',
+    supplySummary(unit && unit.supplies) || '',
     photos || '',
     noteText || '',
     (unit && unit.id) || '',

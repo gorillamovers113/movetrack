@@ -171,44 +171,80 @@ export function overlappingUnits(units, { unitId, stickerColor, from, to }) {
 // the total count of everything handled (furniture included, since that is
 // what gets verified against at load); this is specifically how many of each
 // box went in, which is what materials billing and restock run off.
+// Casey's list, 2026-09-08, after day one. Extra-large and mirror cartons came
+// out because the crew does not stock them; add them back here if that changes.
 export const CARTON_TYPES = [
   { key: 'small', label: 'Small', hint: '1.5 cu ft, book box' },
   { key: 'medium', label: 'Medium', hint: '3.0 cu ft' },
   { key: 'large', label: 'Large', hint: '4.5 cu ft' },
-  { key: 'xlarge', label: 'Extra large', hint: '6.0 cu ft' },
-  { key: 'wardrobe', label: 'Wardrobe', hint: 'hanging' },
   { key: 'dishpack', label: 'Dish pack', hint: 'china / glassware' },
-  { key: 'mirror', label: 'Mirror / picture', hint: 'flat, framed art' },
+  { key: 'wardrobe', label: 'Wardrobe', hint: 'hanging' },
+]
+
+// Everything that is not a box. Kept separate rather than folded in with the
+// cartons, because a roll of tape is not a carton and must never inflate the
+// box count that billing and restock read. Liv had to type "A roll of shrink
+// wrap used" into the notes field on unit 906, which is exactly the gap this
+// closes.
+export const SUPPLY_TYPES = [
+  { key: 'paper', label: 'Packing paper', hint: 'newsprint bundles' },
+  { key: 'paperpad', label: 'Paper pad', hint: '3 ply furniture pad' },
+  { key: 'tape', label: 'Tape', hint: 'rolls' },
+  { key: 'plasticwrap', label: 'Plastic wrap', hint: 'stretch wrap rolls' },
 ]
 
 // Total cartons across the breakdown. Tolerates missing keys, strings from
 // form inputs, and junk, because it feeds a count shown to crew.
-export function sumCartons(materials) {
-  if (!materials) return 0
-  return CARTON_TYPES.reduce((n, t) => {
-    const v = Number(materials[t.key])
+function sumOf(types, counts) {
+  if (!counts) return 0
+  return types.reduce((n, t) => {
+    const v = Number(counts[t.key])
     return n + (Number.isFinite(v) && v > 0 ? Math.floor(v) : 0)
   }, 0)
 }
 
+export function sumCartons(materials) {
+  return sumOf(CARTON_TYPES, materials)
+}
+
+export function sumSupplies(supplies) {
+  return sumOf(SUPPLY_TYPES, supplies)
+}
+
 // Form values -> the map stored on the unit. Drops blanks and zeroes so a
 // unit doc carries only the box types it actually used.
-export function cartonsFromForm(form) {
+function countsFromForm(types, form, prefix) {
   const out = {}
-  for (const t of CARTON_TYPES) {
-    const v = Number(form?.[`carton_${t.key}`])
+  for (const t of types) {
+    const v = Number(form?.[`${prefix}${t.key}`])
     if (Number.isFinite(v) && v > 0) out[t.key] = Math.floor(v)
   }
   return out
 }
 
+export function cartonsFromForm(form) {
+  return countsFromForm(CARTON_TYPES, form, 'carton_')
+}
+
+export function suppliesFromForm(form) {
+  return countsFromForm(SUPPLY_TYPES, form, 'supply_')
+}
+
 // "12 small, 8 medium, 2 wardrobe" for the unit page and reports.
-export function cartonSummary(materials) {
-  if (!materials) return null
-  const parts = CARTON_TYPES
-    .filter((t) => Number(materials[t.key]) > 0)
-    .map((t) => `${Math.floor(Number(materials[t.key]))} ${t.label.toLowerCase()}`)
+function summaryOf(types, counts) {
+  if (!counts) return null
+  const parts = types
+    .filter((t) => Number(counts[t.key]) > 0)
+    .map((t) => `${Math.floor(Number(counts[t.key]))} ${t.label.toLowerCase()}`)
   return parts.length ? parts.join(', ') : null
+}
+
+export function cartonSummary(materials) {
+  return summaryOf(CARTON_TYPES, materials)
+}
+
+export function supplySummary(supplies) {
+  return summaryOf(SUPPLY_TYPES, supplies)
 }
 
 // The six things a unit needs before it is genuinely packed, in the order a

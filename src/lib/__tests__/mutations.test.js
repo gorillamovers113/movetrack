@@ -6,6 +6,7 @@ import {
   matchContainerByNumber, surnameOf,
   STICKER_COLORS, stickerHex, inventoryRangeLabel, inventoryRangeError, overlappingUnits,
   CARTON_TYPES, sumCartons, cartonsFromForm, cartonSummary,
+  SUPPLY_TYPES, sumSupplies, suppliesFromForm, supplySummary,
   PACKING_STEPS, REQUIRED_STEPS, packingChecklist, packingProgress, nextPackingStep, packingComplete, wouldCompletePacking,
 } from '../mutations.js'
 
@@ -548,5 +549,36 @@ describe('any order, but all seven to finish', () => {
     const six = KEYS.slice(0, 6)
     expect(wouldCompletePacking(withSteps(six), [], 'notes')).toBe(false)
     expect(packingComplete(withSteps(KEYS), [])).toBe(true)
+  })
+})
+
+// Boxes and materials are counted separately on purpose: a roll of tape is not
+// a carton, and must never inflate the number billing and restock read.
+describe('materials, separate from boxes', () => {
+  it('is Casey\'s list from day one', () => {
+    expect(CARTON_TYPES.map((t) => t.key)).toEqual(['small', 'medium', 'large', 'dishpack', 'wardrobe'])
+    expect(SUPPLY_TYPES.map((t) => t.key)).toEqual(['paper', 'paperpad', 'tape', 'plasticwrap'])
+  })
+
+  it('totals and summarises materials on their own', () => {
+    const sup = { paper: 2, tape: 3, plasticwrap: 1 }
+    expect(sumSupplies(sup)).toBe(6)
+    expect(supplySummary(sup)).toBe('2 packing paper, 3 tape, 1 plastic wrap')
+  })
+
+  it('a material never counts as a box, and vice versa', () => {
+    expect(sumCartons({ tape: 99, paper: 99 })).toBe(0)
+    expect(sumSupplies({ small: 99, wardrobe: 99 })).toBe(0)
+  })
+
+  it('reads the supply_ fields off the form, dropping blanks and zeroes', () => {
+    expect(suppliesFromForm({ supply_tape: '3', supply_paper: '', supply_paperpad: '0', supply_plasticwrap: '2' }))
+      .toEqual({ tape: 3, plasticwrap: 2 })
+  })
+
+  it('handles a unit that recorded no materials at all', () => {
+    expect(sumSupplies(undefined)).toBe(0)
+    expect(supplySummary(null)).toBe(null)
+    expect(suppliesFromForm({})).toEqual({})
   })
 })

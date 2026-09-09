@@ -218,6 +218,25 @@ describe('units — packer', () => {
       )
     })
 
+    // Boxes and the non-box materials (tape, paper, wrap) are separate fields.
+    it('boxes and materials together mid-packing allowed', async () => {
+      await seed('units', 'u1', baseUnit({ stage: 'packing' }))
+      await assertSucceeds(
+        updateDoc(doc(dbAs(PACKER), 'units', 'u1'), {
+          'steps.materials': { uid: PACKER, userName: 'Test packer-1', at: 1 },
+          materials: { small: 10, wardrobe: 3 },
+          supplies: { paper: 2, tape: 3, plasticwrap: 1 },
+        })
+      )
+    })
+
+    it('a mover may not write packing materials', async () => {
+      await seed('units', 'u1', baseUnit({ stage: 'packing' }))
+      await assertFails(
+        updateDoc(doc(dbAs(MOVER), 'units', 'u1'), { supplies: { tape: 1 } })
+      )
+    })
+
     it('a second packer may tick an item on a unit someone else started', async () => {
       await seed('units', 'u1', baseUnit({ stage: 'packing', crew: { packers: [PACKER], movers: [] } }))
       await assertSucceeds(

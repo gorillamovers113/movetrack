@@ -189,6 +189,7 @@ export function StoreProvider({ children }) {
         if (Number.isInteger(p.inventoryTo)) patch.inventoryTo = p.inventoryTo
         if (Number.isInteger(p.pieces)) patch.pieces = p.pieces
         if (p.materials && Object.keys(p.materials).length) patch.materials = p.materials
+        if (p.supplies && Object.keys(p.supplies).length) patch.supplies = p.supplies
 
         // Which items are done once this one lands. Built from the checklist
         // rather than from the raw steps map so a unit part-packed under the
@@ -277,6 +278,7 @@ export function StoreProvider({ children }) {
             inventoryTo: patch.inventoryTo != null ? patch.inventoryTo : unit.inventoryTo,
             pieces: patch.pieces != null ? patch.pieces : unit.pieces,
             materials: patch.materials || unit.materials,
+            supplies: patch.supplies || unit.supplies,
             media: [...((unit && unit.media) || []), ...p.media],
             steps: { ...((unit && unit.steps) || {}), [key]: { uid: currentUser.uid, userName: currentUser.name, at: now } },
           }
@@ -343,6 +345,7 @@ export function StoreProvider({ children }) {
         // How many of each carton went in. Feeds materials billing and
         // restock, and is the only record of it once the truck leaves.
         if (p.materials && Object.keys(p.materials).length) patch.materials = p.materials
+        if (p.supplies && Object.keys(p.supplies).length) patch.supplies = p.supplies
         await updateDoc(doc(db, 'units', p.unitId), patch)
         const range = Number.isInteger(p.inventoryFrom) && Number.isInteger(p.inventoryTo)
           ? `, stickers ${p.inventoryFrom}-${p.inventoryTo}` : ''

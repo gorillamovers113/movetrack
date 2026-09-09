@@ -28,8 +28,8 @@ describe('sheet backup rows', () => {
     expect(row[SHEET_COLUMNS.indexOf('Sticker colour')]).toBe('Pink')
     expect(row[SHEET_COLUMNS.indexOf('Sticker numbers')]).toBe('1-9')
     expect(row[SHEET_COLUMNS.indexOf('Pieces')]).toBe(45)
-    expect(row[SHEET_COLUMNS.indexOf('Cartons')]).toBe(64)
-    expect(String(row[SHEET_COLUMNS.indexOf('Carton breakdown')])).toContain('20')
+    expect(row[SHEET_COLUMNS.indexOf('Boxes')]).toBe(64)
+    expect(String(row[SHEET_COLUMNS.indexOf('Box breakdown')])).toContain('20')
   })
 
   it('counts only the photos belonging to that item', () => {
@@ -73,5 +73,35 @@ describe('sheet backup rows', () => {
   it('does nothing when no sheet is configured', async () => {
     await expect(pushRows('', [[1]])).resolves.toMatchObject({ sent: false })
     await expect(pushRows('https://x', [])).resolves.toMatchObject({ sent: false })
+  })
+})
+
+// Materials the crew asked for after day one: tape and paper are counted, but
+// never as boxes.
+describe('materials on the backup row', () => {
+  const unit = {
+    id: 'u1', number: '906', tenant: 'Maria Ochoa', floor: 9,
+    materials: { small: 15 },
+    supplies: { paper: 2, tape: 3, plasticwrap: 1 },
+  }
+
+  it('reports materials in their own columns', () => {
+    const row = stepRow({ unit, stepKey: 'materials', userName: 'Liv', ts: 1 })
+    expect(row[SHEET_COLUMNS.indexOf('Materials')]).toBe(6)
+    const breakdown = String(row[SHEET_COLUMNS.indexOf('Material breakdown')])
+    expect(breakdown).toContain('2 packing paper')
+    expect(breakdown).toContain('3 tape')
+    expect(breakdown).toContain('1 plastic wrap')
+  })
+
+  it('never folds materials into the box count', () => {
+    const row = stepRow({ unit, stepKey: 'materials', userName: 'Liv', ts: 1 })
+    expect(row[SHEET_COLUMNS.indexOf('Boxes')]).toBe(15)
+  })
+
+  it('leaves the columns blank when nothing was used', () => {
+    const row = stepRow({ unit: { id: 'x', number: '1', materials: { small: 1 } }, stepKey: 'materials', ts: 1 })
+    expect(row[SHEET_COLUMNS.indexOf('Materials')]).toBe('')
+    expect(row[SHEET_COLUMNS.indexOf('Material breakdown')]).toBe('')
   })
 })

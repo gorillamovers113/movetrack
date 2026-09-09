@@ -3,7 +3,7 @@ import { STAGES, stageOf } from '../seed.js'
 import { useStore, canAct, filesToMedia, fmtTime, CONT_STATUS } from '../store.jsx'
 import { Modal, Lightbox, Uploader, EventRow, Avatar, StagePill } from '../ui.jsx'
 import { captureMedia } from '../lib/upload.js'
-import { surnameOf, STICKER_COLORS, inventoryRangeError, overlappingUnits, inventoryRangeLabel, stickerHex, CARTON_TYPES, cartonsFromForm, sumCartons, cartonSummary, packingChecklist, packingProgress, packingComplete, nextPackingStep, PACKING_STEPS, readyToReceive } from '../lib/mutations.js'
+import { surnameOf, STICKER_COLORS, inventoryRangeError, overlappingUnits, inventoryRangeLabel, stickerHex, CARTON_TYPES, cartonsFromForm, sumCartons, cartonSummary, SUPPLY_TYPES, suppliesFromForm, sumSupplies, supplySummary, packingChecklist, packingProgress, packingComplete, nextPackingStep, PACKING_STEPS, readyToReceive } from '../lib/mutations.js'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import ReportOverflowButton from '../components/ReportOverflowButton.jsx'
 import LoadOutCard from '../components/LoadOutCard.jsx'
@@ -78,6 +78,10 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
   // is the exact mix-up the numbers prevent, but the packer is standing in
   // the apartment and knows better than we do. Declared above the !unit
   // guard: a hook after an early return changes hook order between renders.
+  const supplyTotal = useMemo(
+    () => sumSupplies(Object.fromEntries(SUPPLY_TYPES.map((t) => [t.key, form[`supply_${t.key}`]]))),
+    [form],
+  )
   const cartonTotal = useMemo(
     () => sumCartons(Object.fromEntries(CARTON_TYPES.map((t) => [t.key, form[`carton_${t.key}`]]))),
     [form],
@@ -194,6 +198,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
     if (stepKey === 'materials') {
       if (cartonTotal < 1) return toast('Enter how many of each carton you used.')
       p.materials = cartonsFromForm(form)
+      p.supplies = suppliesFromForm(form)
     }
     if (stepKey === 'packed') {
       if (!pending.some((m) => m.kind === 'photo')) return toast('Add at least one photo of the unit packed and ready.')
@@ -501,9 +506,13 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
               <dt>Phone</dt><dd>{unit.phone}</dd>
               <dt>Floor</dt><dd>{unit.floor}</dd>
               <dt>Pieces packed</dt><dd>{unit.pieces ?? '-'}</dd>
-              <dt>Cartons</dt>
+              <dt>Boxes</dt>
               <dd>{cartonSummary(unit.materials)
                 ? `${sumCartons(unit.materials)} · ${cartonSummary(unit.materials)}`
+                : '-'}</dd>
+              <dt>Materials</dt>
+              <dd>{supplySummary(unit.supplies)
+                ? `${sumSupplies(unit.supplies)} · ${supplySummary(unit.supplies)}`
                 : '-'}</dd>
               <dt>Stickers</dt>
               <dd>{unit.stickerColor
@@ -649,21 +658,41 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
           )}
 
           {stepKey === 'materials' && (
-            <div className="field">
-              <label>How many of each did you use?{cartonTotal > 0 ? ` · ${cartonTotal} cartons` : ''}</label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(132px, 1fr))', gap: 8 }}>
-                {CARTON_TYPES.map((t) => (
-                  <label key={t.key} style={{ display: 'block' }}>
-                    <span className="muted" style={{ display: 'block', fontSize: 12.5, marginBottom: 3 }}>{t.label}</span>
-                    <input
-                      className="input" type="number" min="0" inputMode="numeric" placeholder="0"
-                      value={form[`carton_${t.key}`] || ''}
-                      onChange={(e) => setForm({ ...form, [`carton_${t.key}`]: e.target.value })}
-                    />
-                  </label>
-                ))}
+            <>
+              <div className="field">
+                <label>Boxes used{cartonTotal > 0 ? ` · ${cartonTotal}` : ''}</label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(132px, 1fr))', gap: 8 }}>
+                  {CARTON_TYPES.map((t) => (
+                    <label key={t.key} style={{ display: 'block' }}>
+                      <span className="muted" style={{ display: 'block', fontSize: 12.5, marginBottom: 3 }}>{t.label}</span>
+                      <input
+                        className="input" type="number" min="0" inputMode="numeric" placeholder="0"
+                        value={form[`carton_${t.key}`] || ''}
+                        onChange={(e) => setForm({ ...form, [`carton_${t.key}`]: e.target.value })}
+                      />
+                    </label>
+                  ))}
+                </div>
               </div>
-            </div>
+              <div className="field">
+                <label>Other materials{supplyTotal > 0 ? ` · ${supplyTotal}` : ''}</label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(132px, 1fr))', gap: 8 }}>
+                  {SUPPLY_TYPES.map((t) => (
+                    <label key={t.key} style={{ display: 'block' }}>
+                      <span className="muted" style={{ display: 'block', fontSize: 12.5, marginBottom: 3 }}>{t.label}</span>
+                      <input
+                        className="input" type="number" min="0" inputMode="numeric" placeholder="0"
+                        value={form[`supply_${t.key}`] || ''}
+                        onChange={(e) => setForm({ ...form, [`supply_${t.key}`]: e.target.value })}
+                      />
+                    </label>
+                  ))}
+                </div>
+                <div className="muted" style={{ marginTop: 6, fontSize: 12.5 }}>
+                  Counted separately from boxes, so tape and paper never inflate the carton total.
+                </div>
+              </div>
+            </>
           )}
 
           {stepKey === 'packed' && (
