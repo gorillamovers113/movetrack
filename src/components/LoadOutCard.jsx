@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import { useStore, fmtTime } from '../store.jsx'
 import { Modal } from '../ui.jsx'
-import { captureMedia } from '../lib/upload.js'
+import { captureMedia, uploadFile } from '../lib/upload.js'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import {
   LOADING_STEPS, loadingChecklist, loadingProgress, loadingComplete,
@@ -17,8 +17,9 @@ const SAVE_ERROR = "Couldn't save that. Check your signal and try again."
  * unit and each needs its own independent state. Uploading as soon as the
  * shot is taken means the write at the end is a URL, not an image, so a box
  * gets logged in the time it takes to tap Save. */
-function PhotoSlot({ label, path, url, setUrl, hint }) {
+function PhotoSlot({ label, path, url, setUrl, hint, setKind }) {
   const [preview, setPreview] = useState(null)
+  const [isVideo, setIsVideo] = useState(false)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
 
@@ -26,12 +27,17 @@ function PhotoSlot({ label, path, url, setUrl, hint }) {
 
   const take = async (file) => {
     setErr(null)
+    setIsVideo(file.type.startsWith('video'))
     setPreview(URL.createObjectURL(file))
     setUrl(null)
     setBusy(true)
     try {
-      const res = await captureMedia(file, path())
-      setUrl(res.url)
+      const video = file.type.startsWith('video')
+      if (setKind) setKind(video ? 'video' : 'photo')
+      const url = video
+        ? await uploadFile(file, path('mp4'))
+        : (await captureMedia(file, path('jpg'))).url
+      setUrl(url)
     } catch (e) {
       setErr(e.message || 'Capture failed, try again.')
     } finally {
@@ -44,12 +50,14 @@ function PhotoSlot({ label, path, url, setUrl, hint }) {
       <label>{label}</label>
       <label className="dropzone camera-capture" style={{ display: 'block' }}>
         <input
-          type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
+          type="file" accept="image/*,video/*" capture="environment" style={{ display: 'none' }}
           onChange={(e) => { const f = e.target.files[0]; if (f) take(f); e.target.value = '' }}
         />
         {preview ? (
           <div className="inv-preview">
-            <img src={preview} alt={label} className="inv-thumb" />
+            {isVideo
+              ? <video src={preview} className="inv-thumb" controls playsInline />
+              : <img src={preview} alt={label} className="inv-thumb" />}
             <div className="muted" style={{ marginTop: 8 }}>
               {busy ? 'Saving…' : url ? '✓ Saved, tap to retake' : err || 'Tap to retake'}
             </div>
@@ -72,6 +80,7 @@ export default function LoadOutCard({ unit, toast }) {
   const [form, setForm] = useState({})
   const [busy, setBusy] = useState(false)
   const [unitPhoto, setUnitPhoto] = useState(null)
+  const [unitPhotoKind, setUnitPhotoKind] = useState('photo')
   const [openUrl, setOpenUrl] = useState(null)
   const [closedUrl, setClosedUrl] = useState(null)
 
@@ -101,11 +110,11 @@ export default function LoadOutCard({ unit, toast }) {
 
   const saveStep = () => {
     if (modal === 'load_unit_photo') {
-      if (!unitPhoto) return toast('Take a photo of the unit, fully packed.')
+      if (!unitPhoto) return toast('Add a photo or video of the unit, fully packed.')
       return run(
         () => dispatch({ type: 'completeLoadStep', p: {
           unitId: unit.id, key: 'load_unit_photo',
-          media: [{ id: `lu-${Date.now()}`, kind: 'photo', url: unitPhoto, label: 'packed unit', phase: 'load_unit_photo' }],
+          media: [{ id: `lu-${Date.now()}`, kind: unitPhotoKind, url: unitPhoto, label: 'packed unit', phase: 'load_unit_photo' }],
         } }),
         'Unit photo saved ✓',
       )
@@ -139,8 +148,8 @@ export default function LoadOutCard({ unit, toast }) {
     if (modal === 'box') {
       const err = boxNumberError(form.box, unit)
       if (err) return toast(err)
-      if (!openUrl) return toast('Take a photo of the box with the door open.')
-      if (!closedUrl) return toast('Take a photo of the box with the door closed.')
+      if (!openUrl) return toast('Add a photo or video of the box with the door open.')
+      if (!closedUrl) return toast('Add a photo or video of the box with the door closed.')
       return run(
         () => dispatch({ type: 'logBox', p: { unitId: unit.id, number: form.box, openUrl, closedUrl } }),
         `Box ${normalizeBoxNumber(form.box)} logged ✓`,
@@ -154,7 +163,7 @@ export default function LoadOutCard({ unit, toast }) {
   )
 
   const label = LOADING_STEPS.find((s) => s.key === modal)
-  const path = (kind) => () => `units/${unit.id}/${kind}/${Date.now()}-${currentUser.uid}.jpg`
+  const path = (kind) => (ext) => `units/${unit.id}/${kind}/${Date.now()}-${currentUser.uid}.${ext || 'jpg'}`
 
   return (
     <>
@@ -247,8 +256,8 @@ export default function LoadOutCard({ unit, toast }) {
           {modal === 'load_unit_photo' && (
             <PhotoSlot
               label="The unit, fully packed and ready to go"
-              hint="Tap to photograph the packed unit"
-              path={path('load')} url={unitPhoto} setUrl={setUnitPhoto}
+              hint="Tap for a photo or video of the packed unit"
+              path={path('load')} url={unitPhoto} setUrl={setUnitPhoto} setKind={setUnitPhotoKind}
             />
           )}
 
@@ -304,12 +313,12 @@ export default function LoadOutCard({ unit, toast }) {
               </div>
               <PhotoSlot
                 label="Doors open, showing what went in"
-                hint="Tap to photograph the box, doors open"
+                hint="Tap for a photo or video, doors open"
                 path={path('box-open')} url={openUrl} setUrl={setOpenUrl}
               />
               <PhotoSlot
                 label="Doors closed"
-                hint="Tap to photograph the box, doors closed"
+                hint="Tap for a photo or video, doors closed"
                 path={path('box-closed')} url={closedUrl} setUrl={setClosedUrl}
               />
             </>

@@ -17,7 +17,7 @@ describe('sheet backup rows', () => {
     expect(row).toHaveLength(SHEET_COLUMNS.length)
     expect(row[SHEET_COLUMNS.indexOf('Unit')]).toBe('906')
     expect(row[SHEET_COLUMNS.indexOf('Tenant')]).toBe('Maria Ochoa')
-    expect(row[SHEET_COLUMNS.indexOf('Item')]).toBe('Front door photo with the unit number')
+    expect(row[SHEET_COLUMNS.indexOf('Item')]).toBe('Front door with the unit number')
     expect(row[SHEET_COLUMNS.indexOf('Done by')]).toBe('Liv Post')
     expect(row[SHEET_COLUMNS.indexOf('Role')]).toBe('packer')
     expect(row[SHEET_COLUMNS.indexOf('Unit ID')]).toBe('unit-906')

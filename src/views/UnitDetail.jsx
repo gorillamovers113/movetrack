@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { STAGES, stageOf } from '../seed.js'
 import { useStore, canAct, filesToMedia, fmtTime, CONT_STATUS } from '../store.jsx'
 import { Modal, Lightbox, Uploader, EventRow, Avatar, StagePill } from '../ui.jsx'
-import { captureMedia } from '../lib/upload.js'
+import { captureMedia, uploadFile } from '../lib/upload.js'
 import { surnameOf, STICKER_COLORS, inventoryRangeError, overlappingUnits, inventoryRangeLabel, stickerHex, CARTON_TYPES, cartonsFromForm, sumCartons, cartonSummary, SUPPLY_TYPES, suppliesFromForm, sumSupplies, supplySummary, packingChecklist, packingProgress, packingComplete, nextPackingStep, PACKING_STEPS, readyToReceive } from '../lib/mutations.js'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import ReportOverflowButton from '../components/ReportOverflowButton.jsx'
@@ -44,6 +44,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
   // camera, resized + uploaded to Storage as soon as it's picked so the
   // upload runs while the packer is still filling in the piece count.
   const [invPreview, setInvPreview] = useState(null)
+  const [invIsVideo, setInvIsVideo] = useState(false)
   const [invUploading, setInvUploading] = useState(false)
   const [invUrl, setInvUrl] = useState(null)
   const [invError, setInvError] = useState(null)
@@ -52,6 +53,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
 
   const resetInventoryCapture = () => {
     setInvPreview(null)
+    setInvIsVideo(false)
     setInvUploading(false)
     setInvUrl(null)
     setInvError(null)
@@ -63,9 +65,16 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
     setInvUrl(null)
     setInvUploading(true)
     try {
-      const path = `units/${unitId}/inventory/${Date.now()}-${currentUser.uid}.jpg`
-      const { url } = await captureMedia(file, path)
+      // captureMedia resizes through a canvas, which decodes the file as an
+      // image and throws on an mp4. The slot accepts video, so video has to
+      // take the raw upload path instead.
+      const video = file.type.startsWith('video')
+      const stem = `units/${unitId}/inventory/${Date.now()}-${currentUser.uid}`
+      const url = video
+        ? await uploadFile(file, `${stem}.mp4`)
+        : (await captureMedia(file, `${stem}.jpg`)).url
       setInvUrl(url)
+      setInvIsVideo(video)
     } catch (err) {
       setInvError(err.message || 'Capture failed, try again.')
     } finally {
@@ -170,7 +179,9 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
     // something belonging to a different item, which is the whole point of
     // splitting them: the door photo saves at the door, not at the end.
     if (stepKey === 'door') {
-      if (!pending.some((m) => m.kind === 'photo')) return toast('Take the front door photo showing the unit number.')
+      // A video counts. The crew shot a walkthrough on day one and were told
+      // to add a still as well, so unit 902 has two photos of somebody's legs.
+      if (pending.length === 0) return toast('Add a photo or video of the front door showing the unit number.')
       p.media = pending.map((m) => ({ ...m, phase: 'door', label: m.label || 'front door' }))
     }
     if (stepKey === 'rooms') {
@@ -184,7 +195,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
     if (stepKey === 'inventory') {
       if (invUploading) return toast('Still uploading the inventory sheet photo, wait a moment and try again.')
       if (!invUrl) return toast('Take a photo of the paper inventory sheet.')
-      p.media = [{ id: `inv-${Date.now()}`, kind: 'photo', url: invUrl, label: 'inventory', phase: 'inventory' }]
+      p.media = [{ id: `inv-${Date.now()}`, kind: invIsVideo ? 'video' : 'photo', url: invUrl, label: 'inventory', phase: 'inventory' }]
     }
     if (stepKey === 'numbers') {
       const rangeErr = inventoryRangeError(form.invFrom, form.invTo)
@@ -201,7 +212,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
       p.supplies = suppliesFromForm(form)
     }
     if (stepKey === 'packed') {
-      if (!pending.some((m) => m.kind === 'photo')) return toast('Add at least one photo of the unit packed and ready.')
+      if (pending.length === 0) return toast('Add a photo or video of the unit packed and ready.')
       p.media = pending.map((m) => ({ ...m, phase: 'packed', label: m.label || 'packed' }))
     }
     if (stepKey === 'notes') {
@@ -231,12 +242,12 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
     // are the two halves of the evidence a damage claim turns on.
     const needsPhoto = ['startPacking', 'finishPacking', 'loadUnit', 'loadForReturn', 'unloadReturn', 'unpackUnit'].includes(action.key)
     if (action.key === 'startPacking') {
-      if (!pendingDoor.some((m) => m.kind === 'photo')) return toast('Take the front door photo showing the unit number.')
+      if (pendingDoor.length === 0) return toast('Add a photo or video of the front door showing the unit number.')
       if (pendingRooms.length === 0) return toast('Add photos or video of the rooms before anything moves.')
       if (!form.stickerColor) return toast('Pick the inventory sticker colour for this unit.')
-    } else if (needsPhoto && !media.some((m) => m.kind === 'photo')) {
-      if (action.key === 'finishPacking') return toast('Add at least one photo of the unit packed and ready.')
-      return toast('At least one photo is required to complete this step, the photo record is the whole point.')
+    } else if (needsPhoto && media.length === 0) {
+      if (action.key === 'finishPacking') return toast('Add a photo or video of the unit packed and ready.')
+      return toast('At least one photo or video is required to complete this step, the record is the whole point.')
     }
     // Client-side validation up front, same as before: nothing here talks to
     // Firestore, so it stays outside the busy/try below.
@@ -275,7 +286,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
         status = await submitWrite(dispatch({ type: 'startPacking', p: { unitId, stickerColor: form.stickerColor, media: beforeMedia } }))
       }
       if (action.key === 'finishPacking') {
-        const invMedia = [{ id: `inv-${Date.now()}`, kind: 'photo', url: invUrl, label: 'inventory', phase: 'inventory', uid: currentUser.uid, ts: Date.now() }]
+        const invMedia = [{ id: `inv-${Date.now()}`, kind: invIsVideo ? 'video' : 'photo', url: invUrl, label: 'inventory', phase: 'inventory', uid: currentUser.uid, ts: Date.now() }]
         // The inventory sheet plus whatever the packer shot of the finished unit.
         status = await submitWrite(dispatch({ type: 'finishPacking', p: {
           unitId, pieces: n,
@@ -575,9 +586,9 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
         >
           {stepKey === 'door' && (
             <div className="field">
-              <label>Front door, showing the unit number {pending.length > 0 && <span className="muted">✓ {pending.length}</span>}</label>
+              <label>Front door with the unit number, photo or video {pending.length > 0 && <span className="muted">✓ {pending.length}</span>}</label>
               <Uploader
-                label={pending.length ? 'Retake or add another' : 'Photograph the front door'}
+                label={pending.length ? 'Add another' : 'Photo or video of the front door'}
                 onFiles={async (files) => setPending([...pending, ...(await filesToMedia(files, 'front door', `units/${unitId}/door`))])}
               />
             </div>
@@ -617,12 +628,14 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
               <label>Photo of the paper inventory sheet</label>
               <label className="dropzone camera-capture" style={{ display: 'block' }}>
                 <input
-                  type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
+                  type="file" accept="image/*,video/*" capture="environment" style={{ display: 'none' }}
                   onChange={(e) => { const f = e.target.files[0]; if (f) captureInventoryPhoto(f); e.target.value = '' }}
                 />
                 {invPreview ? (
                   <div className="inv-preview">
-                    <img src={invPreview} alt="Inventory sheet" className="inv-thumb" />
+                    {invIsVideo
+                      ? <video src={invPreview} className="inv-thumb" controls playsInline />
+                      : <img src={invPreview} alt="Inventory sheet" className="inv-thumb" />}
                     <div className="muted" style={{ marginTop: 8 }}>
                       {invUploading ? 'Saving…' : invUrl ? '✓ Photo saved, tap to retake' : invError || 'Tap to retake'}
                     </div>
@@ -699,7 +712,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
             <div className="field">
               <label>Everything packed and ready to go {pending.length > 0 && <span className="muted">✓ {pending.length}</span>}</label>
               <Uploader
-                label={pending.length ? 'Add another' : 'Photos or video, packed and ready'}
+                label={pending.length ? 'Add another' : 'Photo or video, packed and ready'}
                 onFiles={async (files) => setPending([...pending, ...(await filesToMedia(files, 'packed', `units/${unitId}/packed`))])}
               />
               {progress.done === PACKING_STEPS.length - 1 && (
@@ -745,7 +758,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
             <div className="field">
               <label>1. Front door, showing the unit number {pendingDoor.length > 0 && <span className="muted">✓ {pendingDoor.length}</span>}</label>
               <Uploader
-                label={pendingDoor.length ? 'Retake or add another' : 'Photograph the front door'}
+                label={pendingDoor.length ? 'Add another' : 'Photo or video of the front door'}
                 onFiles={async (files) => setPendingDoor([...pendingDoor, ...(await filesToMedia(files, 'front door', `units/${unitId}/door`))])}
               />
             </div>
@@ -782,12 +795,14 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
                 <label>4. Photo of the paper inventory sheet</label>
                 <label className="dropzone camera-capture" style={{ display: 'block' }}>
                   <input
-                    type="file" accept="image/*" capture="environment" style={{ display: 'none' }}
+                    type="file" accept="image/*,video/*" capture="environment" style={{ display: 'none' }}
                     onChange={(e) => { const f = e.target.files[0]; if (f) captureInventoryPhoto(f); e.target.value = '' }}
                   />
                   {invPreview ? (
                     <div className="inv-preview">
-                      <img src={invPreview} alt="Inventory sheet" className="inv-thumb" />
+                      {invIsVideo
+                      ? <video src={invPreview} className="inv-thumb" controls playsInline />
+                      : <img src={invPreview} alt="Inventory sheet" className="inv-thumb" />}
                       <div className="muted" style={{ marginTop: 8 }}>
                         {invUploading ? 'Saving…' : invUrl ? '✓ Photo saved, tap to retake' : invError || 'Tap to retake'}
                       </div>

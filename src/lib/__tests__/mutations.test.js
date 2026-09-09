@@ -582,3 +582,30 @@ describe('materials, separate from boxes', () => {
     expect(suppliesFromForm({})).toEqual({})
   })
 })
+
+// A video is a complete record on its own. The crew shot a walkthrough on day
+// one and were told to add a still as well, which is how unit 902 ended up
+// with two photos of somebody's legs.
+describe('video counts as evidence', () => {
+  const tick = (name, at) => ({ uid: 'u', userName: name, at })
+
+  it('a step is done whether the evidence is a photo or a video', () => {
+    const withVideo = { media: [{ phase: 'packed', kind: 'video', userName: 'Liv', ts: 5 }] }
+    const withPhoto = { media: [{ phase: 'packed', kind: 'photo', userName: 'Liv', ts: 5 }] }
+    for (const u of [withVideo, withPhoto]) {
+      expect(packingChecklist(u, []).find((s) => s.key === 'packed').done).toBe(true)
+    }
+  })
+
+  it('the door item accepts a video too', () => {
+    const u = { media: [{ phase: 'door', kind: 'video', userName: 'Liv', ts: 1 }] }
+    expect(packingChecklist(u, []).find((s) => s.key === 'door')).toMatchObject({ done: true, by: 'Liv' })
+  })
+
+  it('no label promises a photo where a video is accepted', () => {
+    for (const key of ['door', 'rooms', 'packed']) {
+      const step = PACKING_STEPS.find((s) => s.key === key)
+      expect(step.label.toLowerCase()).not.toMatch(/\bphoto\b(?!s or video)/)
+    }
+  })
+})

@@ -256,7 +256,7 @@ export function supplySummary(supplies) {
 // "done" flag someone could tick. Media carries a `phase` so a front-door
 // shot is distinguishable from a room shot from the packed-and-ready shot.
 export const PACKING_STEPS = [
-  { key: 'door', label: 'Front door photo with the unit number' },
+  { key: 'door', label: 'Front door with the unit number' },
   { key: 'rooms', label: 'Photos or video of the rooms' },
   { key: 'sticker', label: 'Inventory sticker colour' },
   { key: 'inventory', label: 'Inventory sheet photo' },
