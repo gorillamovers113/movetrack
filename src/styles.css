@@ -254,7 +254,7 @@ textarea.input { min-height: 0; }
 .modal .sub { color: var(--ink-2); font-size: 13.5px; line-height: 1.45; margin-bottom: 16px; }
 .lightbox { position: fixed; inset: 0; background: rgba(10, 11, 14, 0.92); z-index: 60; display: grid; place-items: center; padding: 30px; cursor: zoom-out; }
 .lightbox img, .lightbox video { max-width: 100%; max-height: 85vh; border-radius: 12px; }
-.lightbox .cap { position: fixed; bottom: 22px; left: 0; right: 0; text-align: center; color: #cdd3dc; font-size: 14px; }
+.lightbox .cap { pointer-events: none; position: fixed; bottom: 22px; left: 0; right: 0; text-align: center; color: #cdd3dc; font-size: 14px; }
 
 .dropzone {
   border: 2px dashed var(--line); border-radius: 12px; padding: 18px; text-align: center;
@@ -354,7 +354,17 @@ textarea.input { min-height: 0; }
 a.linkish, .linkish { color: #b45309; font-weight: 600; cursor: pointer; text-decoration: none; }
 @media (hover: hover) and (pointer: fine) { .linkish:hover { text-decoration: underline; } }
 
+/* THE "it takes two or three taps" BUG.
+   The toast is fixed, z-index 70, and sits bottom-centre for 2.6 seconds after
+   EVERY action. Measured on a phone-width viewport it covered half the screen
+   width and overlapped the bottom nav, and elementFromPoint confirmed a tap in
+   that area hit the toast rather than the button underneath. So finishing a
+   checklist item armed a dead zone over the next thing you were about to
+   press: first tap swallowed, second maybe, third finally lands.
+   A toast is purely informational and has nothing to click, so it must never
+   take a pointer. */
 .toast {
+  pointer-events: none;
   position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 70;
   background: var(--ink); color: #fff; border-radius: 12px; padding: 12px 20px; font-size: 14px; font-weight: 600;
   box-shadow: var(--shadow-lg); animation: toast-in 0.25s ease;
@@ -413,7 +423,7 @@ a.linkish, .linkish { color: #b45309; font-weight: 600; cursor: pointer; text-de
   .bottom-nav button:active { background: var(--dark-2); }
   .bottom-nav button .ico { font-size: 19px; }
   .kpis { grid-template-columns: repeat(2, 1fr); }
-  .toast { bottom: calc(70px + env(safe-area-inset-bottom)); max-width: calc(100vw - 32px); }
+  .toast { bottom: calc(86px + env(safe-area-inset-bottom)); max-width: calc(100vw - 32px); }
 }
 @media (min-width: 901px) { .topbar-mobile { display: none; } }
 
