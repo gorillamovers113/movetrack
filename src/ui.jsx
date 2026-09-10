@@ -127,7 +127,14 @@ export function EventRow({ e, onOpenMedia, linkUnit, linkContainer, showTarget =
       <div className="tl-body">
         <div className="tl-action">{e.action}</div>
         <div className="tl-meta">
-          <b>{e.userName}</b> · {e.role} · {fmtTime(e.ts)} <span style={{ opacity: 0.7 }}>({fmtAgo(e.ts)})</span>
+          {/* A note written after the fact carries the day it is ABOUT as well
+              as the moment it was typed. Both are shown: the timeline reads in
+              the order things happened, and nothing pretends to have been
+              written at a time it was not. */}
+          <b>{e.userName}</b> · {e.role} · {fmtTime(e.occurredAt || e.ts)}
+          {e.occurredAt
+            ? <span style={{ opacity: 0.7 }}> (written {fmtTime(e.ts)})</span>
+            : <span style={{ opacity: 0.7 }}> ({fmtAgo(e.ts)})</span>}
           {showTarget && e.unitId && linkUnit && <> · <span className="linkish" onClick={() => linkUnit(e.unitId)}>unit</span></>}
           {showTarget && e.containerId && linkContainer && <> · <span className="linkish" onClick={() => linkContainer(e.containerId)}>container</span></>}
         </div>

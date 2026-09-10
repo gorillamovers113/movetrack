@@ -83,7 +83,15 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
     }
   }
 
-  const events = useMemo(() => state.events.filter((e) => e.unitId === unitId).sort((a, b) => b.ts - a.ts), [state.events, unitId])
+  // Ordered by when things HAPPENED, not when they were typed, so a note added
+  // the next morning about yesterday sits with yesterday's work instead of
+  // floating to the top of the unit's history out of context.
+  const events = useMemo(
+    () => state.events
+      .filter((e) => e.unitId === unitId)
+      .sort((a, b) => (b.occurredAt || b.ts) - (a.occurredAt || a.ts)),
+    [state.events, unitId],
+  )
   // Warn, never block: two units sharing sticker numbers on the same colour
   // is the exact mix-up the numbers prevent, but the packer is standing in
   // the apartment and knows better than we do. Declared above the !unit

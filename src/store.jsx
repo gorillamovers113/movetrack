@@ -961,6 +961,19 @@ export function StoreProvider({ children }) {
         const kinds = p.media.some((m) => m.kind === 'video') ? (p.media.every((m) => m.kind === 'video') ? 'video' + (n > 1 ? 's' : '') : 'photos & video') : 'photo' + (n > 1 ? 's' : '')
         return ev('media', `Added ${n} ${kinds}${p.note ? ', ' + p.note : ''} (unit ${unit.number})`, { unitId: unit.id, media: p.media })
       }
+      case 'setNoteDate': {
+        // Admin-only annotation: which day a note is ABOUT. Never touches who
+        // wrote it or when they wrote it, both of which stay exactly as
+        // recorded. It only lets a note added after the fact sit in the right
+        // place in the unit's history.
+        if (currentUser.role !== 'admin') throw new Error('Only the admin can date a note.')
+        await updateDoc(doc(db, 'events', p.eventId), {
+          occurredAt: p.occurredAt,
+          occurredSetBy: currentUser.uid,
+          occurredSetAt: Date.now(),
+        })
+        return
+      }
       case 'addNote': {
         // Only attach containerId/unitId when truthy so a discrepancy note
         // with no real container/unit ref (e.g. a blind-check mismatch)
