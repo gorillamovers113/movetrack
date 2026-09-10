@@ -641,3 +641,73 @@ describe('starting a second unit while one is open', () => {
     ).resolves.not.toThrow()
   })
 })
+
+/* Putting a photo back on the apartment it was taken in. */
+describe('moving a photo to the right unit', () => {
+  const shotOn = (id, over = {}) => ({ id, kind: 'photo', url: `${id}.jpg`, label: 'packed', phase: 'packed', uid: PACKER.uid, userName: PACKER.name, ts: 1000, ...over })
+  const A = { ...UNIT, id: 'unit-1', number: '906', media: [shotOn('m1'), shotOn('m2', { kind: 'video' })] }
+  const B = { ...UNIT, id: 'unit-2', number: '902', media: [shotOn('m3')] }
+  const seedBoth = async () => {
+    await setDoc(doc(db, 'units', 'unit-1'), A)
+    await setDoc(doc(db, 'units', 'unit-2'), B)
+  }
+  const unitRow = async (id) => (await rows('units')).find((u) => u.id === id)
+
+  it('takes it off one unit and puts it on the other, unchanged', async () => {
+    await seedBoth()
+    await run(ADMIN, { type: 'adminMoveMedia', p: { mediaId: 'm1', fromUnitId: 'unit-1', toUnitId: 'unit-2' } }, makeState({ units: [A, B] }))
+
+    expect((await unitRow('unit-1')).media.map((m) => m.id)).toEqual(['m2'])
+    const moved = (await unitRow('unit-2')).media.find((m) => m.id === 'm1')
+    // Authorship and time are true and must survive the move untouched.
+    expect(moved).toMatchObject({ userName: PACKER.name, uid: PACKER.uid, ts: 1000, phase: 'packed' })
+  })
+
+  it('logs the move on the receiving unit', async () => {
+    await seedBoth()
+    await run(ADMIN, { type: 'adminMoveMedia', p: { mediaId: 'm2', fromUnitId: 'unit-1', toUnitId: 'unit-2' } }, makeState({ units: [A, B] }))
+    // Written straight to the collection in the same batch as the move, so it
+    // cannot land without the move landing too.
+    const logged = (await rows('events')).find((e) => e.action && e.action.includes('Moved a video'))
+    expect(logged.action).toMatch(/from unit 906 to unit 902/)
+    expect(logged.unitId).toBe('unit-2')
+    expect(logged.userName).toBe(ADMIN.name)
+  })
+
+  // The activity feed reads the event's own copy, so it has to move as well or
+  // the old unit keeps showing the other apartment's photos.
+  it('moves it on the owning event too, not just the unit', async () => {
+    await seedBoth()
+    await setDoc(doc(db, 'events', 'ev-a'), { unitId: 'unit-1', type: 'stage', step: 'packed', media: [shotOn('m1'), shotOn('m2')] })
+    await setDoc(doc(db, 'events', 'ev-b'), { unitId: 'unit-2', type: 'stage', step: 'packed', media: [shotOn('m3')] })
+    const evs = [
+      { id: 'ev-a', unitId: 'unit-1', type: 'stage', step: 'packed', media: [shotOn('m1'), shotOn('m2')] },
+      { id: 'ev-b', unitId: 'unit-2', type: 'stage', step: 'packed', media: [shotOn('m3')] },
+    ]
+    await run(ADMIN, { type: 'adminMoveMedia', p: { mediaId: 'm1', fromUnitId: 'unit-1', toUnitId: 'unit-2' } },
+      makeState({ units: [A, B], events: evs }))
+
+    const after = await rows('events')
+    expect(after.find((e) => e.id === 'ev-a').media.map((m) => m.id)).toEqual(['m2'])
+    expect(after.find((e) => e.id === 'ev-b').media.map((m) => m.id)).toEqual(['m3', 'm1'])
+  })
+
+  it('refuses to move it twice, or to the unit it is already on', async () => {
+    await seedBoth()
+    const state = makeState({ units: [A, B] })
+    await expect(run(ADMIN, { type: 'adminMoveMedia', p: { mediaId: 'nope', fromUnitId: 'unit-1', toUnitId: 'unit-2' } }, state))
+      .rejects.toThrow(/no longer on this unit/i)
+    await expect(run(ADMIN, { type: 'adminMoveMedia', p: { mediaId: 'm1', fromUnitId: 'unit-1', toUnitId: 'unit-1' } }, state))
+      .rejects.toThrow(/same unit/i)
+  })
+
+  it('is for the admin alone', async () => {
+    await seedBoth()
+    const state = makeState({ units: [A, B] })
+    for (const who of [PACKER, MOVER]) {
+      await expect(run(who, { type: 'adminMoveMedia', p: { mediaId: 'm1', fromUnitId: 'unit-1', toUnitId: 'unit-2' } }, state))
+        .rejects.toThrow(/only an admin/i)
+    }
+    expect((await unitRow('unit-1')).media).toHaveLength(2)
+  })
+})

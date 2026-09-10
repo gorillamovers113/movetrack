@@ -9,6 +9,7 @@ import { unitLabour, fmtDuration } from '../lib/reports.js'
 import ReportOverflowButton from '../components/ReportOverflowButton.jsx'
 import LoadOutCard from '../components/LoadOutCard.jsx'
 import UnitSummaryCard from '../components/UnitSummaryCard.jsx'
+import MediaFilingCard from '../components/MediaFilingCard.jsx'
 import { mayPack, mayLoad } from '../lib/roles.js'
 import ReceiveCard from '../components/ReceiveCard.jsx'
 import { crewOnUnit } from '../lib/reports.js'
@@ -463,6 +464,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
           {onReceiving && <ReceiveCard unit={unit} toast={toast} />}
 
           <UnitSummaryCard unit={unit} />
+          <MediaFilingCard unit={unit} />
 
           <div className="card" style={{ padding: '16px 20px', marginBottom: 14 }}>
             <div className="row" style={{ marginBottom: 6 }}>

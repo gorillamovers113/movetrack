@@ -1029,6 +1029,51 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
         await updateDoc(doc(db, 'units', p.unitId), patch)
         return ev('step', `Unit ${unit.number} \u00b7 ${step.label} corrected to "${value}"${matched ? ' \u2713' : ''}`, { unitId: unit.id, step: key })
       }
+      case 'adminMoveMedia': {
+        /* A photo filed against the wrong apartment.
+         *
+         * Liv had 906 and 902 open at once on 8 Sep and their packed photos
+         * ended up swapped. She could not say how, which is the point: the app
+         * asked which unit while she was standing in a different one. One unit
+         * at a time now makes that impossible, but the units already packed
+         * still need putting right.
+         *
+         * The record itself is untouched. Who took it and when are true and
+         * stay exactly as they were; only which apartment it belongs to
+         * changes, and the move is logged on both units.
+         */
+        if (currentUser.role !== 'admin') throw new Error('Only an admin can move a photo between units.')
+        const from = state.units.find((u) => u.id === p.fromUnitId)
+        const to = state.units.find((u) => u.id === p.toUnitId)
+        if (!from || !to) throw new Error('Pick a unit to move it to.')
+        if (from.id === to.id) throw new Error('That is the same unit.')
+
+        const item = (from.media || []).find((m) => m && m.id === p.mediaId)
+        if (!item) throw new Error('That photo is no longer on this unit. Refresh and try again.')
+        if ((to.media || []).some((m) => m && m.id === p.mediaId)) throw new Error(`Already on unit ${to.number}.`)
+
+        const batch = writeBatch(db)
+        batch.update(doc(db, 'units', from.id), { media: (from.media || []).filter((m) => m && m.id !== p.mediaId) })
+        batch.update(doc(db, 'units', to.id), { media: [...(to.media || []), item] })
+
+        // The activity feed reads each event's own copy of the media, so it
+        // moves too. Otherwise the old unit's timeline keeps showing the other
+        // apartment's photos, which is the symptom somebody actually noticed.
+        const owner = state.events.find((e) => e.unitId === from.id && (e.media || []).some((m) => m && m.id === p.mediaId))
+        if (owner) {
+          batch.update(doc(db, 'events', owner.id), { media: (owner.media || []).filter((m) => m && m.id !== p.mediaId) })
+          const dest = state.events.find((e) => e.unitId === to.id && e.step === owner.step && e.type === owner.type)
+          if (dest) batch.update(doc(db, 'events', dest.id), { media: [...(dest.media || []), item] })
+        }
+
+        const what = item.kind === 'video' ? 'video' : 'photo'
+        batch.set(doc(collection(db, 'events')), makeEvent(actor(), 'system',
+          `Moved a ${what} taken by ${item.userName || 'crew'} from unit ${from.number} to unit ${to.number}, where it belongs`,
+          { unitId: to.id }))
+
+        await batch.commit()
+        return
+      }
       case 'logEmpties': {
         // BigBox drops off empty containers before any loading happens.
         const numbers = p.numbers.map((n) => n.toUpperCase())
