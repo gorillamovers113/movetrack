@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "vitest run src",
     "test:rules": "firebase emulators:exec --only firestore \"vitest run test/rules\"",
-    "prebuild": "oxlint src"
+    "prebuild": "oxlint src",
+    "test:actions": "firebase emulators:exec --only firestore \"vitest run test/actions\""
   },
   "dependencies": {
     "firebase": "^12.18.0",
