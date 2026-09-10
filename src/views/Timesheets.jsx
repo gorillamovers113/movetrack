@@ -4,6 +4,7 @@ import { Modal } from '../ui.jsx'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import { timesheet, fmtDuration } from '../lib/reports.js'
 import { businessDayKey, usesClock } from '../lib/timeclock.js'
+import TimeCorrectionModal, { parseLocal, localValue } from '../components/TimeCorrectionModal.jsx'
 
 /* Admin timesheets: review a day, correct a stamp, or enter a day the app was
  * not used for.
@@ -11,22 +12,6 @@ import { businessDayKey, usesClock } from '../lib/timeclock.js'
  * Admin only, deliberately narrower than the Reports page a viewer can read.
  * Individual hours are a more sensitive record than productivity numbers.
  */
-
-// A datetime-local input has no timezone, so its value is read against the
-// browser's. That is the crew's own machine in practice. An admin working from
-// another timezone should check the day the row lands on.
-const parseLocal = (s) => {
-  if (!s) return null
-  const ms = new Date(s).getTime()
-  return Number.isFinite(ms) ? ms : null
-}
-
-const localValue = (ms) => {
-  if (!ms) return ''
-  const d = new Date(ms)
-  const p = (n) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`
-}
 
 export default function Timesheets({ toast }) {
   const { state, dispatch, currentUser } = useStore()
@@ -65,17 +50,6 @@ export default function Timesheets({ toast }) {
       uid: form.uid, clockIn, clockOut, notes: form.notes,
       lunchMinutes: form.lunch === '' || form.lunch == null ? null : Number(form.lunch),
     } }), 'Day added ✓')
-  }
-
-  const saveEdit = () => {
-    const changes = {}
-    const start = parseLocal(form.start)
-    const end = parseLocal(form.end)
-    if (start && start !== editing.clockIn) changes.clockIn = start
-    if (end && end !== editing.clockOut) changes.clockOut = end
-    if (form.lunch !== '' && Number(form.lunch) !== editing.lunchMinutes) changes.lunchMinutes = Number(form.lunch)
-    if (Object.keys(changes).length === 0) return toast('Nothing changed.')
-    return run(() => dispatch({ type: 'adminCorrectTimeEntry', p: { entryId: editing.entryId, changes } }), 'Corrected ✓')
   }
 
   const totalMs = rows.reduce((n, r) => n + r.workedMs, 0)
@@ -133,10 +107,7 @@ export default function Timesheets({ toast }) {
           {r.notes && <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>{r.notes}</div>}
           <button
             className="btn btn-ghost btn-sm" style={{ marginTop: 10 }}
-            onClick={() => {
-              setEditing(r)
-              setForm({ start: localValue(r.clockIn), end: localValue(r.clockOut), lunch: String(r.lunchMinutes) })
-            }}
+            onClick={() => setEditing(r)}
           >✎ Correct</button>
         </div>
       ))}
@@ -179,27 +150,7 @@ export default function Timesheets({ toast }) {
       )}
 
       {editing && (
-        <Modal title={`Correct ${editing.userName}`} sub={editing.day} onClose={() => !busy && setEditing(null)}>
-          <div className="field">
-            <label>Started</label>
-            <input className="input" type="datetime-local" value={form.start || ''} onChange={(e) => setForm({ ...form, start: e.target.value })} />
-          </div>
-          <div className="field">
-            <label>Finished</label>
-            <input className="input" type="datetime-local" value={form.end || ''} onChange={(e) => setForm({ ...form, end: e.target.value })} />
-          </div>
-          <div className="field">
-            <label>Lunch minutes</label>
-            <input className="input" type="number" min="0" inputMode="numeric"
-              value={form.lunch || ''} onChange={(e) => setForm({ ...form, lunch: e.target.value })} />
-          </div>
-          <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
-            The old values are kept where only you can see them. The crew see the corrected time and nothing else.
-          </div>
-          <button className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={busy} onClick={saveEdit}>
-            {busy ? 'Saving…' : 'Save correction'}
-          </button>
-        </Modal>
+        <TimeCorrectionModal row={editing} toast={toast} onClose={() => setEditing(null)} />
       )}
     </>
   )

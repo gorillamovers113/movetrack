@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react'
 import { useStore } from '../store.jsx'
 import { timesheet, fmtDuration } from '../lib/reports.js'
+import TimeCorrectionModal from '../components/TimeCorrectionModal.jsx'
 import { Modal } from '../ui.jsx'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import { fmtScheduleDate, todayKey, progressForDay, targetStageForWork, scheduleForPhase, DEFAULT_RETURN_SCHEDULE } from '../lib/schedule.js'
@@ -87,6 +88,8 @@ export default function Schedule({ toast }) {
   // Read once per render so every row on the page measures an open shift
   // against the same instant.
   const now = Date.now()
+  // The crew row an admin is adjusting, if any.
+  const [editingTime, setEditingTime] = useState(null)
   const key = todayKey()
 
   const phaseSchedule = useMemo(() => scheduleForPhase(state.schedule, phase), [state.schedule, phase])
@@ -201,13 +204,33 @@ export default function Schedule({ toast }) {
                   {row}
                   {crewOnDay.length > 0 && (
                     <div style={{ padding: '0 18px 12px', display: 'flex', flexWrap: 'wrap', gap: '6px 16px' }}>
-                      {crewOnDay.map((r) => (
-                        <span key={r.entryId} style={{ fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                          <span className="muted">{r.userName}</span>
-                          <b>{r.open ? 'on the clock' : fmtDuration(r.workedMs)}</b>
-                          {r.adminEntered && <span className="muted" style={{ fontSize: 11 }}>added</span>}
-                        </span>
-                      ))}
+                      {crewOnDay.map((r) => {
+                        // Tapping a person opens the same correction modal the
+                        // Timesheets page uses, so a start time can be fixed
+                        // from wherever you noticed it was wrong. Admin only,
+                        // and the rules refuse the write for anyone else.
+                        const Who = isAdmin ? 'button' : 'span'
+                        return (
+                          <Who
+                            key={r.entryId}
+                            type={isAdmin ? 'button' : undefined}
+                            onClick={isAdmin ? () => setEditingTime(r) : undefined}
+                            title={isAdmin ? `Adjust ${r.userName}'s times` : undefined}
+                            style={{
+                              fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 6,
+                              fontFamily: 'inherit', color: 'inherit', background: 'none',
+                              border: isAdmin ? '1px solid var(--line)' : 'none',
+                              borderRadius: 8, padding: isAdmin ? '3px 8px' : 0,
+                              cursor: isAdmin ? 'pointer' : 'default',
+                            }}
+                          >
+                            <span className="muted">{r.userName}</span>
+                            <b>{r.open ? 'on the clock' : fmtDuration(r.workedMs)}</b>
+                            {r.adminEntered && <span className="muted" style={{ fontSize: 11 }}>added</span>}
+                            {isAdmin && <span className="muted" style={{ fontSize: 11 }}>✎</span>}
+                          </Who>
+                        )
+                      })}
                       {crewOnDay.length > 1 && (() => {
                         // Only finished days have a number. An open shift
                         // contributes nothing, because guessing how long
@@ -240,6 +263,9 @@ export default function Schedule({ toast }) {
       ))}
 
       {editing && <DayEditModal day={editing} onClose={() => setEditing(null)} toast={toast} />}
+      {editingTime && (
+        <TimeCorrectionModal row={editingTime} toast={toast} onClose={() => setEditingTime(null)} />
+      )}
     </>
   )
 }
