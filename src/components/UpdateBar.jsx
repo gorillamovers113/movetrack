@@ -19,20 +19,28 @@ import React, { useEffect, useState } from 'react'
 // and a request every few minutes from every phone on a job is rude.
 const EVERY = 3 * 60 * 1000
 
-export async function latestBuild() {
+export async function latestBundle() {
   const res = await fetch(`/version.json?t=${Date.now()}`, { cache: 'no-store' })
   if (!res.ok) throw new Error(`version check failed: ${res.status}`)
   const body = await res.json()
-  return body && body.build
+  return body && body.bundle
+}
+
+// The bundle this page is actually executing, read off its own script tag.
+// Content-hashed, so it changes when the code changes and only then.
+export function runningBundle(doc = document) {
+  const el = [...doc.querySelectorAll('script[src]')]
+    .map((s) => s.getAttribute('src') || '')
+    .find((src) => /assets\/index-.*\.js$/.test(src))
+  return el ? el.split('/').pop() : null
 }
 
 export default function UpdateBar() {
   const [stale, setStale] = useState(false)
 
   useEffect(() => {
-    // __BUILD_ID__ is injected at build time. In dev it is undefined, and
-    // there is nothing to check.
-    const running = typeof __BUILD_ID__ === 'string' ? __BUILD_ID__ : null
+    // In dev there is no hashed bundle, so there is nothing to compare.
+    const running = runningBundle()
     if (!running) return
 
     let alive = true
@@ -40,7 +48,7 @@ export default function UpdateBar() {
 
     const check = async () => {
       try {
-        const latest = await latestBuild()
+        const latest = await latestBundle()
         if (alive && latest && latest !== running) setStale(true)
       } catch {
         // Offline, or the deploy is mid-flight. Either way the next tick asks
@@ -55,7 +63,7 @@ export default function UpdateBar() {
       }
       // Away long enough that coming back is a fresh start anyway.
       const away = backgroundedAt && Date.now() - backgroundedAt > 10 * 60 * 1000
-      latestBuild()
+      latestBundle()
         .then((latest) => {
           if (!alive || !latest || latest === running) return
           if (away) window.location.reload()

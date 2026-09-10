@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { STAGES, stageOf } from '../seed.js'
 import { useStore, canAct, filesToMedia, fmtTime, CONT_STATUS } from '../store.jsx'
-import { Modal, Lightbox, Uploader, EventRow, Avatar, StagePill } from '../ui.jsx'
+import { Modal, Lightbox, Uploader, EventRow, Avatar, StagePill, CaptureButtons } from '../ui.jsx'
 import { captureMedia, uploadFile } from '../lib/upload.js'
 import { surnameOf, STICKER_COLORS, inventoryRangeError, overlappingUnits, inventoryRangeLabel, stickerHex, CARTON_TYPES, cartonsFromForm, sumCartons, cartonSummary, SUPPLY_TYPES, suppliesFromForm, sumSupplies, supplySummary, packingChecklist, packingProgress, packingComplete, nextPackingStep, PACKING_STEPS, readyToReceive } from '../lib/mutations.js'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
@@ -664,22 +664,22 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
           {stepKey === 'inventory' && (
             <div className="field">
               <label>Photo of the paper inventory sheet</label>
-              <label className="dropzone camera-capture" style={{ display: 'block' }}>
-                <input
-                  type="file" accept="image/*,video/*" capture="environment" style={{ display: 'none' }}
-                  onChange={(e) => { const f = e.target.files[0]; if (f) captureInventoryPhoto(f); e.target.value = '' }}
-                />
-                {invPreview ? (
+              {invPreview && (
+                <div className="dropzone camera-capture" style={{ display: 'block', marginBottom: 8 }}>
                   <div className="inv-preview">
                     {invIsVideo
                       ? <video src={invPreview} className="inv-thumb" controls playsInline />
                       : <img src={invPreview} alt="Inventory sheet" className="inv-thumb" />}
                     <div className="muted" style={{ marginTop: 8 }}>
-                      {invUploading ? 'Saving…' : invUrl ? '✓ Photo saved, tap to retake' : invError || 'Tap to retake'}
+                      {invUploading ? 'Saving…' : invUrl ? '✓ Saved, retake below if you need to' : invError || 'Not saved, try again'}
                     </div>
                   </div>
-                ) : <>📷 Tap to photograph the inventory sheet</>}
-              </label>
+                </div>
+              )}
+              {!invPreview && (
+                <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>Photograph the paper inventory sheet.</div>
+              )}
+              <CaptureButtons onFiles={(files) => captureInventoryPhoto(files[0])} busy={invUploading} compact />
             </div>
           )}
 
@@ -831,22 +831,22 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
                 <input className="input" type="number" min="1" inputMode="numeric" autoFocus placeholder="e.g. 42" value={form.pieces || ''} onChange={(e) => setForm({ ...form, pieces: e.target.value })} /></div>
               <div className="field">
                 <label>4. Photo of the paper inventory sheet</label>
-                <label className="dropzone camera-capture" style={{ display: 'block' }}>
-                  <input
-                    type="file" accept="image/*,video/*" capture="environment" style={{ display: 'none' }}
-                    onChange={(e) => { const f = e.target.files[0]; if (f) captureInventoryPhoto(f); e.target.value = '' }}
-                  />
-                  {invPreview ? (
+                {invPreview && (
+                  <div className="dropzone camera-capture" style={{ display: 'block', marginBottom: 8 }}>
                     <div className="inv-preview">
                       {invIsVideo
-                      ? <video src={invPreview} className="inv-thumb" controls playsInline />
-                      : <img src={invPreview} alt="Inventory sheet" className="inv-thumb" />}
+                        ? <video src={invPreview} className="inv-thumb" controls playsInline />
+                        : <img src={invPreview} alt="Inventory sheet" className="inv-thumb" />}
                       <div className="muted" style={{ marginTop: 8 }}>
-                        {invUploading ? 'Saving…' : invUrl ? '✓ Photo saved, tap to retake' : invError || 'Tap to retake'}
+                        {invUploading ? 'Saving…' : invUrl ? '✓ Saved, retake below if you need to' : invError || 'Not saved, try again'}
                       </div>
                     </div>
-                  ) : <>📷 Tap to photograph the inventory sheet</>}
-                </label>
+                  </div>
+                )}
+                {!invPreview && (
+                  <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>Photograph the paper inventory sheet.</div>
+                )}
+                <CaptureButtons onFiles={(files) => captureInventoryPhoto(files[0])} busy={invUploading} compact />
               </div>
               <div className="field">
                 <label>5. Inventory sticker numbers{unit.stickerColor ? ` (${unit.stickerColor} roll)` : ''}</label>

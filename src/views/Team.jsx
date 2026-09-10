@@ -97,16 +97,20 @@ export default function Team({ toast }) {
                 <tr key={u.id}>
                   <td><div className="row"><Avatar name={u.name} size="sm" /><div><b>{u.name}</b>{u.title && <div className="muted">{u.title}</div>}</div></div></td>
                   <td>
-                    {/* Admin rows never get an editable select, only the badge, same as
-                        the current-user row always showed. A controlled <select
-                        value={u.role}> has no matching option when u.role is 'admin'
-                        (ASSIGNABLE used to exclude it), so it rendered a wrong role and
-                        one stray click silently demoted a fellow admin. Now that admin
-                        IS in ASSIGNABLE this particular bug can't recur either way, but
-                        the badge-only rendering also is what makes fix 3's guard (b)
-                        above true: there's simply no control here that could change an
-                        admin's role. */}
-                    {isAdmin && u.id !== currentUser.uid && u.role !== 'admin' ? (
+                    {/* Admin rows used to render a badge and no select, which made
+                        promoting somebody a one-way door: Aaron was made an admin so
+                        he could switch between packing and loading, and then there was
+                        no control anywhere to put him back on the crew.
+
+                        That guard existed for a real bug. A controlled <select
+                        value={u.role}> had no matching option when u.role was 'admin',
+                        because ASSIGNABLE excluded it, so the select rendered some
+                        other role and one stray click silently demoted a fellow admin.
+                        Admin is in ASSIGNABLE now, so the select shows the real value
+                        and that cannot happen. Demotion is guarded by a confirm and by
+                        the last-admin check instead, which is what the danger actually
+                        warranted. */}
+                    {isAdmin && u.id !== currentUser.uid ? (
                       <select className="input" style={{ width: 'auto', padding: '5px 9px', fontSize: 13 }} value={u.role} disabled={busyIds.has(u.id)}
                         onChange={(e) => {
                           const nextRole = e.target.value
@@ -114,7 +118,16 @@ export default function Team({ toast }) {
                           // edit everything), so it needs a deliberate confirmation, not
                           // a single mis-click on a dropdown. Cancelling just leaves the
                           // select's value alone since it's controlled by u.role.
+                          if (nextRole === u.role) return
                           if (nextRole === 'admin' && !confirm(`Make ${u.name} a full admin? Admins can approve/remove users, change roles, and edit everything.`)) return
+                          // Taking the last admin's rights away would lock the whole
+                          // team out of approving, correcting and removing anybody.
+                          if (u.role === 'admin' && isLastAdmin(u)) {
+                            return toast(`${u.name} is the only admin. Promote somebody else first.`)
+                          }
+                          // Demotion is quieter than promotion but still not a thing to
+                          // do by brushing a dropdown on a phone.
+                          if (u.role === 'admin' && !confirm(`Take away ${u.name}'s admin access and make them ${ROLES[nextRole].label}? They will lose timesheets, corrections and team management.`)) return
                           withUserBusy(u.id, async () => {
                             const status = await submitWrite(dispatch({ type: 'changeRole', p: { userId: u.id, role: nextRole, byId: currentUser.uid } }))
                             toast(status === 'queued' ? QUEUED_MESSAGE : `${u.name} → ${ROLES[nextRole].label}`)

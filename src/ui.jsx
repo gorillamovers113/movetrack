@@ -99,22 +99,77 @@ export function AttributedMedia({ media, onOpen }) {
   )
 }
 
-export function Uploader({ onFiles, label = 'Tap to add photos or videos' }) {
-  const [busy, setBusy] = useState(false)
+/* Camera first, and exactly one accept type per input.
+ *
+ * Android Chrome ignores `capture` when `accept` lists more than one type: it
+ * cannot tell which capture intent to launch, so it quietly falls back to the
+ * file picker. Widening accept to "image/*,video/*" to support video therefore
+ * broke the camera on every Android phone on the job, while iOS carried on
+ * working perfectly, which is why it took a day to surface.
+ *
+ * So each way in gets its own input with a single accept type. Photo opens the
+ * camera. Video opens the video camera. Choosing something already shot is a
+ * separate, quieter option rather than the thing Android drops you into.
+ */
+function CaptureSlot({ accept, capture, multiple, onPick, className, children }) {
   return (
-    <label className="dropzone" style={{ display: 'block' }}>
+    <label className={className} style={{ cursor: 'pointer', margin: 0 }}>
       <input
-        type="file" accept="image/*,video/*" multiple capture="environment" style={{ display: 'none' }}
-        onChange={async (e) => {
-          if (!e.target.files.length) return
-          setBusy(true)
-          await onFiles(e.target.files)
-          setBusy(false)
+        type="file"
+        accept={accept}
+        {...(capture ? { capture: 'environment' } : {})}
+        {...(multiple ? { multiple: true } : {})}
+        style={{ display: 'none' }}
+        onChange={(e) => {
+          const files = e.target.files
+          if (files && files.length) onPick(files)
           e.target.value = ''
         }}
       />
-      {busy ? 'Processing…' : <>📷 {label}</>}
+      {children}
     </label>
+  )
+}
+
+export function CaptureButtons({ onFiles, multiple = false, busy = false, compact = false }) {
+  const size = compact ? 'btn-sm' : ''
+  return (
+    <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+      <CaptureSlot
+        accept="image/*" capture multiple={multiple} onPick={onFiles}
+        className={`btn btn-primary ${size}`}
+      >
+        {busy ? 'Saving…' : '📷 Photo'}
+      </CaptureSlot>
+      <CaptureSlot
+        accept="video/*" capture multiple={multiple} onPick={onFiles}
+        className={`btn btn-ghost ${size}`}
+      >
+        🎥 Video
+      </CaptureSlot>
+      {/* No capture attribute: this one is meant to open the library. */}
+      <CaptureSlot
+        accept="image/*,video/*" multiple={multiple} onPick={onFiles}
+        className={`btn btn-ghost ${size}`}
+      >
+        Choose a file
+      </CaptureSlot>
+    </div>
+  )
+}
+
+export function Uploader({ onFiles, label = 'Take a photo or video' }) {
+  const [busy, setBusy] = useState(false)
+  const handle = async (files) => {
+    setBusy(true)
+    await onFiles(files)
+    setBusy(false)
+  }
+  return (
+    <div className="dropzone" style={{ display: 'block' }}>
+      <div className="muted" style={{ marginBottom: 8 }}>{busy ? 'Processing…' : label}</div>
+      <CaptureButtons onFiles={handle} multiple busy={busy} />
+    </div>
   )
 }
 

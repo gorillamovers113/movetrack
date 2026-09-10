@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { useStore, fmtTime } from '../store.jsx'
-import { Modal } from '../ui.jsx'
+import { Modal, CaptureButtons } from '../ui.jsx'
 import { captureMedia, uploadFile } from '../lib/upload.js'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import {
@@ -49,22 +49,20 @@ function PhotoSlot({ label, path, url, setUrl, hint, setKind }) {
   return (
     <div className="field">
       <label>{label}</label>
-      <label className="dropzone camera-capture" style={{ display: 'block' }}>
-        <input
-          type="file" accept="image/*,video/*" capture="environment" style={{ display: 'none' }}
-          onChange={(e) => { const f = e.target.files[0]; if (f) take(f); e.target.value = '' }}
-        />
-        {preview ? (
+      {preview && (
+        <div className="dropzone camera-capture" style={{ display: 'block', marginBottom: 8 }}>
           <div className="inv-preview">
             {isVideo
               ? <video src={preview} className="inv-thumb" controls playsInline />
               : <img src={preview} alt={label} className="inv-thumb" />}
             <div className="muted" style={{ marginTop: 8 }}>
-              {busy ? 'Saving…' : url ? '✓ Saved, tap to retake' : err || 'Tap to retake'}
+              {busy ? 'Saving…' : url ? '✓ Saved, retake below if you need to' : err || 'Not saved, try again'}
             </div>
           </div>
-        ) : <>📷 {hint}</>}
-      </label>
+        </div>
+      )}
+      {!preview && <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>{hint}</div>}
+      <CaptureButtons onFiles={(files) => take(files[0])} busy={busy} compact />
     </div>
   )
 }
