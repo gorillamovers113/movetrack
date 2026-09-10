@@ -477,3 +477,96 @@ describe('adding more shots to a door already photographed', () => {
     expect(u.vaults.find((v) => v.number === 'BB-2').open.count).toBe(1)
   })
 })
+
+/* An admin fixing a value a crew member typed wrong.
+ *
+ * Aaron typed 901 on unit 902. The crew deliberately cannot retype a blind
+ * check, because one you can retry until it passes is not a check, so a
+ * genuine typo had no way back and left the unit flagged for something that
+ * never happened. */
+describe('correcting a mistyped checklist value', () => {
+  const withTypo = (over = {}) => ({
+    ...UNIT, stage: 'packed', number: '902', stickerColor: 'Green',
+    steps: {
+      load_number: { value: '901', matched: false, uid: MOVER.uid, userName: MOVER.name, at: 1000 },
+      ...(over.steps || {}),
+    },
+    ...over,
+  })
+  const unitRow = async () => (await rows('units')).find((u) => u.id === UNIT.id)
+
+  it('writes the new value and recomputes the match', async () => {
+    const u = withTypo()
+    await setDoc(doc(db, 'units', UNIT.id), u)
+    await run(ADMIN, { type: 'adminCorrectStep', p: { unitId: UNIT.id, key: 'load_number', value: '902' } }, makeState({ units: [u] }))
+
+    const after = await unitRow()
+    expect(after.steps.load_number).toMatchObject({ value: '902', matched: true })
+    // The person who actually typed it keeps the credit.
+    expect(after.steps.load_number.userName).toBe(MOVER.name)
+  })
+
+  // The contract that makes this safe to use: every active user can read
+  // units, so the original must not live there.
+  it('keeps the original where only an admin can read it, never on the unit', async () => {
+    const u = withTypo()
+    await setDoc(doc(db, 'units', UNIT.id), u)
+    await run(ADMIN, { type: 'adminCorrectStep', p: { unitId: UNIT.id, key: 'load_number', value: '902' } }, makeState({ units: [u] }))
+
+    const after = await unitRow()
+    const blob = JSON.stringify(after.steps.load_number)
+    expect(blob).not.toMatch(/901/)
+    expect(blob).not.toMatch(new RegExp(ADMIN.name))
+
+    const [correction] = await rows('stepCorrections')
+    expect(correction).toMatchObject({
+      unitId: UNIT.id, key: 'load_number', oldValue: '901', newValue: '902',
+      oldMatched: false, newMatched: true, byUid: ADMIN.uid, enteredByName: MOVER.name,
+    })
+  })
+
+  it('still flags when the correction is itself wrong', async () => {
+    const u = withTypo()
+    await setDoc(doc(db, 'units', UNIT.id), u)
+    await run(ADMIN, { type: 'adminCorrectStep', p: { unitId: UNIT.id, key: 'load_number', value: '905' } }, makeState({ units: [u] }))
+    expect((await unitRow()).steps.load_number).toMatchObject({ value: '905', matched: false })
+  })
+
+  it('takes the flag down with the last mismatch', async () => {
+    const u = withTypo({ flag: { message: 'Loaded with a mismatch on unit number.', ts: 1, by: 'Ali', open: true } })
+    await setDoc(doc(db, 'units', UNIT.id), u)
+    await run(ADMIN, { type: 'adminCorrectStep', p: { unitId: UNIT.id, key: 'load_number', value: '902' } }, makeState({ units: [u] }))
+    expect((await unitRow()).flag).toMatchObject({ open: false, clearedBy: ADMIN.name })
+  })
+
+  it('leaves the flag up while something else still disagrees', async () => {
+    const u = withTypo({
+      flag: { message: 'two mismatches', ts: 1, by: 'Ali', open: true },
+      steps: {
+        load_number: { value: '901', matched: false, uid: MOVER.uid, userName: MOVER.name, at: 1000 },
+        load_sticker: { value: 'Pink', matched: false, uid: MOVER.uid, userName: MOVER.name, at: 1001 },
+      },
+    })
+    await setDoc(doc(db, 'units', UNIT.id), u)
+    await run(ADMIN, { type: 'adminCorrectStep', p: { unitId: UNIT.id, key: 'load_number', value: '902' } }, makeState({ units: [u] }))
+    expect((await unitRow()).flag.open).toBe(true)
+  })
+
+  it('matches a sticker colour the way a person reads it', async () => {
+    const u = withTypo({ steps: { load_sticker: { value: 'Pink', matched: false, uid: MOVER.uid, userName: MOVER.name, at: 1 } } })
+    await setDoc(doc(db, 'units', UNIT.id), u)
+    await run(ADMIN, { type: 'adminCorrectStep', p: { unitId: UNIT.id, key: 'load_sticker', value: 'green' } }, makeState({ units: [u] }))
+    expect((await unitRow()).steps.load_sticker).toMatchObject({ value: 'green', matched: true })
+  })
+
+  it('refuses an item nobody recorded, and a change that changes nothing', async () => {
+    const u = withTypo()
+    await setDoc(doc(db, 'units', UNIT.id), u)
+    const state = makeState({ units: [u] })
+    await expect(run(ADMIN, { type: 'adminCorrectStep', p: { unitId: UNIT.id, key: 'load_sticker', value: 'Green' } }, state))
+      .rejects.toThrow(/not been recorded/i)
+    await expect(run(ADMIN, { type: 'adminCorrectStep', p: { unitId: UNIT.id, key: 'load_number', value: '901' } }, state))
+      .rejects.toThrow(/nothing changed/i)
+    expect(await rows('stepCorrections')).toHaveLength(0)
+  })
+})

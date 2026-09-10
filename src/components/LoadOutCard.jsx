@@ -117,12 +117,15 @@ export default function LoadOutCard({ unit, toast }) {
   const { dispatch, currentUser } = useStore()
   const [modal, setModal] = useState(null)     // a step key, or 'vault'
   const [shot, setShot] = useState(null)       // { number, part } for one vault photo
+  const [fixing, setFixing] = useState(null)  // a completed step an admin is correcting
+  const [fixValue, setFixValue] = useState('')
   const [form, setForm] = useState({})
   const [busy, setBusy] = useState(false)
   const [unitShots, setUnitShots] = useState([])
   const [afterShots, setAfterShots] = useState([])
   const [vaultShots, setVaultShots] = useState([])
 
+  const isAdmin = currentUser.role === 'admin'
   const checklist = loadingChecklist(unit)
   const progress = loadingProgress(unit)
   const vaults = vaultsOf(unit).slice().sort((a, b) => vaultTouchedAt(a) - vaultTouchedAt(b))
@@ -134,14 +137,25 @@ export default function LoadOutCard({ unit, toast }) {
   }
   const open = (key) => { reset(); setShot(null); setModal(key) }
   const openShot = (number, part) => { reset(); setModal(null); setShot({ number, part }) }
-  const close = () => { if (!busy) { setModal(null); setShot(null) } }
+  const close = () => { if (!busy) { setModal(null); setShot(null); setFixing(null) } }
+
+  const saveFix = () => {
+    const value = fixing.key === 'load_vault_count' ? Number(fixValue) : String(fixValue).trim()
+    if (fixing.key === 'load_vault_count' ? !Number.isInteger(value) || value < 1 : !value) {
+      return toast('Enter the correct value.')
+    }
+    return run(
+      () => dispatch({ type: 'adminCorrectStep', p: { unitId: unit.id, key: fixing.key, value } }),
+      `${fixing.label} corrected ✓`,
+    )
+  }
 
   const run = async (fn, done) => {
     if (busy) return
     setBusy(true)
     try {
       const status = await submitWrite(fn())
-      setModal(null); setShot(null)
+      setModal(null); setShot(null); setFixing(null)
       toast(status === 'queued' ? QUEUED_MESSAGE : done)
     } catch (err) {
       toast(err.message || SAVE_ERROR)
@@ -289,12 +303,23 @@ export default function LoadOutCard({ unit, toast }) {
                 {step.done && (step.by || step.at) && (
                   <span style={{ display: 'block', fontSize: 12, color: 'var(--ink-3, #9aa1ab)' }}>
                     {step.by || 'Crew'}{step.at ? ` · ${fmtTime(step.at)}` : ''}
-                    {step.value ? ` · ${step.value}` : ''}
+                    {step.value != null && step.value !== '' ? ` · ${step.value}` : ''}
                     {step.matched === false && <b style={{ color: '#b91c1c' }}> · did not match</b>}
                   </span>
                 )}
               </span>
               {tappable && <span aria-hidden style={{ flex: 'none', color: 'var(--ink-3, #9aa1ab)', fontWeight: 700 }}>›</span>}
+              {/* The crew cannot retype a blind check, on purpose: one you can
+                  retry until it passes is not a check. An admin can, because a
+                  genuine typo otherwise leaves the unit flagged forever. */}
+              {isAdmin && step.done && step.value != null && step.value !== '' && (
+                <span
+                  role="button" tabIndex={0}
+                  onClick={(e) => { e.stopPropagation(); setFixValue(String(step.value)); setFixing(step) }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.stopPropagation(); setFixValue(String(step.value)); setFixing(step) } }}
+                  style={{ flex: 'none', padding: '2px 8px', borderRadius: 8, cursor: 'pointer', fontSize: 12.5, color: 'var(--ink-3, #6b7280)' }}
+                >✎ Fix</span>
+              )}
             </Row>
           )
         })}
@@ -457,6 +482,46 @@ export default function LoadOutCard({ unit, toast }) {
           <div className="muted" style={{ fontSize: 12.5, marginTop: 8, textAlign: 'center' }}>
             Saves on its own, under {currentUser.name}, timestamped.
           </div>
+        </Modal>
+      )}
+
+      {fixing && (
+        <Modal
+          title={`Correct: ${fixing.label}`}
+          sub={`Unit ${unit.number} · entered by ${fixing.by || 'crew'}${fixing.at ? `, ${fmtTime(fixing.at)}` : ''}`}
+          onClose={close}
+        >
+          <div className="field">
+            <label>They entered “{String(fixing.value)}”. What should it be?</label>
+            {fixing.key === 'load_sticker' ? (
+              <div className="pick-list" style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {STICKER_COLORS.map((c) => (
+                  <button
+                    key={c.name} type="button"
+                    className={`btn ${fixValue === c.name ? 'btn-primary' : 'btn-ghost'}`}
+                    style={{ display: 'flex', alignItems: 'center', gap: 8 }}
+                    onClick={() => setFixValue(c.name)}
+                  >
+                    <span style={{ width: 14, height: 14, borderRadius: 4, background: c.hex, border: '1px solid rgba(0,0,0,.25)' }} />
+                    {c.name}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <input
+                className="input" type={fixing.key === 'load_vault_count' ? 'number' : 'text'}
+                inputMode="numeric" autoFocus
+                value={fixValue} onChange={(e) => setFixValue(e.target.value)}
+              />
+            )}
+          </div>
+          <div className="muted" style={{ fontSize: 12.5, marginBottom: 10 }}>
+            The crew see the corrected value and nothing else. What was originally entered is kept where only you
+            can read it. If this clears the last mismatch on the unit, the flag comes down with it.
+          </div>
+          <button className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={busy} onClick={saveFix}>
+            {busy ? 'Saving…' : 'Save the correction'}
+          </button>
         </Modal>
       )}
 

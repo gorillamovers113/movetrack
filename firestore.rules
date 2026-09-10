@@ -504,6 +504,14 @@ service cloud.firestore {
       allow read, write: if isAdmin();
     }
 
+    // Same contract as timeCorrections, for a value a crew member typed wrong
+    // on a checklist. The old value lives here rather than on the unit,
+    // because every active user can read units: the crew see the corrected
+    // value and nothing about who changed it.
+    match /stepCorrections/{correctionId} {
+      allow read, write: if isAdmin();
+    }
+
     match /unitSessions/{sessionId} {
       allow read: if isAdmin()
         || (onTheClock() && resource.data.uid == request.auth.uid);

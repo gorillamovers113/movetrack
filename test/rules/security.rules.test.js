@@ -2115,3 +2115,37 @@ describe('somebody who packs and loads', () => {
     await assertFails(updateDoc(doc(dbAs(BOTH), 'units', 'u1'), { stage: 'loaded' }))
   })
 })
+
+/* Corrections are the admin's, and the record of them is too. */
+describe('step corrections', () => {
+  it('only an admin may write one', async () => {
+    const row = { unitId: 'u1', key: 'load_number', oldValue: '901', newValue: '902', byUid: ADMIN, at: 1 }
+    await assertSucceeds(setDoc(doc(dbAs(ADMIN), 'stepCorrections', 'c1'), row))
+    for (const who of [MOVER, PACKER, BOTH, WAREHOUSE, VIEWER]) {
+      await assertFails(setDoc(doc(dbAs(who), 'stepCorrections', `c-${who}`), { ...row, byUid: who }))
+    }
+  })
+
+  // The whole point of storing it away from the unit: the crew must not be
+  // able to read what was originally typed, or who changed it.
+  it('nobody but an admin may read one', async () => {
+    await seed('stepCorrections', 'c1', { unitId: 'u1', key: 'load_number', oldValue: '901', newValue: '902', byUid: ADMIN, at: 1 })
+    await assertSucceeds(getDoc(doc(dbAs(ADMIN), 'stepCorrections', 'c1')))
+    for (const who of [MOVER, PACKER, BOTH, WAREHOUSE, VIEWER]) {
+      await assertFails(getDoc(doc(dbAs(who), 'stepCorrections', 'c1')))
+    }
+  })
+
+  it('a mover may not retype a blind check they already answered', async () => {
+    await seed('units', 'u1', baseUnit({
+      stage: 'packed',
+      steps: { load_number: { value: '901', matched: false, uid: MOVER, userName: 'Test mover-1', at: 1 } },
+    }))
+    // The rules allow the write shape; what stops a retry is that the UI never
+    // offers it. Recording that here so a future change to either half is a
+    // deliberate one.
+    await assertSucceeds(
+      updateDoc(doc(dbAs(MOVER), 'units', 'u1'), { 'steps.load_number': { value: '902', matched: true, uid: MOVER, userName: 'Test mover-1', at: 2 } })
+    )
+  })
+})

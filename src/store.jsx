@@ -5,7 +5,7 @@ import { app, auth, db } from './firebase.js'
 import { captureMedia, uploadFile } from './lib/upload.js'
 import { businessDayKey, canClockInAt, lunchMinutesFor, openSessionFor, usesClock } from './lib/timeclock.js'
 import { stepRow, pushRows } from './lib/sheetBackup.js'
-import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction, sumCartons, PACKING_STEPS, REQUIRED_STEPS, packingChecklist, wouldCompletePacking, LOADING_STEPS, loadingComplete, normalizeVaultNumber, vaultsOf, vaultCountMismatch, RECEIVING_STEPS, receivingComplete, readyToReceive } from './lib/mutations.js'
+import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction, sumCartons, PACKING_STEPS, REQUIRED_STEPS, packingChecklist, wouldCompletePacking, LOADING_STEPS, loadingComplete, normalizeVaultNumber, normalizeCode, vaultsOf, completeVaults, vaultCountMismatch, RECEIVING_STEPS, receivingComplete, readyToReceive } from './lib/mutations.js'
 import { DEFAULT_SCHEDULE, DEFAULT_RETURN_SCHEDULE, scheduleDocId } from './lib/schedule.js'
 import { stageOf } from './seed.js'
 import { mayPack, mayLoad } from './lib/roles.js'
@@ -949,6 +949,66 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
         }
         await updateDoc(doc(db, 'timeEntries', p.entryId), changes)
         return
+      }
+      case 'adminCorrectStep': {
+        /* An admin fixes a value a crew member typed wrong.
+         *
+         * The crew cannot retype these themselves, and that is the point: the
+         * sticker colour, the unit number and the vault count are asked blind,
+         * and a check you can retry until it passes is not a check. Aaron
+         * typed 901 on unit 902 and had no way back, which is the right
+         * default and the wrong dead end.
+         *
+         * So it lands here, with the same contract as a time correction: the
+         * old value goes to a collection only admins can read, never onto the
+         * unit, because the whole crew can read units. They see the corrected
+         * value and nothing else.
+         */
+        const key = p.key
+        const before = (unit.steps || {})[key]
+        if (!before) throw new Error('That item has not been recorded yet.')
+
+        const step = LOADING_STEPS.find((x) => x.key === key)
+        if (!step) throw new Error('That item cannot be corrected.')
+
+        const value = p.value
+        if (value === before.value) throw new Error('Nothing changed.')
+
+        // Recompute the match against what the packer recorded, so correcting
+        // a typo clears the mismatch and correcting to a genuinely wrong value
+        // still flags.
+        const expected = key === 'load_sticker' ? unit.stickerColor
+          : key === 'load_number' ? unit.number
+            : completeVaults(unit).length
+        const matched = key === 'load_vault_count'
+          ? Number(value) === Number(expected)
+          : normalizeCode(value) === normalizeCode(expected)
+
+        const now = Date.now()
+        await addDoc(collection(db, 'stepCorrections'), {
+          unitId: unit.id, unitNumber: unit.number, key,
+          oldValue: before.value === undefined ? null : before.value,
+          newValue: value,
+          oldMatched: before.matched === undefined ? null : before.matched,
+          newMatched: matched,
+          enteredByUid: before.uid || null, enteredByName: before.userName || null, enteredAt: before.at || null,
+          byUid: currentUser.uid, byName: currentUser.name, at: now,
+        })
+
+        const patch = { [`steps.${key}.value`]: value, [`steps.${key}.matched`]: matched }
+
+        // A flag raised by this mismatch has to come down with it, or the unit
+        // stays red for a typo that no longer exists. Only when nothing else
+        // on the unit still disagrees.
+        const stillWrong = LOADING_STEPS.some((x) => {
+          const st = (unit.steps || {})[x.key]
+          if (!st || st.matched !== false) return false
+          return x.key !== key || !matched
+        })
+        if (!stillWrong && unit.flag?.open) patch.flag = { ...unit.flag, open: false, clearedBy: currentUser.name, clearedAt: now }
+
+        await updateDoc(doc(db, 'units', p.unitId), patch)
+        return ev('step', `Unit ${unit.number} \u00b7 ${step.label} corrected to "${value}"${matched ? ' \u2713' : ''}`, { unitId: unit.id, step: key })
       }
       case 'logEmpties': {
         // BigBox drops off empty containers before any loading happens.
