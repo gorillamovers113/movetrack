@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { computeUserReport, computeAllReports, summarizeRoster, fmtDuration, reportsToCSV, crewOnUnit } from '../reports.js'
+import { computeUserReport, computeAllReports, summarizeRoster, fmtDuration, reportsToCSV, crewOnUnit, timesheet, unitLabour } from '../reports.js'
 
 const packer = { id: 'u-packer', name: 'Sam Packer', role: 'packer', status: 'active' }
 const mover = { id: 'u-mover', name: 'Ali Mover', role: 'mover', status: 'active' }
@@ -300,5 +300,93 @@ describe('crewOnUnit', () => {
     const events = [null, {}, { uid: 'a' }, { uid: 'b', unitId: 'u1', ts: NOW + min(5), userName: 'Future' }]
     expect(crewOnUnit(events, 'u1', NOW)).toEqual([])
     expect(crewOnUnit(undefined, 'u1', NOW)).toEqual([])
+  })
+})
+
+// Timesheets. The reconciliation these prove is the one the design promises:
+// unit time explains part of a day, and whatever is left is reported rather
+// than hidden.
+describe('timesheet', () => {
+  const at = (iso) => Date.parse(iso)
+  const H = 3600000
+  const entry = (over = {}) => ({
+    id: 'e1', uid: 'liv', userName: 'Liv Post', role: 'packer', day: '2026-09-10',
+    clockIn: at('2026-09-10T16:00:00Z'), clockOut: at('2026-09-11T01:00:00Z'),
+    lunchMinutes: 30, workedThroughLunch: false, source: 'self', ...over,
+  })
+  const sess = (over = {}) => ({
+    unitId: 'u1', uid: 'liv', userName: 'Liv Post', day: '2026-09-10',
+    startedAt: at('2026-09-10T16:00:00Z'), endedAt: at('2026-09-10T20:00:00Z'), ...over,
+  })
+
+  it('reports one row per person with worked time net of lunch', () => {
+    const rows = timesheet([entry()], [], '2026-09-10', 0)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ userName: 'Liv Post', workedMs: 8.5 * H, lunchMinutes: 30 })
+  })
+
+  it('flags an open day and does not guess its length', () => {
+    const rows = timesheet([entry({ clockOut: null, lunchMinutes: 0 })], [], '2026-09-10', 0)
+    expect(rows[0]).toMatchObject({ open: true, workedMs: 0 })
+  })
+
+  it('flags a day the admin entered, and carries its note', () => {
+    const rows = timesheet([entry({ source: 'admin', notes: 'Before the app' })], [], '2026-09-10', 0)
+    expect(rows[0]).toMatchObject({ adminEntered: true, notes: 'Before the app' })
+  })
+
+  it('flags a worked-through-lunch day', () => {
+    const rows = timesheet([entry({ workedThroughLunch: true, lunchMinutes: 0 })], [], '2026-09-10', 0)
+    expect(rows[0].workedThroughLunch).toBe(true)
+  })
+
+  it('splits the day into time attributed to units and time not', () => {
+    const rows = timesheet([entry()], [sess()], '2026-09-10', 0)
+    expect(rows[0].unitMs).toBe(4 * H)
+    expect(rows[0].unattributedMs).toBe(4.5 * H)
+  })
+
+  it('reports a back-entered day as entirely unattributed, not as a shortfall', () => {
+    const rows = timesheet([entry({ source: 'admin' })], [], '2026-09-10', 0)
+    expect(rows[0].unitMs).toBe(0)
+    expect(rows[0].unattributedMs).toBe(8.5 * H)
+    expect(rows[0].adminEntered).toBe(true)
+  })
+
+  it('never reports more unit time than the person actually worked', () => {
+    const long = sess({ endedAt: at('2026-09-12T00:00:00Z') })
+    const rows = timesheet([entry()], [long], '2026-09-10', 0)
+    expect(rows[0].unitMs).toBe(rows[0].workedMs)
+    expect(rows[0].unattributedMs).toBe(0)
+  })
+
+  it('ignores other days entirely', () => {
+    expect(timesheet([entry({ day: '2026-09-09' })], [], '2026-09-10', 0)).toEqual([])
+  })
+
+  it('sorts by name so the roll-up reads the same every day', () => {
+    const rows = timesheet([
+      entry({ id: 'b', uid: 'z', userName: 'Zoe' }),
+      entry({ id: 'a', uid: 'a', userName: 'Ana' }),
+    ], [], '2026-09-10', 0)
+    expect(rows.map((r) => r.userName)).toEqual(['Ana', 'Zoe'])
+  })
+})
+
+describe('unitLabour', () => {
+  const at = (iso) => Date.parse(iso)
+  const sess = (over = {}) => ({
+    unitId: 'u1', uid: 'liv', userName: 'Liv Post', day: '2026-09-10',
+    startedAt: at('2026-09-10T16:00:00Z'), endedAt: at('2026-09-10T17:00:00Z'), ...over,
+  })
+
+  it('totals a unit and breaks it down by person', () => {
+    const out = unitLabour([sess(), sess({ uid: 'ana', userName: 'Ana Ruiz' })], 'u1', 0)
+    expect(out.totalMs).toBe(7200000)
+    expect(out.people).toHaveLength(2)
+  })
+
+  it('is zero for a unit nobody has worked', () => {
+    expect(unitLabour([], 'u9', 0)).toEqual({ totalMs: 0, people: [] })
   })
 })

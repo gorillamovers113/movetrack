@@ -1,3 +1,4 @@
+import { workedMs, dayLabourMs, unitLabourMs, unitLabourByPerson } from './timeclock.js'
 // Per-user productivity analytics, computed from existing state (units,
 // containers, overflow, events). Pure and deterministic: no Date.now() or
 // other ambient state is read in here, so the same `state` always produces
@@ -304,4 +305,51 @@ export function crewOnUnit(events = [], unitId, now = 0, windowMs = 20 * 60 * 10
   return [...latest.values()]
     .map((e) => ({ uid: e.uid, name: e.userName || 'Someone', role: e.role || null, ts: e.ts, action: e.action || '' }))
     .sort((a, b) => b.ts - a.ts)
+}
+
+/* ---------------------------------------------------------------------------
+ * Timesheets
+ *
+ * Admin only. Individual hours are a more sensitive record than the
+ * productivity reports viewers can already read, so these are deliberately
+ * narrower than the rest of this file.
+ * ------------------------------------------------------------------------- */
+
+export function timesheet(timeEntries = [], sessions = [], dayKey, now = 0) {
+  return (timeEntries || [])
+    .filter((e) => e && e.day === dayKey)
+    .map((e) => {
+      const worked = workedMs(e)
+      const unit = dayLabourMs(sessions, e.uid, dayKey, now)
+      // Unit time can only ever explain time that was actually worked. A
+      // back-entered day has hours and no sessions at all, and the remainder is
+      // reported as unattributed rather than shown as a silent shortfall that
+      // reads like missing work.
+      const attributed = Math.min(unit, worked)
+      return {
+        entryId: e.id,
+        uid: e.uid,
+        userName: e.userName || 'Crew',
+        role: e.role || '',
+        day: e.day,
+        clockIn: e.clockIn,
+        clockOut: e.clockOut || null,
+        lunchMinutes: Number(e.lunchMinutes) || 0,
+        workedMs: worked,
+        unitMs: attributed,
+        unattributedMs: worked - attributed,
+        open: !e.clockOut,
+        adminEntered: e.source === 'admin',
+        workedThroughLunch: !!e.workedThroughLunch,
+        notes: e.notes || '',
+      }
+    })
+    .sort((a, b) => (a.userName || '').localeCompare(b.userName || ''))
+}
+
+export function unitLabour(sessions = [], unitId, now = 0) {
+  return {
+    totalMs: unitLabourMs(sessions, unitId, now),
+    people: unitLabourByPerson(sessions, unitId, now),
+  }
 }
