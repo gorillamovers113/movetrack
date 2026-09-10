@@ -393,6 +393,107 @@ service cloud.firestore {
     // Project-level singleton: the return-phase switch (setReturnPhase) plus
     // name/address. Any active user may read it (the board needs to know
     // whether the return leg is on); only an admin may flip it.
+    // ---- time clock ----
+    // Only packers and movers keep time. Everyone else is either off the clock
+    // or is the person reviewing it.
+    function onTheClock() {
+      return isActive() && (hasRole('packer') || hasRole('mover'));
+    }
+
+    // A crew member may only stamp the moment they are actually in. Rules have
+    // no timezone library, so the 8am floor cannot be evaluated here exactly;
+    // pinning the stamp to server time is the stronger guarantee anyway,
+    // because it means a packer cannot write an arbitrary clock-in at all, and
+    // the exact floor is then enforced against a time they cannot forge.
+    function stampedNow(ms) {
+      return ms >= request.time.toMillis() - 120000
+          && ms <= request.time.toMillis() + 120000;
+    }
+
+    // WHERE THE 8AM FLOOR IS ENFORCED, AND WHY IT IS NOT HERE
+    //
+    // A first version of these rules also refused any clock-in whose UTC
+    // time-of-day fell in the window that means "before 8am in California".
+    // It worked, and it made the rules test suite pass or fail depending on
+    // what time of day it was run, because stampedNow() pins the value to real
+    // server time and the two checks then fight each other every morning. A
+    // test that is green in the afternoon and red before breakfast is worse
+    // than no test.
+    //
+    // stampedNow() is the check that actually matters. It means a crew member
+    // cannot write an arbitrary clock-in at all: not an earlier one, not a
+    // later one, only the moment they are really in. Forgery is what rules can
+    // meaningfully prevent. The 8am floor is a scheduling policy, it needs the
+    // exact local minute to evaluate, and rules have no timezone library, so it
+    // lives in the client where it can be evaluated correctly and explained to
+    // the person it stops. The residual risk is a crew member who bypasses the
+    // app to clock in at 07:30, which records a true time half an hour early
+    // and shows up in the admin timesheet.
+
+    match /timeEntries/{entryId} {
+      allow read: if isAdmin()
+        || (onTheClock() && resource.data.uid == request.auth.uid);
+
+      // Crew open their own day, always as 'self', always open, always stamped
+      // now, so a day cannot be fabricated whole or backdated.
+      // Admin creates back-entries for anyone, at any time, marked 'admin'.
+      allow create: if isAdmin()
+        ? (request.resource.data.source == 'admin'
+           && request.resource.data.enteredBy == request.auth.uid)
+        : (onTheClock()
+           && request.resource.data.uid == request.auth.uid
+           && request.resource.data.source == 'self'
+           && request.resource.data.clockOut == null
+           && stampedNow(request.resource.data.clockIn));
+
+      // Crew close their own open day and touch nothing else on it. An admin
+      // may edit anything, at any age, and is the only role that can.
+      allow update: if isAdmin()
+        || (onTheClock()
+            && resource.data.uid == request.auth.uid
+            && resource.data.clockOut == null
+            && request.resource.data.uid == resource.data.uid
+            && request.resource.data.day == resource.data.day
+            && request.resource.data.clockIn == resource.data.clockIn
+            && request.resource.data.source == resource.data.source
+            && request.resource.data.clockOut != null
+            && stampedNow(request.resource.data.clockOut)
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['clockOut', 'lunchMinutes', 'workedThroughLunch']));
+
+      allow delete: if isAdmin();
+    }
+
+    // The correction history lives here and NOT on the entry, because crew can
+    // read their own entries and anything stored there would be readable by
+    // them whatever the interface chooses to render. Admin only, both ways.
+    // This rule is what makes "the crew never see corrections" true rather
+    // than cosmetic.
+    match /timeCorrections/{correctionId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /unitSessions/{sessionId} {
+      allow read: if isAdmin()
+        || (onTheClock() && resource.data.uid == request.auth.uid);
+
+      allow create: if isAdmin()
+        || (onTheClock()
+            && request.resource.data.uid == request.auth.uid
+            && request.resource.data.endedAt == null
+            && stampedNow(request.resource.data.startedAt));
+
+      allow update: if isAdmin()
+        || (onTheClock()
+            && resource.data.uid == request.auth.uid
+            && request.resource.data.uid == resource.data.uid
+            && request.resource.data.startedAt == resource.data.startedAt
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['endedAt', 'endedReason']));
+
+      allow delete: if isAdmin();
+    }
+
     match /meta/project {
       allow read: if isActive();
       allow write: if isAdmin();

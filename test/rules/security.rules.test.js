@@ -1817,3 +1817,197 @@ describe('return phase — identity guards still apply on return transitions', (
     await assertFails(updateDoc(doc(dbAs(MOVER), 'overflow', 'o1'), { stage: 'returned', unitId: 'other-unit' }))
   })
 })
+
+// =====================================================================
+// Time clock: entries, sessions, and the admin-only correction history.
+// =====================================================================
+describe('timeEntries', () => {
+  const now = () => Date.now()
+  const entry = (over = {}) => ({
+    uid: PACKER, userName: 'Test packer-1', role: 'packer', day: '2026-09-10',
+    clockIn: now(), clockOut: null,
+    lunchMinutes: 0, workedThroughLunch: false, source: 'self', ...over,
+  })
+
+  it('a packer may open their own day', async () => {
+    await assertSucceeds(addDoc(collection(dbAs(PACKER), 'timeEntries'), entry()))
+  })
+
+  it('a mover may open their own day', async () => {
+    await assertSucceeds(addDoc(collection(dbAs(MOVER), 'timeEntries'),
+      entry({ uid: MOVER, userName: 'Test mover-1', role: 'mover' })))
+  })
+
+  it('a packer may not open a day for somebody else', async () => {
+    await assertFails(addDoc(collection(dbAs(PACKER), 'timeEntries'), entry({ uid: OTHER_PACKER })))
+  })
+
+  // The strongest guarantee here: a crew member can only stamp the moment they
+  // are actually in, so no clock-in can be invented or moved earlier.
+  it('a packer may not backdate their clock-in', async () => {
+    await assertFails(addDoc(collection(dbAs(PACKER), 'timeEntries'),
+      entry({ clockIn: now() - 3 * 3600000 })))
+  })
+
+  it('a packer may not post-date their clock-in either', async () => {
+    await assertFails(addDoc(collection(dbAs(PACKER), 'timeEntries'),
+      entry({ clockIn: now() + 3 * 3600000 })))
+  })
+
+  it('a packer may not create a day already marked as admin-entered', async () => {
+    await assertFails(addDoc(collection(dbAs(PACKER), 'timeEntries'), entry({ source: 'admin' })))
+  })
+
+  it('a packer may not create a day that is already closed', async () => {
+    await assertFails(addDoc(collection(dbAs(PACKER), 'timeEntries'),
+      entry({ clockOut: now() + 1000 })))
+  })
+
+  it('a viewer and a warehouse user may not create days at all', async () => {
+    for (const who of [VIEWER, WAREHOUSE]) {
+      await assertFails(addDoc(collection(dbAs(who), 'timeEntries'), entry({ uid: who })))
+    }
+  })
+
+  it('a packer may close their own open day', async () => {
+    await seed('timeEntries', 't1', entry())
+    await assertSucceeds(updateDoc(doc(dbAs(PACKER), 'timeEntries', 't1'), {
+      clockOut: now(), lunchMinutes: 30, workedThroughLunch: false,
+    }))
+  })
+
+  it('a packer may not move their own clock-in while closing', async () => {
+    await seed('timeEntries', 't1', entry())
+    await assertFails(updateDoc(doc(dbAs(PACKER), 'timeEntries', 't1'), {
+      clockOut: now(), clockIn: now() - 3600000,
+    }))
+  })
+
+  it('a packer may not fake an earlier clock-out', async () => {
+    await seed('timeEntries', 't1', entry())
+    await assertFails(updateDoc(doc(dbAs(PACKER), 'timeEntries', 't1'), {
+      clockOut: now() - 3 * 3600000,
+    }))
+  })
+
+  it('a packer may not reopen or edit a day that is already closed', async () => {
+    await seed('timeEntries', 't1', entry({ clockOut: now() }))
+    await assertFails(updateDoc(doc(dbAs(PACKER), 'timeEntries', 't1'), { clockOut: null }))
+    await assertFails(updateDoc(doc(dbAs(PACKER), 'timeEntries', 't1'), { lunchMinutes: 0 }))
+  })
+
+  it('a packer may not touch another packer day', async () => {
+    await seed('timeEntries', 't1', entry({ uid: OTHER_PACKER }))
+    await assertFails(updateDoc(doc(dbAs(PACKER), 'timeEntries', 't1'), { clockOut: now() }))
+  })
+
+  it('a packer reads their own days and nobody else', async () => {
+    await seed('timeEntries', 'mine', entry())
+    await seed('timeEntries', 'theirs', entry({ uid: OTHER_PACKER }))
+    await assertSucceeds(getDoc(doc(dbAs(PACKER), 'timeEntries', 'mine')))
+    await assertFails(getDoc(doc(dbAs(PACKER), 'timeEntries', 'theirs')))
+  })
+
+  it('an admin may back-enter a past day for someone, marked as admin', async () => {
+    await assertSucceeds(addDoc(collection(dbAs(ADMIN), 'timeEntries'), entry({
+      day: '2026-09-09',
+      clockIn: Date.parse('2026-09-09T15:00:00Z'),
+      clockOut: Date.parse('2026-09-09T23:30:00Z'),
+      lunchMinutes: 30, source: 'admin', enteredBy: ADMIN, notes: 'Worked before the app existed',
+    })))
+  })
+
+  it('an admin may edit a closed day', async () => {
+    await seed('timeEntries', 't1', entry({ clockOut: now(), lunchMinutes: 30 }))
+    await assertSucceeds(updateDoc(doc(dbAs(ADMIN), 'timeEntries', 't1'), {
+      clockIn: Date.parse('2026-09-10T16:00:00Z'),
+    }))
+  })
+})
+
+describe('timeCorrections', () => {
+  const corr = {
+    entryId: 't1', uid: PACKER, day: '2026-09-10', field: 'clockIn',
+    oldValue: 1, newValue: 2, byUid: ADMIN, byName: 'Casey P', at: 1,
+  }
+
+  it('an admin may write one', async () => {
+    await assertSucceeds(addDoc(collection(dbAs(ADMIN), 'timeCorrections'), corr))
+  })
+
+  it('a packer may not write one', async () => {
+    await assertFails(addDoc(collection(dbAs(PACKER), 'timeCorrections'), corr))
+  })
+
+  // These two are what make "the crew never see corrections" true rather than
+  // cosmetic. Hiding the field in the UI would leave it readable on the doc.
+  it('a packer may not read corrections, their own included', async () => {
+    await seed('timeCorrections', 'c1', corr)
+    await assertFails(getDoc(doc(dbAs(PACKER), 'timeCorrections', 'c1')))
+  })
+
+  it('a viewer may not read corrections either', async () => {
+    await seed('timeCorrections', 'c1', corr)
+    await assertFails(getDoc(doc(dbAs(VIEWER), 'timeCorrections', 'c1')))
+  })
+
+  // Casey's exact case: he moves a 9:15 clock-in to 9:00, and the packer sees
+  // 9:00 with nothing saying it was ever anything else.
+  it('a corrected entry carries no trace of the correction', async () => {
+    await seed('timeEntries', 't1', {
+      uid: PACKER, userName: 'Test packer-1', role: 'packer', day: '2026-09-10',
+      clockIn: Date.parse('2026-09-10T16:15:00Z'), clockOut: Date.parse('2026-09-11T00:00:00Z'),
+      lunchMinutes: 30, workedThroughLunch: false, source: 'self',
+    })
+    await assertSucceeds(updateDoc(doc(dbAs(ADMIN), 'timeEntries', 't1'), {
+      clockIn: Date.parse('2026-09-10T16:00:00Z'),
+    }))
+    const snap = await getDoc(doc(dbAs(PACKER), 'timeEntries', 't1'))
+    const data = snap.data()
+    if (data.clockIn !== Date.parse('2026-09-10T16:00:00Z')) throw new Error('packer should see the corrected time')
+    for (const leak of ['correctedBy', 'correctedAt', 'corrections', 'oldValue', 'previousClockIn']) {
+      if (data[leak] !== undefined) throw new Error(`entry leaked ${leak} to the packer`)
+    }
+  })
+})
+
+describe('unitSessions', () => {
+  const now = () => Date.now()
+  const sess = (over = {}) => ({
+    unitId: 'u1', uid: PACKER, userName: 'Test packer-1', day: '2026-09-10',
+    startedAt: now(), endedAt: null, endedReason: null, ...over,
+  })
+
+  it('a packer may open and close their own session', async () => {
+    await assertSucceeds(addDoc(collection(dbAs(PACKER), 'unitSessions'), sess()))
+    await seed('unitSessions', 's1', sess())
+    await assertSucceeds(updateDoc(doc(dbAs(PACKER), 'unitSessions', 's1'), {
+      endedAt: now(), endedReason: 'switched',
+    }))
+  })
+
+  it('a packer may not open a session as someone else', async () => {
+    await assertFails(addDoc(collection(dbAs(PACKER), 'unitSessions'), sess({ uid: OTHER_PACKER })))
+  })
+
+  it('a packer may not backdate the start of a session', async () => {
+    await assertFails(addDoc(collection(dbAs(PACKER), 'unitSessions'),
+      sess({ startedAt: now() - 4 * 3600000 })))
+  })
+
+  it('a packer may not close somebody else session', async () => {
+    await seed('unitSessions', 's1', sess({ uid: OTHER_PACKER }))
+    await assertFails(updateDoc(doc(dbAs(PACKER), 'unitSessions', 's1'), { endedAt: now() }))
+  })
+
+  it('a packer may not move the start of a session while closing it', async () => {
+    await seed('unitSessions', 's1', sess())
+    await assertFails(updateDoc(doc(dbAs(PACKER), 'unitSessions', 's1'), {
+      endedAt: now(), startedAt: now() - 3600000,
+    }))
+  })
+
+  it('a warehouse user may not open a session at all', async () => {
+    await assertFails(addDoc(collection(dbAs(WAREHOUSE), 'unitSessions'), sess({ uid: WAREHOUSE })))
+  })
+})
