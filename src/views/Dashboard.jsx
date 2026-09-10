@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { STAGES, stageOf, ROLES } from '../seed.js'
-import { surnameOf } from '../lib/mutations.js'
+import { surnameOf, loadingChecklist, loadingProgress, completeBoxes, LOADING_STEPS } from '../lib/mutations.js'
 import { activeCrew } from '../lib/reports.js'
 import { useStore } from '../store.jsx'
 import { Avatar } from '../ui.jsx'
@@ -100,6 +100,69 @@ function TodayBanner({ toast }) {
 // Who is signed in and what they are doing, for the people watching the
 // building rather than working it. Refreshes on its own so a "3 min ago"
 // does not sit there going stale while nobody touches the page.
+/* Load-outs under way.
+ *
+ * A unit sits at "packed" from the moment the packers finish until a mover
+ * closes it out, which can be a day or more. That says nothing about whether
+ * anyone has actually started on it. This panel answers the question the board
+ * cannot: which units a mover has picked up, who has it, and how far through.
+ */
+function LoadingNow({ openUnit }) {
+  const { state, currentUser } = useStore()
+  if (!currentUser || !['admin', 'viewer'].includes(currentUser.role)) return null
+
+  const started = state.units
+    .filter((u) => u.stage === 'packed' && loadingProgress(u).done > 0)
+    .map((u) => {
+      const list = loadingChecklist(u)
+      const done = list.filter((s) => s.done)
+      // Whoever ticked the most recent item is the person holding it now.
+      const latest = done.slice().sort((a, b) => (b.at || 0) - (a.at || 0))[0]
+      return {
+        unit: u,
+        by: latest ? latest.by : null,
+        at: latest ? latest.at : 0,
+        done: done.length,
+        total: LOADING_STEPS.length,
+        boxes: completeBoxes(u).length,
+        next: list.find((s) => !s.done),
+      }
+    })
+    .sort((a, b) => b.at - a.at)
+
+  if (started.length === 0) return null
+
+  return (
+    <div className="card" style={{ padding: '16px 20px', marginBottom: 14 }}>
+      <div className="row" style={{ marginBottom: 2 }}>
+        <div className="section-title grow" style={{ margin: 0 }}>Loading under way</div>
+        <span className="muted" style={{ fontWeight: 700 }}>{started.length}</span>
+      </div>
+      {started.map((r) => (
+        <div
+          key={r.unit.id}
+          onClick={() => openUnit(r.unit.id)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0',
+            borderTop: '1px solid var(--line)', cursor: 'pointer',
+          }}
+        >
+          <span className="cont-num" style={{ flex: 'none' }}>{r.unit.number}</span>
+          <span className="grow" style={{ minWidth: 0 }}>
+            <span style={{ fontWeight: 700 }}>{r.by || 'A mover'}</span>
+            <span className="muted"> · {surnameOf(r.unit.tenant)}</span>
+            <span className="muted" style={{ display: 'block', fontSize: 12.5 }}>
+              {r.boxes > 0 ? `${r.boxes} box${r.boxes === 1 ? '' : 'es'} logged · ` : ''}
+              {r.next ? `next: ${r.next.label.toLowerCase()}` : 'ready to close out'}
+            </span>
+          </span>
+          <b style={{ flex: 'none' }}>{r.done}/{r.total}</b>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function OnTheFloor({ openUnit }) {
   const { state, currentUser } = useStore()
   const [now, setNow] = useState(() => Date.now())
@@ -210,6 +273,7 @@ export default function Dashboard({ openUnit, toast }) {
       <TodayBanner toast={toast} />
 
       <OnTheFloor openUnit={openUnit} />
+      <LoadingNow openUnit={openUnit} />
 
       <div className="kpis">
         {/* I6 fix: denominator/count come from live state.units, not a hardcoded 100 */}
