@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import { useStore } from '../store.jsx'
+import { timesheet, fmtDuration } from '../lib/reports.js'
 import { Modal } from '../ui.jsx'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import { fmtScheduleDate, todayKey, progressForDay, targetStageForWork, scheduleForPhase, DEFAULT_RETURN_SCHEDULE } from '../lib/schedule.js'
@@ -83,6 +84,9 @@ export default function Schedule({ toast }) {
   // to remember to flip the tab; still switchable either way regardless.
   const [phase, setPhase] = useState(state.project?.returnPhase ? 'return' : 'out')
   const isAdmin = currentUser?.role === 'admin'
+  // Read once per render so every row on the page measures an open shift
+  // against the same instant.
+  const now = Date.now()
   const key = todayKey()
 
   const phaseSchedule = useMemo(() => scheduleForPhase(state.schedule, phase), [state.schedule, phase])
@@ -167,16 +171,8 @@ export default function Schedule({ toast }) {
               const { done, planned } = progressForDay(day, state.units)
               const hitPlan = isPast && planned > 0 && done >= planned
               const doneLabel = targetStageForWork(day.work)
-              return (
-                <div
-                  key={day.id}
-                  className="row"
-                  style={{
-                    padding: '14px 18px',
-                    borderBottom: i < byFloor[f].length - 1 ? '1px solid var(--line)' : 'none',
-                    background: isToday ? '#fffbeb' : 'transparent',
-                  }}
-                >
+              const row = (
+                <div className="row" style={{ padding: '14px 18px' }}>
                   <div style={{ width: 130, flexShrink: 0 }}>
                     <b>{fmtScheduleDate(day.date)}</b>
                     {isToday && <div style={{ color: 'var(--brand-ink)', fontSize: 12, fontWeight: 700 }}>Today</div>}
@@ -184,6 +180,42 @@ export default function Schedule({ toast }) {
                   <WorkPill work={day.work} />
                   <div className="grow muted">{done} of {planned} {doneLabel}{hitPlan ? ' ✓' : ''}</div>
                   {isAdmin && <button className="btn btn-ghost btn-sm" onClick={() => setEditing(day)}>Edit</button>}
+                </div>
+              )
+              // Who was on the clock that day, and for how long.
+              //
+              // An admin sees the whole crew. A packer or mover sees only
+              // themselves, and not because the screen hides the rest: the
+              // security rules only let them read their own entries, so the
+              // rest was never loaded. That is the same admin-only boundary
+              // the Timesheets page is built on, and it holds here for free.
+              const crewOnDay = timesheet(state.timeEntries, state.unitSessions, day.date, now)
+              return (
+                <div
+                  key={day.id}
+                  style={{
+                    borderBottom: i < byFloor[f].length - 1 ? '1px solid var(--line)' : 'none',
+                    background: isToday ? '#fffbeb' : 'transparent',
+                  }}
+                >
+                  {row}
+                  {crewOnDay.length > 0 && (
+                    <div style={{ padding: '0 18px 12px', display: 'flex', flexWrap: 'wrap', gap: '6px 16px' }}>
+                      {crewOnDay.map((r) => (
+                        <span key={r.entryId} style={{ fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          <span className="muted">{r.userName}</span>
+                          <b>{r.open ? 'on the clock' : fmtDuration(r.workedMs)}</b>
+                          {r.adminEntered && <span className="muted" style={{ fontSize: 11 }}>added</span>}
+                        </span>
+                      ))}
+                      {crewOnDay.length > 1 && (
+                        <span style={{ fontSize: 13, marginLeft: 'auto' }}>
+                          <span className="muted">Total </span>
+                          <b>{fmtDuration(crewOnDay.reduce((n, r) => n + r.workedMs, 0))}</b>
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
               )
             })}
