@@ -7,6 +7,7 @@ import EmptiesInButton from '../components/EmptiesInButton.jsx'
 import BigBoxSwapButton from '../components/BigBoxSwapButton.jsx'
 import DeliverReturnButton from '../components/DeliverReturnButton.jsx'
 import ReceiveContainerButton from '../components/ReceiveContainerButton.jsx'
+import { mayLoad } from '../lib/roles.js'
 
 // Lifecycle order the pool view groups by, matches CONT_STATUS in store.jsx:
 // empty (on site) → filling → full/ready → picked_up (in transit) → at_warehouse,
@@ -36,7 +37,7 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
   const [drUrl, setDrUrl] = useState(null)
   const [drError, setDrError] = useState(null)
 
-  const isMover = currentUser?.role === 'admin' || currentUser?.role === 'mover'
+  const isMover = mayLoad(currentUser?.role)
   const isWarehouse = currentUser?.role === 'admin' || currentUser?.role === 'warehouse'
 
   const groups = useMemo(() => {

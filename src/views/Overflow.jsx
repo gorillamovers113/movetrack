@@ -4,6 +4,7 @@ import { Modal, Lightbox, EventRow, AttributedMedia } from '../ui.jsx'
 import { captureMedia } from '../lib/upload.js'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import ReportOverflowButton from '../components/ReportOverflowButton.jsx'
+import { mayLoad } from '../lib/roles.js'
 
 // Lifecycle order the pool view groups by, matches OVERFLOW_STATUS in
 // store.jsx: identified (needs prep) → prepped (ready to transport) →
@@ -47,7 +48,7 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
   const [bUrl, setBUrl] = useState(null)
   const [bError, setBError] = useState(null)
 
-  const isMover = currentUser?.role === 'admin' || currentUser?.role === 'mover'
+  const isMover = mayLoad(currentUser?.role)
   const isWarehouse = currentUser?.role === 'admin' || currentUser?.role === 'warehouse'
   const isAdmin = currentUser?.role === 'admin'
 

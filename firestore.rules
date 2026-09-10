@@ -22,7 +22,33 @@ service cloud.firestore {
     // scoped to the specific stage transition their role owns (see the
     // transition helpers below). Admin is exempt from all of these checks.
     function isCrew() {
-      return isActive() && me().role in ['packer', 'mover', 'driver', 'warehouse'];
+      return isActive() && me().role in ['packer', 'mover', 'crew', 'driver', 'warehouse'];
+    }
+
+    /* Capability, not job title.
+     *
+     * The crew genuinely do both jobs on the same day. Before this there was no
+     * way to say so, so Aaron was made an ADMIN to let him switch between
+     * packing and loading, which handed him timesheets and team management to
+     * solve a rota problem and took him off the clock as a side effect.
+     *
+     * 'crew' holds both. Every check below asks whether you can pack or can
+     * load rather than what you are called, so the combined role is honoured
+     * everywhere without any single rule naming it. The two argument-taking
+     * forms are for the transition helpers, which are handed a role rather
+     * than reading it themselves.
+     */
+    function packs(role) {
+      return role == 'packer' || role == 'crew';
+    }
+    function loads(role) {
+      return role == 'mover' || role == 'crew';
+    }
+    function canPack() {
+      return isActive() && packs(me().role);
+    }
+    function canLoad() {
+      return isActive() && loads(me().role);
     }
 
     // meta/project.returnPhase gate for the return leg (see the return
@@ -52,10 +78,10 @@ service cloud.firestore {
     // progress and is allowed regardless of returnPhase (still role+stage
     // gated), so toggling the phase off never strands a unit mid-return.
     function unitTransitionOK(role, before, after) {
-      return (role == 'packer'
+      return (packs(role)
               && ((before == 'not_started' && after == 'packing')   // startPacking
                   || (before == 'packing' && after == 'packed')))   // finishPacking
-          || (role == 'mover'
+          || (loads(role)
               && ((before == 'packed' && after == 'loaded')         // loadUnit
                   || (before == 'loaded' && after == 'picked_up'))) // bigboxSwap (units in a full container)
           || (role == 'warehouse'
@@ -85,7 +111,7 @@ service cloud.firestore {
     // "tenant not home, come back after 2" against an apartment nobody has
     // opened yet, without that note claiming the unit into the packing queue.
     function unitStepWriteOK() {
-      return hasRole('packer')
+      return canPack()
           && resource.data.stage == request.resource.data.stage
           && (resource.data.stage == 'packing' || resource.data.stage == 'not_started')
           && request.resource.data.diff(resource.data).affectedKeys()
@@ -122,7 +148,7 @@ service cloud.firestore {
     // raised as a flag during the packed -> loaded transition, so this path
     // can never be used to clear somebody else's open flag.
     function unitLoadWriteOK() {
-      return hasRole('mover')
+      return canLoad()
           && resource.data.stage == 'packed'
           && request.resource.data.stage == 'packed'
           && request.resource.data.diff(resource.data).affectedKeys()
@@ -162,10 +188,10 @@ service cloud.firestore {
       return (role == 'warehouse'
               && ((before == 'at_warehouse' && after == 'return_loaded' && returnPhaseOn())  // loadForReturn (entry)
                   || (before == 'return_loaded' && after == 'return_transit')))               // dispatchReturn (its units)
-          || (role == 'mover'
+          || (loads(role)
               && ((before == 'return_transit' && after == 'back_on_site')    // deliverReturn (its units)
                   || (before == 'back_on_site' && after == 'unloaded')))     // unloadReturn
-          || (role == 'packer'
+          || (packs(role)
               && before == 'unloaded' && after == 'unpacked');               // unpackUnit, terminal
     }
 
@@ -182,7 +208,7 @@ service cloud.firestore {
     // container already on the return leg) and every later return hop are
     // continuations, allowed regardless of returnPhase.
     function containerTransitionOK(role, before, after) {
-      return (role == 'mover'
+      return (loads(role)
               && (((before == 'empty' || before == 'filling') && after == 'filling') // loadUnit
                   || (before == 'filling' && after == 'full')                        // markContainerFull
                   || (before == 'full' && after == 'picked_up')))                    // bigboxSwap
@@ -196,7 +222,7 @@ service cloud.firestore {
                   || (before == 'return_filling' && after == 'return_filling')       // loadForReturn (2nd+ unit, continuation)
                   || (before == 'return_filling' && after == 'return_full')          // markReturnFull
                   || (before == 'return_full' && after == 'return_transit')))        // dispatchReturn
-          || (role == 'mover'
+          || (loads(role)
               && ((before == 'return_transit' && after == 'back_on_site')            // deliverReturn
                   || (before == 'back_on_site' && after == 'returned_empty')));      // unloadReturn (last unit out)
     }
@@ -209,7 +235,7 @@ service cloud.firestore {
     // entry hop (transportOverflowBack) requires returnPhaseOn(). rt_transit
     // -> returned (returnOverflow) is a continuation, allowed regardless.
     function overflowTransitionOK(role, before, after) {
-      return (role == 'mover'
+      return (loads(role)
               && ((before == 'identified' && after == 'prepped')      // prepOverflow
                   || (before == 'prepped' && after == 'in_transit'))) // transportOverflow
           || (role == 'warehouse'
@@ -217,10 +243,10 @@ service cloud.firestore {
           || overflowReturnTransitionOK(role, before, after);
     }
     function overflowReturnTransitionOK(role, before, after) {
-      return (role == 'mover'
+      return (loads(role)
               && ((before == 'at_warehouse' && after == 'rt_transit' && returnPhaseOn())  // transportOverflowBack (entry)
                   || (before == 'rt_transit' && after == 'returned')))                     // returnOverflow
-          || (role == 'packer'
+          || (packs(role)
               && before == 'rt_transit' && after == 'returned');       // returnOverflow
     }
 
@@ -318,7 +344,7 @@ service cloud.firestore {
       allow read: if isActive();
 
       // createUnit: admin, or packer starting a fresh unit at not_started.
-      allow create: if (isAdmin() || hasRole('packer'))
+      allow create: if (isAdmin() || canPack())
         && request.resource.data.stage == 'not_started';
 
       // admin may edit/fix/adjust anything; a crew member may only advance
@@ -342,7 +368,7 @@ service cloud.firestore {
 
       // logEmpties / bigboxSwap new-empties: admin, or mover dropping a
       // fresh empty container.
-      allow create: if (isAdmin() || hasRole('mover'))
+      allow create: if (isAdmin() || canLoad())
         && request.resource.data.status == 'empty'
         && request.resource.data.unitIds == [];
 
@@ -366,7 +392,7 @@ service cloud.firestore {
       // identified, and createdBy must be the caller (mirrors events.uid
       // below) so custody of a freshly identified item can't be forged onto
       // someone else from the very first write.
-      allow create: if (isAdmin() || hasRole('packer') || hasRole('mover'))
+      allow create: if (isAdmin() || canPack() || canLoad())
         && request.resource.data.stage == 'identified'
         && request.resource.data.createdBy == request.auth.uid;
 
@@ -402,7 +428,7 @@ service cloud.firestore {
     // Only packers and movers keep time. Everyone else is either off the clock
     // or is the person reviewing it.
     function onTheClock() {
-      return isActive() && (hasRole('packer') || hasRole('mover'));
+      return isActive() && (canPack() || canLoad());
     }
 
     // A crew member may only stamp the moment they are actually in. Rules have

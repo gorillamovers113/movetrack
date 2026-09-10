@@ -448,3 +448,54 @@ describe('a unit that is still being packed', () => {
     expect(sessionPhase(live[0], { id: 'u9', stage: 'packed' }, nowAMover)).toBe('loading')
   })
 })
+
+/* The combined packer + mover role.
+ *
+ * Its stamped role says nothing about which job an hour was, deliberately, so
+ * every session it writes has to be settled by the unit's own timeline. That
+ * is the same machinery that already fixed Liv, exercised from the other
+ * direction: there the role was wrong, here it is absent by design. */
+describe('somebody who packs and loads', () => {
+  const CREW_USER = [{ uid: 'aaron', name: 'Aaron Soto', role: 'crew' }]
+  const sess2 = (startIso, endIso, over = {}) => ({
+    unitId: 'u1', uid: 'aaron', userName: 'Aaron Soto', role: 'crew',
+    day: '2026-09-11', startedAt: at(startIso), endedAt: at(endIso), ...over,
+  })
+  const unit = {
+    id: 'u1', stage: 'packed', steps: {}, vaults: [], media: [],
+    times: { packStart: at('2026-09-11T16:00:00Z'), packEnd: at('2026-09-11T19:00:00Z') },
+  }
+
+  it('splits one person one day across both phases by when they worked', () => {
+    const sessions = [
+      sess2('2026-09-11T16:00:00Z', '2026-09-11T19:00:00Z'),  // during packing
+      sess2('2026-09-11T20:00:00Z', '2026-09-11T21:00:00Z'),  // after packEnd
+    ]
+    const s = unitSummary({ unit, sessions, users: CREW_USER })
+    expect(s.packing.totalMs).toBe(3 * H)
+    expect(s.loading.totalMs).toBe(H)
+    expect(s.totals.labourMs).toBe(4 * H)
+  })
+
+  it('counts work on a unit that is still being packed as packing', () => {
+    const midPack = { ...unit, stage: 'packing', times: { packStart: at('2026-09-11T16:00:00Z') } }
+    const s = unitSummary({ unit: midPack, sessions: [sess2('2026-09-11T16:00:00Z', '2026-09-11T18:00:00Z')], users: CREW_USER })
+    expect(s.packing.totalMs).toBe(2 * H)
+    expect(s.loading.totalMs).toBe(0)
+  })
+
+  it('falls to loading on a packed unit with no timeline to read', () => {
+    expect(sessionPhase(sess2('2026-09-11T16:00:00Z', '2026-09-11T17:00:00Z'), { id: 'u1', stage: 'packed' }, CREW_USER))
+      .toBe('loading')
+  })
+
+  it('shows up under both headings on the same unit', () => {
+    const sessions = [
+      sess2('2026-09-11T16:00:00Z', '2026-09-11T19:00:00Z'),
+      sess2('2026-09-11T20:00:00Z', '2026-09-11T21:00:00Z'),
+    ]
+    const s = unitSummary({ unit, sessions, users: CREW_USER })
+    expect(s.packing.people[0].userName).toBe('Aaron Soto')
+    expect(s.loading.people[0].userName).toBe('Aaron Soto')
+  })
+})

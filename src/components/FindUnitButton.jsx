@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react'
 import { useStore } from '../store.jsx'
 import { Modal, StagePill } from '../ui.jsx'
 import { surnameOf, stickerHex, inventoryRangeLabel, readyToReceive } from '../lib/mutations.js'
+import { canLoad, canPack } from '../lib/roles.js'
 
 /* "Start a unit" for crew on the floor.
  *
@@ -33,7 +34,7 @@ export default function FindUnitButton({ openUnit, toast, fullWidth }) {
   // of a half-packed room, and find every write refused by the rules. Better
   // to say so at the door than to let them start.
   const tooEarly = !!match && (
-    (currentUser.role === 'mover' && (match.stage === 'not_started' || match.stage === 'packing'))
+    (canLoad(currentUser.role) && !canPack(currentUser.role) && (match.stage === 'not_started' || match.stage === 'packing'))
     // The warehouse books in what the movers have loaded, nothing earlier.
     || (currentUser.role === 'warehouse' && !readyToReceive(match) && match.stage !== 'at_warehouse')
   )

@@ -9,6 +9,7 @@ import { unitLabour, fmtDuration } from '../lib/reports.js'
 import ReportOverflowButton from '../components/ReportOverflowButton.jsx'
 import LoadOutCard from '../components/LoadOutCard.jsx'
 import UnitSummaryCard from '../components/UnitSummaryCard.jsx'
+import { mayPack, mayLoad } from '../lib/roles.js'
 import ReceiveCard from '../components/ReceiveCard.jsx'
 import { crewOnUnit } from '../lib/reports.js'
 
@@ -112,7 +113,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
   const sealing = useRef(false)
   useEffect(() => {
     if (!unit || unit.stage !== 'packing') return
-    if (currentUser.role !== 'packer' && currentUser.role !== 'admin') return
+    if (!mayPack(currentUser.role)) return
     if (sealing.current || !packingComplete(unit, events)) return
     sealing.current = true
     Promise.resolve(dispatch({ type: 'sealPacking', p: { unitId } }))
@@ -149,11 +150,11 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
   // and a separate line in the activity feed carrying the name and time of
   // whoever did it. Every other stage (loading, warehouse, the return leg)
   // keeps the single-action flow it already had.
-  const onChecklist = (currentUser.role === 'packer' || currentUser.role === 'admin')
+  const onChecklist = mayPack(currentUser.role)
     && (unit.stage === 'not_started' || unit.stage === 'packing')
   // The mover's equivalent, on a unit the packers have finished. Same one
   // item, one save, one name-and-time shape as the packing checklist.
-  const onLoadOut = (currentUser.role === 'mover' || currentUser.role === 'admin')
+  const onLoadOut = mayLoad(currentUser.role)
     && unit.stage === 'packed'
   // The warehouse manager's arrival check. readyToReceive accepts 'loaded' as
   // well as 'picked_up' because the drivers do not use the app.

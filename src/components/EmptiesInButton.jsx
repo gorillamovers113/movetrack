@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useStore } from '../store.jsx'
 import { Modal } from '../ui.jsx'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
+import { mayLoad } from '../lib/roles.js'
 
 // "＋ Empties in": BigBox drops off a batch of empty containers on site
 // (5 at a time is the norm, but any count works). One screen: add rows,
@@ -13,7 +14,7 @@ export default function EmptiesInButton({ toast }) {
   const [rows, setRows] = useState(['', '', '', '', ''])
   const [busy, setBusy] = useState(false)
 
-  if (!currentUser || !['admin', 'mover'].includes(currentUser.role)) return null
+  if (!currentUser || !mayLoad(currentUser.role)) return null
 
   const openModal = () => { setRows(['', '', '', '', '']); setOpen(true) }
   const close = () => { if (!busy) setOpen(false) }

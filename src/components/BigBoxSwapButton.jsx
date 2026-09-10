@@ -3,6 +3,7 @@ import { useStore } from '../store.jsx'
 import { Modal } from '../ui.jsx'
 import { captureMedia } from '../lib/upload.js'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
+import { mayLoad } from '../lib/roles.js'
 
 // "BigBox swap": the driver hands off full containers and drops new empties,
 // but never touches the app. The on-site mover is the custody witness: pick
@@ -24,7 +25,7 @@ export default function BigBoxSwapButton({ toast }) {
 
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview) }, [preview])
 
-  if (!currentUser || !['admin', 'mover'].includes(currentUser.role)) return null
+  if (!currentUser || !mayLoad(currentUser.role)) return null
 
   const fulls = state.containers.filter((c) => c.status === 'full')
 

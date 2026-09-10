@@ -24,6 +24,7 @@ const WAREHOUSE = 'warehouse-1'
 const VIEWER = 'viewer-1'
 const PENDING = 'pending-1'
 const OTHER_PACKER = 'packer-2' // for the "forged event uid" test
+const BOTH = 'crew-1' // packer + mover in one person
 
 let testEnv
 
@@ -54,6 +55,7 @@ beforeEach(async () => {
       [VIEWER]: { role: 'viewer', status: 'active' },
       [PENDING]: { role: null, status: 'pending' },
       [OTHER_PACKER]: { role: 'packer', status: 'active' },
+      [BOTH]: { role: 'crew', status: 'active' },
     }
     await Promise.all(
       Object.entries(users).map(([uid, u]) =>
@@ -2044,5 +2046,72 @@ describe('unitSessions', () => {
 
   it('a warehouse user may not open a session at all', async () => {
     await assertFails(addDoc(collection(dbAs(WAREHOUSE), 'unitSessions'), sess({ uid: WAREHOUSE })))
+  })
+})
+
+/* The combined packer + mover role.
+ *
+ * Before this existed the only way to let one person do both jobs was to make
+ * them an admin, which handed them timesheets, corrections and team
+ * management to solve a rota problem. These tests are what make sure the new
+ * role is exactly two jobs and not a third set of powers.
+ */
+describe('somebody who packs and loads', () => {
+  it('may start and finish packing, like a packer', async () => {
+    await seed('units', 'u1', baseUnit({ stage: 'not_started' }))
+    await assertSucceeds(updateDoc(doc(dbAs(BOTH), 'units', 'u1'), { stage: 'packing' }))
+    await seed('units', 'u2', baseUnit({ stage: 'packing' }))
+    await assertSucceeds(updateDoc(doc(dbAs(BOTH), 'units', 'u2'), { stage: 'packed' }))
+  })
+
+  it('may tick a packing checklist item mid-pack, like a packer', async () => {
+    await seed('units', 'u1', baseUnit({ stage: 'packing' }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(BOTH), 'units', 'u1'), {
+        'steps.door': { uid: BOTH, userName: 'Test crew-1', at: 1 },
+        'crew.packers': arrayUnion(BOTH),
+      })
+    )
+  })
+
+  it('may open a vault and close the unit out, like a mover', async () => {
+    await seed('units', 'u1', baseUnit({ stage: 'packed' }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(BOTH), 'units', 'u1'), {
+        vaults: arrayUnion({ number: 'BB-1', uid: BOTH, userName: 'Test crew-1', at: 1 }),
+        'crew.movers': arrayUnion(BOTH),
+      })
+    )
+    await assertSucceeds(updateDoc(doc(dbAs(BOTH), 'units', 'u1'), { stage: 'loaded' }))
+  })
+
+  it('keeps the clock, which is what being made an admin quietly took away', async () => {
+    await assertSucceeds(
+      setDoc(doc(dbAs(BOTH), 'timeEntries', 'e1'), {
+        uid: BOTH, userName: 'Test crew-1', day: '2026-09-11',
+        clockIn: Date.now(), clockOut: null, lunchMinutes: 0, source: 'self', role: 'crew',
+      })
+    )
+  })
+
+  it('is still only two jobs: no warehouse receiving', async () => {
+    await seed('units', 'u1', baseUnit({ stage: 'loaded' }))
+    await assertFails(updateDoc(doc(dbAs(BOTH), 'units', 'u1'), { stage: 'at_warehouse' }))
+  })
+
+  it('is still only two jobs: cannot touch the roster or anybody else', async () => {
+    await assertFails(updateDoc(doc(dbAs(BOTH), 'users', PACKER), { role: 'admin' }))
+    await assertFails(updateDoc(doc(dbAs(BOTH), 'users', BOTH), { role: 'admin' }))
+  })
+
+  it('is still only two jobs: cannot correct a time entry', async () => {
+    await assertFails(
+      setDoc(doc(dbAs(BOTH), 'timeCorrections', 'c1'), { entryId: 'e1', field: 'clockIn', oldValue: 1, newValue: 2, byUid: BOTH })
+    )
+  })
+
+  it('cannot skip a stage any more than a packer or mover can', async () => {
+    await seed('units', 'u1', baseUnit({ stage: 'not_started' }))
+    await assertFails(updateDoc(doc(dbAs(BOTH), 'units', 'u1'), { stage: 'loaded' }))
   })
 })

@@ -56,6 +56,8 @@ export const ROLES = {
   admin: { label: 'Admin', color: '#f59e0b' },
   packer: { label: 'Packer / prep', color: '#14b8a6' },
   mover: { label: 'Mover', color: '#8b5cf6' },
+  // Holds both jobs, for the crew who genuinely do both on the same day.
+  crew: { label: 'Packer + Mover', color: '#0ea5e9' },
   warehouse: { label: 'Warehouse', color: '#3b82f6' },
   driver: { label: 'Driver (pickup & delivery)', color: '#f97316' },
   viewer: { label: 'Viewer (read-only)', color: '#3b82f6' },

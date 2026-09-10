@@ -1,3 +1,4 @@
+import { mayPack, mayLoad } from './roles.js'
 export const STAGES = ['not_started', 'packing', 'packed', 'loaded', 'picked_up', 'at_warehouse']
 
 export function nextStage(stage) {
@@ -58,8 +59,8 @@ export function nextReturnUnitAction(role, stage) {
   const admin = role === 'admin'
   switch (stage) {
     case 'at_warehouse': return admin || role === 'warehouse' ? { key: 'loadForReturn', label: 'Load for return' } : null
-    case 'back_on_site': return admin || role === 'mover' ? { key: 'unloadReturn', label: 'Unload into apartment' } : null
-    case 'unloaded': return admin || role === 'packer' ? { key: 'unpackUnit', label: 'Unpack' } : null
+    case 'back_on_site': return mayLoad(role) ? { key: 'unloadReturn', label: 'Unload into apartment' } : null
+    case 'unloaded': return mayPack(role) ? { key: 'unpackUnit', label: 'Unpack' } : null
     default: return null
   }
 }
@@ -75,8 +76,8 @@ export function nextReturnContainerAction(role, status) {
 export function nextReturnOverflowAction(role, stage) {
   const admin = role === 'admin'
   switch (stage) {
-    case 'at_warehouse': return admin || role === 'mover' ? { key: 'transportOverflowBack', label: 'Load & transport back to site' } : null
-    case 'rt_transit': return admin || role === 'mover' || role === 'packer' ? { key: 'returnOverflow', label: 'Unwrap & place back' } : null
+    case 'at_warehouse': return mayLoad(role) ? { key: 'transportOverflowBack', label: 'Load & transport back to site' } : null
+    case 'rt_transit': return mayLoad(role) || mayPack(role) ? { key: 'returnOverflow', label: 'Unwrap & place back' } : null
     default: return null
   }
 }

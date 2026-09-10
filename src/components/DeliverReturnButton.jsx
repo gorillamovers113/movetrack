@@ -4,6 +4,7 @@ import { Modal } from '../ui.jsx'
 import { captureMedia } from '../lib/upload.js'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import { matchContainerByNumber } from '../lib/mutations.js'
+import { mayLoad } from '../lib/roles.js'
 
 // "Receive returning BigBox": the blind container-number check on the
 // return leg's deliver step (docs/superpowers/specs/2026-08-26-return-phase-design.md,
@@ -32,7 +33,7 @@ export default function DeliverReturnButton({ toast }) {
 
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview) }, [preview])
 
-  if (!currentUser || !['admin', 'mover'].includes(currentUser.role)) return null
+  if (!currentUser || !mayLoad(currentUser.role)) return null
 
   const openModal = () => {
     setTyped(''); setMismatch(false); setBusy(false)

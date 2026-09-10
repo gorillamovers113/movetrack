@@ -8,6 +8,7 @@ import { stepRow, pushRows } from './lib/sheetBackup.js'
 import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction, sumCartons, PACKING_STEPS, REQUIRED_STEPS, packingChecklist, wouldCompletePacking, LOADING_STEPS, loadingComplete, normalizeVaultNumber, vaultsOf, vaultCountMismatch, RECEIVING_STEPS, receivingComplete, readyToReceive } from './lib/mutations.js'
 import { DEFAULT_SCHEDULE, DEFAULT_RETURN_SCHEDULE, scheduleDocId } from './lib/schedule.js'
 import { stageOf } from './seed.js'
+import { mayPack, mayLoad } from './lib/roles.js'
 
 // meta/project doc default, used whenever the doc is absent (brand-new
 // project, or before an admin has touched return phase). Keeps name/address
@@ -275,9 +276,9 @@ export function canAct(user, unit, returnPhase = false) {
   }
   const admin = role === 'admin'
   switch (unit.stage) {
-    case 'not_started': return admin || role === 'packer' ? { key: 'startPacking', label: 'Start packing' } : null
-    case 'packing': return admin || role === 'packer' ? { key: 'finishPacking', label: 'Finish packing' } : null
-    case 'packed': return admin || role === 'mover' ? { key: 'loadUnit', label: 'Load into vaults' } : null
+    case 'not_started': return mayPack(role) ? { key: 'startPacking', label: 'Start packing' } : null
+    case 'packing': return mayPack(role) ? { key: 'finishPacking', label: 'Finish packing' } : null
+    case 'packed': return mayLoad(role) ? { key: 'loadUnit', label: 'Load into vaults' } : null
     // Both stages go to the warehouse. 'loaded' is here because the drivers do
     // not use the app, so nothing ever marks a unit picked up and the
     // warehouse would otherwise never see any work waiting.
@@ -309,7 +310,7 @@ export function containerAction(user, cont, _returnPhase = false) {
   const admin = user.role === 'admin'
   switch (cont.status) {
     case 'filling':
-      return admin || user.role === 'mover' ? { key: 'markContainerFull', label: 'Mark full, ready for pickup' } : null
+      return mayLoad(user.role) ? { key: 'markContainerFull', label: 'Mark full, ready for pickup' } : null
     default:
       return null
   }
@@ -351,7 +352,7 @@ export function overflowAction(user, item, returnPhase = false) {
   const admin = user.role === 'admin'
   switch (item.stage) {
     case 'prepped':
-      return admin || user.role === 'mover' ? { key: 'transportOverflow', label: 'Load & transport to warehouse' } : null
+      return mayLoad(user.role) ? { key: 'transportOverflow', label: 'Load & transport to warehouse' } : null
     default:
       return null
   }

@@ -22,7 +22,7 @@ export const LUNCH_THRESHOLD_MS = 5 * 60 * 60 * 1000
 
 // Only these two roles keep time. Everyone else is either off the clock or is
 // the person reviewing it.
-export const CLOCK_ROLES = ['packer', 'mover']
+export const CLOCK_ROLES = ['packer', 'mover', 'crew']
 
 export function usesClock(role) {
   return CLOCK_ROLES.indexOf(role) !== -1

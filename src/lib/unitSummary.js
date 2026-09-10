@@ -19,6 +19,7 @@ import {
   sumCartons, cartonSummary, sumSupplies, supplySummary, inventoryRangeLabel,
 } from './mutations.js'
 import { sessionMs } from './timeclock.js'
+import { CREW } from './roles.js'
 
 // A person's role at the time, preferring what the session recorded. Sessions
 // written before roles were stamped fall back to the roster, which is right
@@ -86,6 +87,10 @@ export function sessionPhase(session, unit, users) {
   const role = sessionRole(session, users)
   if (role === 'mover') return 'loading'
   if (role === 'packer') return 'packing'
+  // The combined role is ambiguous by design, which is the whole point of it.
+  // Everything above has already failed, so the unit is past packing with no
+  // packEnd recorded: on that unit the only work left is loading.
+  if (role === CREW) return 'loading'
   return null
 }
 

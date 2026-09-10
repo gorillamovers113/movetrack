@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import { useStore } from '../store.jsx'
 import { Modal } from '../ui.jsx'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
+import { mayPack, mayLoad } from '../lib/roles.js'
 
 // "＋ Report overflow item" logs an oversized piece that won't fit inside a
 // BigBox container; Gorilla Movers transports it to the warehouse directly
@@ -16,7 +17,7 @@ export default function ReportOverflowButton({ unitId, toast, fullWidth = false 
   const [description, setDescription] = useState('')
   const [busy, setBusy] = useState(false)
 
-  if (!currentUser || !['admin', 'packer', 'mover'].includes(currentUser.role)) return null
+  if (!currentUser || !(mayPack(currentUser.role) || mayLoad(currentUser.role))) return null
 
   const unit = unitId ? state.units.find((u) => u.id === unitId) : null
   const ready = pickUnitId && description.trim()
