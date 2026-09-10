@@ -120,6 +120,38 @@ new day starts normally and the stale one goes to Casey's review queue. Blocking
 someone's morning because of a record only an admin can fix would punish the
 wrong person.
 
+## Admin back-entry
+
+Casey must be able to add a day for a packer or mover after the fact, for any
+past date, with a start time, a finish time and a note. The immediate need is
+real: the crew worked before the app existed, and days like that have to end up
+in the record rather than being lost because nobody tapped anything.
+
+**A back-entered day is marked as such and never disguised as a punch.** Every
+entry carries `source`, either `self` or `admin`. This is not decoration. A
+record the worker created and a record the boss created on their behalf are
+different kinds of evidence, and a system that renders them identically is worth
+less than one that admits the difference. Reports label them, and the person
+they belong to can see them.
+
+The 08:00 floor does **not** apply to back-entry. The floor is a control on when
+crew may start their own day; back-entry is recording what already happened, and
+history does not become false because it began at half past seven.
+
+Lunch on a back-entered day follows the same five-hour rule by default, and
+Casey can override the deducted minutes when he knows what actually happened. He
+is entering a fact he has other knowledge of, which is precisely the situation
+the auto-deduction is a poor substitute for.
+
+**A back-entered day carries no unit sessions.** Nobody can reconstruct which
+apartment someone was standing in at 11:40 last Tuesday, and inventing that
+attribution would poison the per-unit numbers to make a report look complete.
+The day contributes to that person's hours and to nothing else. See the
+reconciliation note under Reports.
+
+Back-entered days are corrected through the same admin path as any other, with
+the same audit trail.
+
 ## Forgetting to clock out
 
 The app invents nothing. The day stays open and appears in Casey's review queue,
@@ -148,8 +180,11 @@ timeEntries/{id}
   day            'YYYY-MM-DD'  business-timezone day key
   clockIn        number        ms epoch, exact
   clockOut       number|null   null while the day is open
-  lunchMinutes   number        0 or 30, computed at clock-out
+  lunchMinutes   number        0 or 30 by rule, or set by an admin
   workedThroughLunch  boolean
+  source         'self' | 'admin'   who created it, never inferred
+  notes          string        admin back-entry only, free text
+  enteredBy, enteredAt          the admin, when source is 'admin'
   correctedBy, correctedAt, corrections[]   admin edits, if any
 
 unitSessions/{id}
@@ -180,6 +215,10 @@ Mirrors the shape already used for `unitStepWriteOK` and `unitLoadWriteOK`.
   They may never change `clockIn`, `uid` or `day`.
 - **admin** may update anything, and is the only role that may modify a closed
   entry.
+- **admin** may create an entry for any packer or mover, on any date, with
+  `source == 'admin'`, `enteredBy == request.auth.uid`, and no 08:00 floor. Crew
+  may never create an entry with `source == 'admin'`, which is what stops the
+  marker being forged from a phone.
 - `unitSessions` follow the same ownership rule: create and close your own,
   never anyone else's.
 
@@ -189,10 +228,17 @@ that exists only in the client is a suggestion.
 ## Reports
 
 **Per person, per day:** clock-in, clock-out, lunch deducted, total worked,
-and any flags (open day, worked through lunch, admin-corrected).
+and any flags (open day, worked through lunch, admin-entered, admin-corrected).
+An admin-entered day shows its note.
 
 **Per unit:** total labour time, broken down by person, with each session
 listed. This is the answer to "how long did 906 take and who did it".
+
+**Reconciliation, honestly stated.** Unit time sums to the day's worked time
+only for days recorded through the app. A back-entered day has hours but no unit
+sessions, so any view that compares the two must say so rather than showing a
+silent shortfall that looks like missing work. The per-day report carries the
+unattributed remainder as its own line.
 
 **Per day, all crew:** the roll-up Casey asked for, one row per person.
 
@@ -226,7 +272,9 @@ Pure logic in `src/lib/` with vitest, following the existing suite:
 - worked-through-lunch removes the deduction
 - session summing, including several sessions per unit per person
 - that switching units closes the previous session exactly once
-- that totals across units reconcile with the day's worked time
+- that totals across units reconcile with the day's worked time for app-recorded
+  days, and that a back-entered day reports its hours as unattributed rather
+  than as a reconciliation failure
 
 Rules tests in `test/rules/` against the emulator, following the existing
 pattern of proving both the allowed write and the abuse:
@@ -237,6 +285,10 @@ pattern of proving both the allowed write and the abuse:
 - a packer may not alter `clockIn` when closing
 - a packer may not reopen or edit a closed entry
 - a viewer, warehouse user or admin-less caller may not create entries at all
+- an admin may create a back-dated entry for another user, before 08:00, with
+  `source: 'admin'`
+- a packer may not create an entry carrying `source: 'admin'`, for themselves or
+  anyone else
 
 ## Out of scope
 
@@ -247,6 +299,10 @@ Deliberately not in this iteration:
   recording them would add noise without adding a record anyone needs.
 - Geofencing or photo verification of punches. Worth revisiting if punches are
   ever disputed, not worth the friction before then.
-- Editing history by the crew. Corrections are an admin function by design.
+- Editing history by the crew. Corrections and back-entry are admin functions by
+  design.
+- Back-filling unit sessions for days worked before the app. The hours are
+  recoverable, the apartment-by-apartment attribution is not, and guessing it
+  would corrupt the only numbers this system exists to produce.
 - Exporting to the contractor company's payroll system. The reports and the
   existing Google Sheet mirror cover the immediate need.
