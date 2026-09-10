@@ -174,7 +174,7 @@ export function StoreProvider({ children }) {
     ts: m.ts || Date.now(),
   }))
 
-  async function dispatch({ type, p }) {
+  async function dispatch({ type, p = {} }) {
     const unit = p.unitId ? state.units.find((u) => u.id === p.unitId) : null
     const cont0 = p.containerId ? state.containers.find((c) => c.id === p.containerId) : null
     const over0 = p.overflowId ? state.overflow.find((o) => o.id === p.overflowId) : null
