@@ -131,8 +131,8 @@ in the record rather than being lost because nobody tapped anything.
 entry carries `source`, either `self` or `admin`. This is not decoration. A
 record the worker created and a record the boss created on their behalf are
 different kinds of evidence, and a system that renders them identically is worth
-less than one that admits the difference. Reports label them, and the person
-they belong to can see them.
+less than one that admits the difference. The admin reports label them; the
+marker is not shown to crew (see Visibility of corrections).
 
 The 08:00 floor does **not** apply to back-entry. The floor is a control on when
 crew may start their own day; back-entry is recording what already happened, and
@@ -167,8 +167,35 @@ Crew may start and end their own entries. That is all. They cannot edit a closed
 day, cannot alter a timestamp, and cannot touch anyone else's record. A time
 record that its subject can quietly revise is worth nothing in a dispute.
 
-Only an admin may correct a record. Every correction writes an audit event
-carrying the admin's name, the field, the old value and the new one.
+**Only an admin may edit a time or date stamp**, on any entry, at any age. Every
+edit writes an audit record carrying the admin's name, the field, the old value,
+the new one and when it happened.
+
+## Visibility of corrections
+
+Crew see their own days at their current values and nothing about how those
+values got there. They do not see that a stamp was edited, who edited it, or
+what it said before. Casey's decision.
+
+This has to be enforced in the data, not just in the interface. Hiding a field
+in the UI while leaving it readable on a document the crew member can fetch is
+not hiding it: anyone with the app open and a browser console can read the whole
+document. So corrections do **not** live on `timeEntries`. They live in a
+separate `timeCorrections` collection that only an admin can read or write, and
+`timeEntries` carries only the current values.
+
+Two things follow, and both matter:
+
+The audit trail is **hidden, not discarded**. Every edit is still recorded in
+full, permanently. The difference between not showing a worker their correction
+history and not keeping one is the difference between a private record and no
+record, and only the first is defensible.
+
+California gives workers the right to inspect their own time and payroll records
+on request, and the obligation to produce them sits with the contractor company
+as their employer. Keeping the trail in `timeCorrections` means it can always be
+produced. Not showing it inside this app is a product decision and does not
+affect that obligation either way.
 
 ## Data model
 
@@ -185,7 +212,16 @@ timeEntries/{id}
   source         'self' | 'admin'   who created it, never inferred
   notes          string        admin back-entry only, free text
   enteredBy, enteredAt          the admin, when source is 'admin'
-  correctedBy, correctedAt, corrections[]   admin edits, if any
+
+  NOTE: no correction history on this document. Crew can read their own
+  timeEntries, so anything stored here is visible to them whatever the UI
+  chooses to render.
+
+timeCorrections/{id}          admin read and write only
+  entryId, uid, day
+  field          'clockIn' | 'clockOut' | 'lunchMinutes' | 'notes'
+  oldValue, newValue
+  byUid, byName, at
 
 unitSessions/{id}
   unitId, uid, userName
@@ -221,6 +257,11 @@ Mirrors the shape already used for `unitStepWriteOK` and `unitLoadWriteOK`.
   marker being forged from a phone.
 - `unitSessions` follow the same ownership rule: create and close your own,
   never anyone else's.
+- **read** on `timeEntries`: an admin reads all; a packer or mover reads only
+  documents where `uid == request.auth.uid`. Viewers and warehouse read none.
+- **read** on `timeCorrections`: admin only. This is the rule that actually
+  delivers the invisibility, and the only one that cannot be worked around from
+  a phone.
 
 The 08:00 floor is enforced in the rules and not only in the UI, because a rule
 that exists only in the client is a suggestion.
@@ -289,6 +330,9 @@ pattern of proving both the allowed write and the abuse:
   `source: 'admin'`
 - a packer may not create an entry carrying `source: 'admin'`, for themselves or
   anyone else
+- a packer may read their own `timeEntries` and no one else's
+- a packer may not read `timeCorrections` at all, their own included, which is
+  the test that proves the hiding is real rather than cosmetic
 
 ## Out of scope
 
