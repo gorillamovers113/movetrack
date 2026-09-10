@@ -379,7 +379,12 @@ export const LOADING_STEPS = [
   { key: 'load_unit_photo', label: 'Photo of the unit, fully packed' },
   { key: 'load_sticker', label: 'Inventory sticker colour' },
   { key: 'load_number', label: 'Unit number' },
-  { key: 'load_boxes', label: 'Boxes loaded, logged and photographed', repeatable: true },
+  { key: 'load_vaults', label: 'Vaults loaded', repeatable: true },
+  // Counted off the truck at the end, not read back off the app. This only
+  // catches a vault nobody logged if the mover answers from what is in front
+  // of them, which is the same reason the sticker and the unit number are
+  // asked blind.
+  { key: 'load_vault_count', label: 'How many vaults' },
   // The empty apartment, once everything is out. This is the shot that answers
   // "was anything left behind" and "what condition was it left in", and it can
   // only be taken at one moment: after the last box goes and before the crew
@@ -403,44 +408,89 @@ export function stickerMismatch(unit, entered) {
 }
 
 export function unitNumberMismatch(unit, entered) {
-  const recorded = normalizeBoxNumber(unit && unit.number)
-  const typed = normalizeBoxNumber(entered)
+  const recorded = normalizeCode(unit && unit.number)
+  const typed = normalizeCode(entered)
   if (!recorded || !typed) return null
   return recorded === typed ? null : { recorded, entered: typed }
 }
 
-// One BigBox as the mover records it: the number off the side of the box, a
-// shot with the door open showing what went in, and a shot with it closed.
-// Both photos are required before the box counts, because the open-door shot
-// is the only record of what is inside and the closed-door shot is what shows
-// it was sealed in that state.
-export function boxComplete(box) {
-  return !!(box && String(box.number || '').trim() && box.openUrl && box.closedUrl)
+/* One vault, logged in three separate acts.
+ *
+ * The number, the door-open shot and the door-closed shot used to be a single
+ * form the mover had to fill in one sitting. On a real load those moments are
+ * far apart: you number the vault, you fill it, and only then can you shut it.
+ * Asking for all three at once meant either standing there holding a
+ * half-finished form or shooting both photos back to back, which makes the
+ * closed-door shot worthless as a record of what actually went in.
+ *
+ * So each part saves on its own, under its own name and time, and a vault
+ * counts as a record only when all three are in.
+ */
+export const VAULT_PARTS = [
+  { key: 'open', label: 'Photo, door open', hint: 'Tap for a photo or video, door open' },
+  { key: 'closed', label: 'Photo, door closed', hint: 'Tap for a photo or video, door closed' },
+]
+
+export function vaultComplete(vault) {
+  return !!(vault && String(vault.number || '').trim()
+    && vault.open && vault.open.url && vault.closed && vault.closed.url)
 }
 
-export function boxesOf(unit) {
-  return ((unit && unit.boxes) || []).filter(Boolean)
+export function vaultsOf(unit) {
+  return ((unit && unit.vaults) || []).filter(Boolean)
 }
 
-export function completeBoxes(unit) {
-  return boxesOf(unit).filter(boxComplete)
+export function completeVaults(unit) {
+  return vaultsOf(unit).filter(vaultComplete)
 }
 
-// A box number is written on the side of a physical container, so it is
-// matched the way a person would read it: case and surrounding space are not
-// part of the identity. "bb-1007 " and "BB-1007" are the same box.
-export function normalizeBoxNumber(n) {
+// How far through one vault the crew are. The number always counts as done: a
+// vault does not exist on the unit until somebody types it.
+export function vaultProgress(vault) {
+  const shot = VAULT_PARTS.filter((part) => vault && vault[part.key] && vault[part.key].url).length
+  return { done: 1 + shot, total: VAULT_PARTS.length + 1 }
+}
+
+// The last moment anybody touched this vault. Orders the list on the mover's
+// card and tells the dashboard who is holding the unit right now.
+export function vaultTouchedAt(vault) {
+  if (!vault) return 0
+  return VAULT_PARTS.reduce(
+    (n, part) => Math.max(n, (vault[part.key] && vault[part.key].at) || 0),
+    vault.at || 0,
+  )
+}
+
+// A vault number is painted on the side of a physical container, so it is
+// matched the way a person reads it: case and surrounding space are not part
+// of the identity. "bb-1007 " and "BB-1007" are the same vault.
+export function normalizeCode(n) {
   return String(n ?? '').trim().toUpperCase()
 }
 
-export function boxNumberError(n, unit) {
-  const v = normalizeBoxNumber(n)
-  if (!v) return 'Enter the number on the side of the box.'
-  if (v.length < 2) return 'That looks too short to be a box number.'
-  if (boxesOf(unit).some((b) => normalizeBoxNumber(b.number) === v)) {
-    return `Box ${v} is already logged on this unit.`
+export const normalizeVaultNumber = normalizeCode
+
+export function vaultNumberError(n, unit) {
+  const v = normalizeVaultNumber(n)
+  if (!v) return 'Enter the number on the side of the vault.'
+  if (v.length < 2) return 'That looks too short to be a vault number.'
+  if (vaultsOf(unit).some((b) => normalizeVaultNumber(b.number) === v)) {
+    return `Vault ${v} is already logged on this unit.`
   }
   return null
+}
+
+// What the mover counted off the truck against what they actually logged.
+// Same blind-check shape as stickerMismatch and unitNumberMismatch: null when
+// the two agree, and the two numbers when they do not.
+export function vaultCountMismatch(unit, typed) {
+  // Number('') is 0, not NaN. Without this guard a blank answer reads as
+  // "zero vaults" and flags a mismatch against a unit nobody has counted yet.
+  if (typed == null || String(typed).trim() === '') return null
+  const said = Number(typed)
+  if (!Number.isFinite(said)) return null
+  const logged = completeVaults(unit).length
+  return said === logged ? null : { said, logged }
 }
 
 // The mover's checklist, mirroring packingChecklist: done, by whom, when.
@@ -454,16 +504,21 @@ export function loadingChecklist(unit) {
     const s = steps[key]
     return s ? { done: true, by: s.userName || null, at: typeof s.at === 'number' ? s.at : null } : { done: false }
   }
-  const boxes = completeBoxes(unit).slice().sort((a, b) => (a.at || 0) - (b.at || 0))
-  const first = boxes[0]
+  // A vault that is started but not finished must keep the row open, so the
+  // row reports against complete vaults while the count reports every vault
+  // the crew have opened.
+  const started = vaultsOf(unit)
+  const done = completeVaults(unit).slice().sort((a, b) => vaultTouchedAt(a) - vaultTouchedAt(b))
+  const first = done[0]
   return LOADING_STEPS.map((s) => {
-    if (s.key === 'load_boxes') {
+    if (s.key === 'load_vaults') {
       return {
         ...s,
-        done: boxes.length > 0,
+        done: done.length > 0 && done.length === started.length,
         by: first ? first.userName || null : null,
-        at: first ? first.at || null : null,
-        count: boxes.length,
+        at: first ? vaultTouchedAt(first) : null,
+        count: done.length,
+        started: started.length,
       }
     }
     const r = recorded(s.key)
@@ -481,7 +536,12 @@ export function loadingProgress(unit) {
 // one box is fully logged. The mover still says when they are finished, since
 // only they know whether another box is coming.
 export function loadingComplete(unit) {
-  return loadingChecklist(unit).every((s) => s.done)
+  if (!loadingChecklist(unit).every((s) => s.done)) return false
+  // Every step can be ticked and the unit still be wrong: the mover counted
+  // three vaults off the truck and logged two. That is the one gap this whole
+  // count step exists to catch, so it also has to block the close.
+  const steps = (unit && unit.steps) || {}
+  return !vaultCountMismatch(unit, steps.load_vault_count && steps.load_vault_count.value)
 }
 
 // ---------------------------------------------------------------------------
@@ -498,7 +558,7 @@ export function loadingComplete(unit) {
 export const RECEIVING_STEPS = [
   { key: 'recv_number', label: 'Unit number' },
   { key: 'recv_lastname', label: "Tenant's last name" },
-  { key: 'recv_boxes', label: 'Box numbers received' },
+  { key: 'recv_vaults', label: 'Vault numbers received' },
 ]
 
 export function lastNameMismatch(unit, entered) {
@@ -513,9 +573,9 @@ export function lastNameMismatch(unit, entered) {
 // different things: a missing box is still on the truck or still on site, an
 // unexpected one belongs to another apartment and someone needs to find out
 // whose before it is put away.
-export function boxSetDiff(unit, typedNumbers = []) {
-  const expected = completeBoxes(unit).map((b) => normalizeBoxNumber(b.number))
-  const got = (typedNumbers || []).map(normalizeBoxNumber).filter(Boolean)
+export function vaultSetDiff(unit, typedNumbers = []) {
+  const expected = completeVaults(unit).map((b) => normalizeVaultNumber(b.number))
+  const got = (typedNumbers || []).map(normalizeVaultNumber).filter(Boolean)
   const expectedSet = new Set(expected)
   const gotSet = new Set(got)
   const missing = expected.filter((n) => !gotSet.has(n))
@@ -525,10 +585,10 @@ export function boxSetDiff(unit, typedNumbers = []) {
 
 // Free text off a phone keyboard: people separate box numbers with commas,
 // spaces, or new lines depending on the phone and the person.
-export function parseBoxNumbers(text) {
+export function parseVaultNumbers(text) {
   return String(text || '')
     .split(/[\s,;]+/)
-    .map(normalizeBoxNumber)
+    .map(normalizeVaultNumber)
     .filter(Boolean)
 }
 

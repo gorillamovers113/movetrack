@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { STAGES, stageOf, ROLES } from '../seed.js'
-import { surnameOf, loadingChecklist, loadingProgress, completeBoxes, LOADING_STEPS } from '../lib/mutations.js'
+import { surnameOf, loadingChecklist, loadingProgress, completeVaults, LOADING_STEPS } from '../lib/mutations.js'
 import { activeCrew } from '../lib/reports.js'
 import { useStore } from '../store.jsx'
 import { Avatar } from '../ui.jsx'
@@ -124,7 +124,7 @@ function LoadingNow({ openUnit }) {
         at: latest ? latest.at : 0,
         done: done.length,
         total: LOADING_STEPS.length,
-        boxes: completeBoxes(u).length,
+        vaults: completeVaults(u).length,
         next: list.find((s) => !s.done),
       }
     })
@@ -152,7 +152,7 @@ function LoadingNow({ openUnit }) {
             <span style={{ fontWeight: 700 }}>{r.by || 'A mover'}</span>
             <span className="muted"> · {surnameOf(r.unit.tenant)}</span>
             <span className="muted" style={{ display: 'block', fontSize: 12.5 }}>
-              {r.boxes > 0 ? `${r.boxes} box${r.boxes === 1 ? '' : 'es'} logged · ` : ''}
+              {r.vaults > 0 ? `${r.vaults} vault${r.vaults === 1 ? '' : 's'} logged · ` : ''}
               {r.next ? `next: ${r.next.label.toLowerCase()}` : 'ready to close out'}
             </span>
           </span>

@@ -250,3 +250,116 @@ describe('admin back-entry and corrections', () => {
     expect(await rows('timeCorrections')).toHaveLength(0)
   })
 })
+
+/* The vault flow, which is the one place two people work the same record.
+ *
+ * A vault is built up in three separate writes: the number when it is opened,
+ * then a door-open photo, then a door-closed photo. The photos land on an
+ * element that already exists, which arrayUnion cannot do, so that path reads
+ * the array and writes it back. With up to three movers on a unit that is a
+ * genuine lost-update risk, and these tests are what hold the transaction
+ * honest. */
+describe('logging a vault in three separate acts', () => {
+  const packed = { ...UNIT, stage: 'packed' }
+  const seedPacked = async () => setDoc(doc(db, 'units', UNIT.id), packed)
+  const unitRow = async () => (await rows('units')).find((u) => u.id === UNIT.id)
+
+  it('opening a vault records the number, the person and the time on its own', async () => {
+    await seedPacked()
+    await run(MOVER, { type: 'startVault', p: { unitId: UNIT.id, number: ' bb-1007 ' } },
+      makeState({ units: [packed] }))
+
+    const u = await unitRow()
+    expect(u.vaults).toHaveLength(1)
+    expect(u.vaults[0]).toMatchObject({ number: 'BB-1007', uid: MOVER.uid, userName: MOVER.name })
+    expect(u.vaults[0].at).toBeGreaterThan(0)
+    // No photos yet, and that is the whole point: the vault exists unfinished.
+    expect(u.vaults[0].open).toBeUndefined()
+    expect(u.vaults[0].closed).toBeUndefined()
+    expect(u.crew.movers).toContain(MOVER.uid)
+  })
+
+  it('creates the container when the vault is not on the board yet', async () => {
+    await seedPacked()
+    await run(MOVER, { type: 'startVault', p: { unitId: UNIT.id, number: 'BB-2001' } },
+      makeState({ units: [packed] }))
+    const conts = await rows('containers')
+    expect(conts).toHaveLength(1)
+    expect(conts[0]).toMatchObject({ number: 'BB-2001', status: 'filling' })
+    expect(conts[0].unitIds).toContain(UNIT.id)
+  })
+
+  it('each door photo saves on its own, stamped with whoever took it', async () => {
+    await seedPacked()
+    const state = makeState({ units: [packed] })
+    await run(MOVER, { type: 'startVault', p: { unitId: UNIT.id, number: 'BB-1' } }, state)
+    await run(MOVER, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-1', part: 'open', url: 'o.jpg' } }, state)
+
+    let u = await unitRow()
+    expect(u.vaults[0].open).toMatchObject({ url: 'o.jpg', kind: 'photo', userName: MOVER.name })
+    expect(u.vaults[0].closed).toBeUndefined()
+
+    // A different mover shuts it, and that is who the closed shot is credited to.
+    const other = { uid: 'mover-2', name: 'Sam Diaz', role: 'mover', status: 'active' }
+    await run(other, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'bb-1', part: 'closed', url: 'c.mp4', kind: 'video' } }, state)
+
+    u = await unitRow()
+    expect(u.vaults[0].open).toMatchObject({ userName: MOVER.name })
+    expect(u.vaults[0].closed).toMatchObject({ url: 'c.mp4', kind: 'video', userName: 'Sam Diaz' })
+    expect(u.crew.movers).toEqual(expect.arrayContaining([MOVER.uid, other.uid]))
+  })
+
+  it('a photo for a vault nobody opened is refused rather than silently dropped', async () => {
+    await seedPacked()
+    await expect(
+      run(MOVER, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-9', part: 'open', url: 'o.jpg' } },
+        makeState({ units: [packed] })),
+    ).rejects.toThrow(/not on this unit/i)
+  })
+
+  it('refuses a part that is not one of the two doors, and a failed upload', async () => {
+    await seedPacked()
+    const state = makeState({ units: [packed] })
+    await run(MOVER, { type: 'startVault', p: { unitId: UNIT.id, number: 'BB-1' } }, state)
+    await expect(run(MOVER, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-1', part: 'side', url: 'x' } }, state))
+      .rejects.toThrow(/unknown vault photo/i)
+    await expect(run(MOVER, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-1', part: 'open', url: null } }, state))
+      .rejects.toThrow(/did not upload/i)
+  })
+
+  // The reason this path is a transaction at all.
+  it('two movers photographing different vaults at once do not overwrite each other', async () => {
+    await seedPacked()
+    const state = makeState({ units: [packed] })
+    await run(MOVER, { type: 'startVault', p: { unitId: UNIT.id, number: 'BB-1' } }, state)
+    await run(MOVER, { type: 'startVault', p: { unitId: UNIT.id, number: 'BB-2' } }, state)
+
+    const other = { uid: 'mover-2', name: 'Sam Diaz', role: 'mover', status: 'active' }
+    await Promise.all([
+      run(MOVER, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-1', part: 'open', url: 'a.jpg' } }, state),
+      run(other, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-2', part: 'open', url: 'b.jpg' } }, state),
+    ])
+
+    const u = await unitRow()
+    expect(u.vaults).toHaveLength(2)
+    expect(u.vaults.find((v) => v.number === 'BB-1').open).toMatchObject({ url: 'a.jpg' })
+    expect(u.vaults.find((v) => v.number === 'BB-2').open).toMatchObject({ url: 'b.jpg' })
+  })
+
+  it('will not close a unit whose vault count disagrees with what was logged', async () => {
+    const steps = {
+      load_unit_photo: { userName: MOVER.name, at: 1 },
+      load_sticker: { userName: MOVER.name, at: 2, value: 'Pink', matched: true },
+      load_number: { userName: MOVER.name, at: 3, value: '906', matched: true },
+      load_vault_count: { userName: MOVER.name, at: 4, value: 3, matched: false },
+      load_after_photo: { userName: MOVER.name, at: 5 },
+    }
+    const shot = { url: 'u', kind: 'photo', uid: MOVER.uid, userName: MOVER.name, at: 6 }
+    const short = { ...packed, steps, vaults: [{ number: 'BB-1', uid: MOVER.uid, userName: MOVER.name, at: 1, open: shot, closed: shot }] }
+    await setDoc(doc(db, 'units', UNIT.id), short)
+
+    await expect(run(MOVER, { type: 'finishLoading', p: { unitId: UNIT.id } }, makeState({ units: [short] })))
+      .rejects.toThrow(/counted 3 vaults but 1 is fully logged/i)
+    expect((await unitRow()).stage).toBe('packed')
+  })
+})

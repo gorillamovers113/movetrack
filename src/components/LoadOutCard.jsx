@@ -5,8 +5,9 @@ import { captureMedia, uploadFile } from '../lib/upload.js'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import {
   LOADING_STEPS, loadingChecklist, loadingProgress, loadingComplete,
-  boxesOf, completeBoxes, boxNumberError, normalizeBoxNumber,
-  stickerMismatch, unitNumberMismatch, STICKER_COLORS, stickerHex,
+  VAULT_PARTS, vaultsOf, completeVaults, vaultComplete, vaultProgress, vaultTouchedAt,
+  vaultNumberError, normalizeVaultNumber, vaultCountMismatch,
+  stickerMismatch, unitNumberMismatch, STICKER_COLORS,
 } from '../lib/mutations.js'
 
 const SAVE_ERROR = "Couldn't save that. Check your signal and try again."
@@ -15,8 +16,8 @@ const SAVE_ERROR = "Couldn't save that. Check your signal and try again."
  *
  * Kept local to this card because the mover takes three or more photos per
  * unit and each needs its own independent state. Uploading as soon as the
- * shot is taken means the write at the end is a URL, not an image, so a box
- * gets logged in the time it takes to tap Save. */
+ * shot is taken means the write at the end is a URL, not an image, so a vault
+ * photo saves in the time it takes to tap Save. */
 function PhotoSlot({ label, path, url, setUrl, hint, setKind }) {
   const [preview, setPreview] = useState(null)
   const [isVideo, setIsVideo] = useState(false)
@@ -72,42 +73,64 @@ function PhotoSlot({ label, path, url, setUrl, hint, setKind }) {
  *
  * Deliberately the same shape as the packer's checklist, because the crew
  * swap roles day to day and a second thing to learn is a second thing to get
- * wrong. The one real difference is that boxes are repeatable: a unit averages
- * about two and a half BigBoxes, so "log the box" is a list, not a tick. */
+ * wrong.
+ *
+ * Vaults are the one place it differs. A unit takes two or three of them, and
+ * each is logged in three separate acts: the number when it is opened, a shot
+ * with the door open once it is full, and a shot with the door closed once it
+ * is sealed. Those happen far enough apart that a single form asking for all
+ * three at once was either abandoned half-filled or answered by taking both
+ * photos back to back, which defeats the point of having two.
+ */
 export default function LoadOutCard({ unit, toast }) {
   const { dispatch, currentUser } = useStore()
-  const [modal, setModal] = useState(null)     // step key, or 'box'
+  const [modal, setModal] = useState(null)     // a step key, or 'vault'
+  const [shot, setShot] = useState(null)       // { number, part } for one vault photo
   const [form, setForm] = useState({})
   const [busy, setBusy] = useState(false)
   const [unitPhoto, setUnitPhoto] = useState(null)
   const [unitPhotoKind, setUnitPhotoKind] = useState('photo')
   const [afterPhoto, setAfterPhoto] = useState(null)
   const [afterPhotoKind, setAfterPhotoKind] = useState('photo')
-  const [openUrl, setOpenUrl] = useState(null)
-  const [closedUrl, setClosedUrl] = useState(null)
+  const [vaultPhoto, setVaultPhoto] = useState(null)
+  const [vaultPhotoKind, setVaultPhotoKind] = useState('photo')
 
   const checklist = loadingChecklist(unit)
   const progress = loadingProgress(unit)
-  const boxes = boxesOf(unit)
+  const vaults = vaultsOf(unit).slice().sort((a, b) => vaultTouchedAt(a) - vaultTouchedAt(b))
   const ready = loadingComplete(unit)
+  const countOff = vaultCountMismatch(unit, unit.steps?.load_vault_count?.value)
 
-  const open = (key) => {
-    setForm({}); setUnitPhoto(null); setAfterPhoto(null); setOpenUrl(null); setClosedUrl(null); setModal(key)
+  const reset = () => {
+    setForm({}); setUnitPhoto(null); setAfterPhoto(null); setVaultPhoto(null)
   }
-  const close = () => { if (!busy) setModal(null) }
+  const open = (key) => { reset(); setShot(null); setModal(key) }
+  const openShot = (number, part) => { reset(); setModal(null); setShot({ number, part }) }
+  const close = () => { if (!busy) { setModal(null); setShot(null) } }
 
   const run = async (fn, done) => {
     if (busy) return
     setBusy(true)
     try {
       const status = await submitWrite(fn())
-      setModal(null)
+      setModal(null); setShot(null)
       toast(status === 'queued' ? QUEUED_MESSAGE : done)
     } catch (err) {
       toast(err.message || SAVE_ERROR)
     } finally {
       setBusy(false)
     }
+  }
+
+  const saveShot = () => {
+    if (!vaultPhoto) return toast('Add a photo or video first.')
+    const part = VAULT_PARTS.find((v) => v.key === shot.part)
+    return run(
+      () => dispatch({ type: 'logVaultPhoto', p: {
+        unitId: unit.id, number: shot.number, part: shot.part, url: vaultPhoto, kind: vaultPhotoKind,
+      } }),
+      `Vault ${shot.number} · ${part.label.toLowerCase()} saved ✓`,
+    )
   }
 
   const saveStep = () => {
@@ -158,14 +181,28 @@ export default function LoadOutCard({ unit, toast }) {
       )
     }
 
-    if (modal === 'box') {
-      const err = boxNumberError(form.box, unit)
-      if (err) return toast(err)
-      if (!openUrl) return toast('Add a photo or video of the box with the door open.')
-      if (!closedUrl) return toast('Add a photo or video of the box with the door closed.')
+    if (modal === 'load_vault_count') {
+      const typed = Number(form.count)
+      if (!Number.isInteger(typed) || typed < 1) return toast('Enter how many vaults this unit went into.')
+      const logged = completeVaults(unit).length
+      const bad = typed !== logged
       return run(
-        () => dispatch({ type: 'logBox', p: { unitId: unit.id, number: form.box, openUrl, closedUrl } }),
-        `Box ${normalizeBoxNumber(form.box)} logged ✓`,
+        () => dispatch({ type: 'completeLoadStep', p: {
+          unitId: unit.id, key: 'load_vault_count', value: typed,
+          matched: !bad, expected: logged,
+        } }),
+        bad
+          ? `⚑ Count flagged: ${typed} counted, ${logged} fully logged`
+          : `${typed} vault${typed === 1 ? '' : 's'} confirmed ✓`,
+      )
+    }
+
+    if (modal === 'vault') {
+      const err = vaultNumberError(form.vault, unit)
+      if (err) return toast(err)
+      return run(
+        () => dispatch({ type: 'startVault', p: { unitId: unit.id, number: form.vault } }),
+        `Vault ${normalizeVaultNumber(form.vault)} added ✓`,
       )
     }
   }
@@ -187,15 +224,17 @@ export default function LoadOutCard({ unit, toast }) {
         </div>
 
         {checklist.map((step, i) => {
-          // The boxes row is never "finished" the way the others are: another
-          // box can always be added, so it stays tappable once done.
-          const tappable = !step.done || step.repeatable
+          // The vaults row is never "finished" the way the others are: another
+          // vault can always be added, so it stays tappable once done. The
+          // count row stays tappable too, because correcting a miscount is the
+          // whole point of asking.
+          const tappable = !step.done || step.repeatable || step.key === 'load_vault_count'
           const Row = tappable ? 'button' : 'div'
           return (
             <Row
               key={step.key}
               type={tappable ? 'button' : undefined}
-              onClick={tappable ? () => open(step.repeatable ? 'box' : step.key) : undefined}
+              onClick={tappable ? () => open(step.repeatable ? 'vault' : step.key) : undefined}
               style={{
                 display: 'flex', alignItems: 'center', gap: 9, width: '100%', textAlign: 'left',
                 padding: tappable ? '10px' : '8px 10px', marginBottom: 4, borderRadius: 10,
@@ -211,8 +250,10 @@ export default function LoadOutCard({ unit, toast }) {
               <span style={{ minWidth: 0, flex: 1 }}>
                 <span style={{ color: step.done ? 'var(--ink-3, #6b7280)' : 'inherit', fontWeight: tappable && !step.done ? 600 : 400 }}>
                   {step.label}
-                  {step.repeatable && step.count > 0 && (
-                    <span className="muted" style={{ marginLeft: 7 }}>· {step.count}</span>
+                  {step.repeatable && step.started > 0 && (
+                    <span className="muted" style={{ marginLeft: 7 }}>
+                      · {step.count} of {step.started} finished
+                    </span>
                   )}
                 </span>
                 {step.done && (step.by || step.at) && (
@@ -228,20 +269,41 @@ export default function LoadOutCard({ unit, toast }) {
           )
         })}
 
-        {boxes.length > 0 && (
+        {vaults.length > 0 && (
           <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--line)' }}>
             <div className="muted" style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.04em', marginBottom: 6 }}>
-              BOXES ON THIS UNIT
+              VAULTS ON THIS UNIT
             </div>
-            {boxes.map((b) => (
-              <div key={b.number} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '4px 0', fontSize: 13.5 }}>
-                <span aria-hidden>📦</span>
-                <span className="grow"><b>{b.number}</b></span>
-                <span className="muted" style={{ fontSize: 12 }}>
-                  {b.userName || 'Crew'}{b.at ? ` · ${fmtTime(b.at)}` : ''}
-                </span>
-              </div>
-            ))}
+            {vaults.map((v) => {
+              const vp = vaultProgress(v)
+              return (
+                <div key={v.number} style={{ padding: '7px 0', borderTop: '1px solid var(--line)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 13.5 }}>
+                    <span aria-hidden>{vaultComplete(v) ? '🔒' : '🚪'}</span>
+                    <span className="grow"><b>{v.number}</b></span>
+                    <span className="muted" style={{ fontSize: 12 }}>{vp.done}/{vp.total}</span>
+                  </div>
+                  <div className="muted" style={{ fontSize: 12, marginLeft: 26 }}>
+                    Opened by {v.userName || 'Crew'}{v.at ? ` · ${fmtTime(v.at)}` : ''}
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, marginTop: 6, marginLeft: 26, flexWrap: 'wrap' }}>
+                    {VAULT_PARTS.map((part) => {
+                      const got = v[part.key]
+                      return (
+                        <button
+                          key={part.key} type="button"
+                          className={`btn btn-sm ${got ? 'btn-ghost' : 'btn-primary'}`}
+                          onClick={() => openShot(v.number, part.key)}
+                          title={got ? `${got.userName || 'Crew'} · ${fmtTime(got.at)}` : undefined}
+                        >
+                          {got ? '✓ ' : '📷 '}{part.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
           </div>
         )}
 
@@ -254,15 +316,17 @@ export default function LoadOutCard({ unit, toast }) {
           {busy ? 'Saving…' : ready ? `Mark unit ${unit.number} fully loaded` : 'Finish the checklist to close this unit'}
         </button>
         <div className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>
-          {ready
-            ? `${completeBoxes(unit).length} box${completeBoxes(unit).length === 1 ? '' : 'es'} logged. Only tap this once nothing else is going in.`
-            : 'Add every box before you close the unit. Each item saves on its own under your name.'}
+          {countOff
+            ? `You counted ${countOff.said} vault${countOff.said === 1 ? '' : 's'} off the truck, but ${countOff.logged} ${countOff.logged === 1 ? 'is' : 'are'} fully logged. Finish the missing one, or tap "How many vaults" to correct the count.`
+            : ready
+              ? `${completeVaults(unit).length} vault${completeVaults(unit).length === 1 ? '' : 's'} logged. Only tap this once nothing else is going in.`
+              : 'Add every vault before you close the unit. Each photo saves on its own under your name.'}
         </div>
       </div>
 
       {modal && (
         <Modal
-          title={modal === 'box' ? 'Log a box' : label ? label.label : ''}
+          title={modal === 'vault' ? 'Add a vault' : label ? label.label : ''}
           sub={`Unit ${unit.number} · logged as ${currentUser.name}, ${fmtTime(Date.now())}`}
           onClose={close}
         >
@@ -319,30 +383,34 @@ export default function LoadOutCard({ unit, toast }) {
             </div>
           )}
 
-          {modal === 'box' && (
-            <>
-              <div className="field">
-                <label>Box number</label>
-                <input
-                  className="input" type="text" autoFocus placeholder="e.g. BB-1007"
-                  value={form.box || ''}
-                  onChange={(e) => setForm({ ...form, box: e.target.value })}
-                />
-                <div className="muted" style={{ marginTop: 6, fontSize: 12.5 }}>
-                  Read it off the side of the box. A box that is not on the board yet is fine, it gets added.
-                </div>
+          {modal === 'load_vault_count' && (
+            <div className="field">
+              <label>How many vaults did this apartment go into?</label>
+              <input
+                className="input" type="number" min="1" inputMode="numeric" autoFocus placeholder="e.g. 3"
+                value={form.count || ''}
+                onChange={(e) => setForm({ ...form, count: e.target.value })}
+              />
+              <div className="muted" style={{ marginTop: 8, fontSize: 12.5 }}>
+                Count them off the truck, not off this screen. If your count does not match what is logged here, that
+                gets flagged and the unit stays open until it is sorted.
               </div>
-              <PhotoSlot
-                label="Doors open, showing what went in"
-                hint="Tap for a photo or video, doors open"
-                path={path('box-open')} url={openUrl} setUrl={setOpenUrl}
+            </div>
+          )}
+
+          {modal === 'vault' && (
+            <div className="field">
+              <label>Vault number</label>
+              <input
+                className="input" type="text" autoFocus placeholder="e.g. BB-1007"
+                value={form.vault || ''}
+                onChange={(e) => setForm({ ...form, vault: e.target.value })}
               />
-              <PhotoSlot
-                label="Doors closed"
-                hint="Tap for a photo or video, doors closed"
-                path={path('box-closed')} url={closedUrl} setUrl={setClosedUrl}
-              />
-            </>
+              <div className="muted" style={{ marginTop: 6, fontSize: 12.5 }}>
+                Read it off the side of the vault. A vault that is not on the board yet is fine, it gets added.
+                The two photos come after, once it is full and once it is shut.
+              </div>
+            </div>
           )}
 
           <button
@@ -350,7 +418,32 @@ export default function LoadOutCard({ unit, toast }) {
             disabled={busy}
             onClick={saveStep}
           >
-            {busy ? 'Saving…' : modal === 'box' ? 'Log this box ✓' : 'Save this step ✓'}
+            {busy ? 'Saving…' : modal === 'vault' ? 'Add this vault ✓' : 'Save this step ✓'}
+          </button>
+          <div className="muted" style={{ fontSize: 12.5, marginTop: 8, textAlign: 'center' }}>
+            Saves on its own, under {currentUser.name}, timestamped.
+          </div>
+        </Modal>
+      )}
+
+      {shot && (
+        <Modal
+          title={`Vault ${shot.number}`}
+          sub={`${VAULT_PARTS.find((v) => v.key === shot.part).label} · ${currentUser.name}, ${fmtTime(Date.now())}`}
+          onClose={close}
+        >
+          <PhotoSlot
+            label={shot.part === 'open' ? 'Door open, showing what went in' : 'Door closed and sealed'}
+            hint={VAULT_PARTS.find((v) => v.key === shot.part).hint}
+            path={path(`vault-${shot.part}`)}
+            url={vaultPhoto} setUrl={setVaultPhoto} setKind={setVaultPhotoKind}
+          />
+          <button
+            className="btn btn-primary btn-lg" style={{ width: '100%', marginTop: 6 }}
+            disabled={busy}
+            onClick={saveShot}
+          >
+            {busy ? 'Saving…' : 'Save this photo ✓'}
           </button>
           <div className="muted" style={{ fontSize: 12.5, marginTop: 8, textAlign: 'center' }}>
             Saves on its own, under {currentUser.name}, timestamped.

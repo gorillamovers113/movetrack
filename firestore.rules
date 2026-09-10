@@ -126,7 +126,7 @@ service cloud.firestore {
           && resource.data.stage == 'packed'
           && request.resource.data.stage == 'packed'
           && request.resource.data.diff(resource.data).affectedKeys()
-               .hasOnly(['steps', 'media', 'boxes', 'containerIds', 'crew'])
+               .hasOnly(['steps', 'media', 'vaults', 'containerIds', 'crew'])
           && moverCrewChangeOK();
     }
 

@@ -1,11 +1,11 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, signOut, updateProfile } from 'firebase/auth'
-import { doc, setDoc, updateDoc, deleteDoc, addDoc, arrayUnion, onSnapshot, collection, query, where, orderBy, serverTimestamp, writeBatch } from 'firebase/firestore'
+import { doc, setDoc, updateDoc, deleteDoc, addDoc, arrayUnion, onSnapshot, collection, query, where, orderBy, serverTimestamp, writeBatch, runTransaction } from 'firebase/firestore'
 import { app, auth, db } from './firebase.js'
 import { captureMedia, uploadFile } from './lib/upload.js'
 import { businessDayKey, canClockInAt, lunchMinutesFor, openSessionFor, usesClock } from './lib/timeclock.js'
 import { stepRow, pushRows } from './lib/sheetBackup.js'
-import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction, sumCartons, PACKING_STEPS, REQUIRED_STEPS, packingChecklist, wouldCompletePacking, LOADING_STEPS, loadingComplete, normalizeBoxNumber, RECEIVING_STEPS, receivingComplete, readyToReceive } from './lib/mutations.js'
+import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction, sumCartons, PACKING_STEPS, REQUIRED_STEPS, packingChecklist, wouldCompletePacking, LOADING_STEPS, loadingComplete, normalizeVaultNumber, vaultsOf, vaultCountMismatch, RECEIVING_STEPS, receivingComplete, readyToReceive } from './lib/mutations.js'
 import { DEFAULT_SCHEDULE, DEFAULT_RETURN_SCHEDULE, scheduleDocId } from './lib/schedule.js'
 import { stageOf } from './seed.js'
 
@@ -277,7 +277,7 @@ export function canAct(user, unit, returnPhase = false) {
   switch (unit.stage) {
     case 'not_started': return admin || role === 'packer' ? { key: 'startPacking', label: 'Start packing' } : null
     case 'packing': return admin || role === 'packer' ? { key: 'finishPacking', label: 'Finish packing' } : null
-    case 'packed': return admin || role === 'mover' ? { key: 'loadUnit', label: 'Load into a BigBox' } : null
+    case 'packed': return admin || role === 'mover' ? { key: 'loadUnit', label: 'Load into vaults' } : null
     // Both stages go to the warehouse. 'loaded' is here because the drivers do
     // not use the app, so nothing ever marks a unit picked up and the
     // warehouse would otherwise never see any work waiting.
@@ -651,7 +651,7 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
         // One item on the mover's checklist, ticked on its own with its own
         // name and time, exactly like the packer flow. Runs while the unit
         // sits at 'packed': the stage only moves when the mover says they are
-        // finished loading, because only they know if another box is coming.
+        // finished loading, because only they know if another vault is coming.
         const step = LOADING_STEPS.find((s) => s.key === p.key)
         if (!step || step.repeatable) throw new Error('Unknown load step.')
 
@@ -669,25 +669,28 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
         // until the unit is finished. If a mover is standing at the wrong
         // apartment, that needs to reach the office now, not later.
         if (p.matched === false) {
-          return ev('flag', `MISMATCH on unit ${unit.number}: mover entered "${p.value}" for ${step.label.toLowerCase()}, packer recorded "${p.expected}"`, { unitId: unit.id, step: p.key })
+          return ev('flag', p.key === 'load_vault_count'
+            ? `MISMATCH on unit ${unit.number}: mover counted ${p.value} vaults off the truck but ${p.expected} are fully logged`
+            : `MISMATCH on unit ${unit.number}: mover entered "${p.value}" for ${step.label.toLowerCase()}, packer recorded "${p.expected}"`,
+            { unitId: unit.id, step: p.key })
         }
         return ev('step', `Unit ${unit.number} · ${step.label} ✓${p.value ? ` (${p.value})` : ''}`, { unitId: unit.id, step: p.key, media: p.media })
       }
-      case 'logBox': {
-        // One BigBox, with the number read off its side and the two photos
-        // that make it a record: doors open showing what went in, doors closed
-        // showing it sealed that way. Repeatable, because a unit averages
-        // about two and a half boxes.
-        const number = normalizeBoxNumber(p.number)
+      case 'startVault': {
+        // A vault begins the moment its number is read off the side. That is
+        // its own event with its own name and time, because it happens well
+        // before the doors close and somebody other than the person who
+        // finishes it may have been the one to start it.
+        const number = normalizeVaultNumber(p.number)
         const now = Date.now()
 
-        // The box may already be on site and part-loaded with another
-        // apartment, or it may be one the mover is opening now. Either way the
-        // mover types the number rather than picking from a list, so a box
-        // nobody logged in advance still works.
-        let cont = state.containers.find((c) => normalizeBoxNumber(c.number) === number)
+        // The vault may already be on site part-loaded from another
+        // apartment, or the mover may be opening a fresh one. Either way they
+        // type the number rather than picking from a list, so a vault nobody
+        // logged in advance still works.
+        let cont = state.containers.find((c) => normalizeVaultNumber(c.number) === number)
         if (cont && cont.status !== 'empty' && cont.status !== 'filling') {
-          throw new Error(`Box ${number} has already left the site. Check the number and try again.`)
+          throw new Error(`Vault ${number} has already left the site. Check the number and try again.`)
         }
         let containerId = cont ? cont.id : null
         if (!containerId) {
@@ -696,22 +699,58 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
         }
         await updateDoc(doc(db, 'containers', containerId), { status: 'filling', unitIds: arrayUnion(p.unitId) })
 
-        const media = attributeMedia([
-          { id: `box-open-${now}`, kind: 'photo', url: p.openUrl, label: `box ${number} open`, phase: 'box_open' },
-          { id: `box-closed-${now}`, kind: 'photo', url: p.closedUrl, label: `box ${number} closed`, phase: 'box_closed' },
-        ])
         await updateDoc(doc(db, 'units', p.unitId), {
-          boxes: arrayUnion({ number, containerId, openUrl: p.openUrl, closedUrl: p.closedUrl, uid: currentUser.uid, userName: currentUser.name, at: now }),
+          vaults: arrayUnion({ number, containerId, uid: currentUser.uid, userName: currentUser.name, at: now }),
           containerIds: arrayUnion(containerId),
           'crew.movers': arrayUnion(currentUser.uid),
-          media: arrayUnion(...media),
         })
-        return ev('step', `Unit ${unit.number} · loaded into box ${number}`, { unitId: unit.id, containerId, step: 'load_boxes', media })
+        return ev('step', `Unit ${unit.number} \u00b7 vault ${number} opened`, { unitId: unit.id, containerId, step: 'load_vaults' })
+      }
+      case 'logVaultPhoto': {
+        // Attaching a photo means editing one element of an array, which
+        // arrayUnion cannot do. Read-modify-write in a transaction instead:
+        // up to three movers work a unit at once, and two of them shooting
+        // different vaults a second apart must not overwrite each other.
+        const number = normalizeVaultNumber(p.number)
+        const part = p.part === 'open' || p.part === 'closed' ? p.part : null
+        if (!part) throw new Error('Unknown vault photo.')
+        if (!p.url) throw new Error('That photo did not upload. Try again.')
+
+        const now = Date.now()
+        const shot = { url: p.url, kind: p.kind || 'photo', uid: currentUser.uid, userName: currentUser.name, at: now }
+        const media = attributeMedia([{
+          id: `vault-${part}-${now}`, kind: p.kind || 'photo', url: p.url,
+          label: `vault ${number} ${part === 'open' ? 'door open' : 'door closed'}`,
+          phase: `vault_${part}`,
+        }])
+
+        const ref = doc(db, 'units', p.unitId)
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(ref)
+          if (!snap.exists()) throw new Error('That unit is gone.')
+          const data = snap.data()
+          const vaults = vaultsOf(data)
+          const i = vaults.findIndex((v) => normalizeVaultNumber(v.number) === number)
+          if (i === -1) throw new Error(`Vault ${number} is not on this unit yet.`)
+          const next = vaults.map((v, j) => (j === i ? { ...v, [part]: shot } : v))
+          tx.update(ref, {
+            vaults: next,
+            'crew.movers': arrayUnion(currentUser.uid),
+            media: arrayUnion(...media),
+          })
+        })
+        return ev('step', `Unit ${unit.number} \u00b7 vault ${number} ${part === 'open' ? 'door open' : 'door closed'} \u2713`, { unitId: unit.id, step: 'load_vaults', media })
       }
       case 'finishLoading': {
         // The mover says the unit is fully loaded. Everything on the checklist
-        // has to be there first, including at least one complete box.
-        if (!loadingComplete(unit)) throw new Error('Finish the checklist first: the photo, both confirmations, and at least one box.')
+        // has to be there first, including at least one complete vault and a
+        // vault count that agrees with what was actually logged.
+        if (!loadingComplete(unit)) {
+          const off = vaultCountMismatch(unit, unit.steps?.load_vault_count?.value)
+          throw new Error(off
+            ? `You counted ${off.said} vault${off.said === 1 ? '' : 's'} but ${off.logged} ${off.logged === 1 ? 'is' : 'are'} fully logged. Finish the missing one or correct the count.`
+            : 'Finish the checklist first: the photos, the confirmations, and at least one complete vault.')
+        }
         const patch = { stage: 'loaded', 'crew.movers': arrayUnion(currentUser.uid) }
 
         // Carry any confirmation mismatch forward as an open flag, so a unit
@@ -726,8 +765,8 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
         }
         await updateDoc(doc(db, 'units', p.unitId), patch)
 
-        const boxes = (unit.boxes || []).map((b) => b.number).join(', ')
-        await ev('stage', `Unit ${unit.number} fully loaded into ${(unit.boxes || []).length} box${(unit.boxes || []).length === 1 ? '' : 'es'} (${boxes})`, { unitId: unit.id, from: 'packed', to: 'loaded' })
+        const loaded = vaultsOf(unit)
+        await ev('stage', `Unit ${unit.number} fully loaded into ${loaded.length} vault${loaded.length === 1 ? '' : 's'} (${loaded.map((v) => v.number).join(', ')})`, { unitId: unit.id, from: 'packed', to: 'loaded' })
         if (wrong.length) await ev('flag', `FLAG raised on unit ${unit.number}: ${wrong.join(' and ')} did not match the packer's record`, { unitId: unit.id })
         return
       }
@@ -755,7 +794,7 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
         // marks a unit picked up and waiting for it would strand every unit
         // one step short of the warehouse.
         if (!readyToReceive(unit)) throw new Error('That unit has not finished loading yet.')
-        if (!receivingComplete(unit)) throw new Error('Verify the unit number, last name and box numbers first.')
+        if (!receivingComplete(unit)) throw new Error('Verify the unit number, last name and vault numbers first.')
 
         const patch = { stage: 'at_warehouse', receivedBy: currentUser.uid, 'times.receivedAt': Date.now() }
         const wrong = RECEIVING_STEPS
@@ -766,7 +805,8 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
         }
         await updateDoc(doc(db, 'units', p.unitId), patch)
 
-        await ev('stage', `Unit ${unit.number} received into the warehouse, ${(unit.boxes || []).length} box${(unit.boxes || []).length === 1 ? '' : 'es'} verified`, { unitId: unit.id, from: unit.stage, to: 'at_warehouse' })
+        const got = vaultsOf(unit)
+        await ev('stage', `Unit ${unit.number} received into the warehouse, ${got.length} vault${got.length === 1 ? '' : 's'} verified`, { unitId: unit.id, from: unit.stage, to: 'at_warehouse' })
         if (wrong.length) await ev('flag', `FLAG raised on unit ${unit.number}: ${wrong.join(' and ')} did not match on arrival`, { unitId: unit.id })
         return
       }

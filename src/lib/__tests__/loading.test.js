@@ -1,50 +1,103 @@
 import { describe, it, expect } from 'vitest'
 import {
-  LOADING_STEPS, boxComplete, boxesOf, completeBoxes, normalizeBoxNumber,
-  boxNumberError, loadingChecklist, loadingProgress, loadingComplete,
+  LOADING_STEPS, VAULT_PARTS, vaultComplete, vaultsOf, completeVaults,
+  vaultProgress, vaultTouchedAt, normalizeVaultNumber, vaultNumberError,
+  vaultCountMismatch, loadingChecklist, loadingProgress, loadingComplete,
   stickerMismatch, unitNumberMismatch,
 } from '../mutations.js'
 
-const box = (over = {}) => ({ number: 'BB-1007', openUrl: 'o', closedUrl: 'c', uid: 'm1', userName: 'Ali Mover', at: 1000, ...over })
+const shot = (at = 1000, who = 'Ali Mover') => ({ url: 'u', kind: 'photo', uid: 'm1', userName: who, at })
+const vault = (over = {}) => ({
+  number: 'BB-1007', uid: 'm1', userName: 'Ali Mover', at: 1000,
+  open: shot(1100), closed: shot(1200), ...over,
+})
 
-describe('box records', () => {
+describe('vault records', () => {
   it('needs a number and both photos to count', () => {
-    expect(boxComplete(box())).toBe(true)
-    expect(boxComplete(box({ openUrl: null }))).toBe(false)
-    expect(boxComplete(box({ closedUrl: null }))).toBe(false)
-    expect(boxComplete(box({ number: '   ' }))).toBe(false)
-    expect(boxComplete(null)).toBe(false)
+    expect(vaultComplete(vault())).toBe(true)
+    expect(vaultComplete(vault({ open: null }))).toBe(false)
+    expect(vaultComplete(vault({ closed: null }))).toBe(false)
+    expect(vaultComplete(vault({ number: '   ' }))).toBe(false)
+    expect(vaultComplete(null)).toBe(false)
   })
 
-  it('reads a number the way a person reads it off the box', () => {
-    expect(normalizeBoxNumber(' bb-1007 ')).toBe('BB-1007')
-    expect(normalizeBoxNumber(null)).toBe('')
+  it('is the two door shots, and nothing else', () => {
+    expect(VAULT_PARTS.map((p) => p.key)).toEqual(['open', 'closed'])
+  })
+
+  it('counts the number itself as the first of three parts', () => {
+    expect(vaultProgress(vault({ open: null, closed: null }))).toEqual({ done: 1, total: 3 })
+    expect(vaultProgress(vault({ closed: null }))).toEqual({ done: 2, total: 3 })
+    expect(vaultProgress(vault())).toEqual({ done: 3, total: 3 })
+  })
+
+  it('reports the last time anybody touched it, not when it was opened', () => {
+    expect(vaultTouchedAt(vault({ at: 10, open: shot(50), closed: shot(90) }))).toBe(90)
+    expect(vaultTouchedAt(vault({ at: 10, open: null, closed: null }))).toBe(10)
+    expect(vaultTouchedAt(null)).toBe(0)
+  })
+
+  it('reads a number the way a person reads it off the vault', () => {
+    expect(normalizeVaultNumber(' bb-1007 ')).toBe('BB-1007')
+    expect(normalizeVaultNumber(null)).toBe('')
   })
 
   it('rejects a blank or too-short number, and a duplicate on the same unit', () => {
-    const unit = { boxes: [box({ number: 'BB-1007' })] }
-    expect(boxNumberError('', unit)).toMatch(/Enter the number/)
-    expect(boxNumberError('B', unit)).toMatch(/too short/)
-    expect(boxNumberError('bb-1007', unit)).toMatch(/already logged/)
-    expect(boxNumberError('BB-1008', unit)).toBe(null)
+    const unit = { vaults: [vault({ number: 'BB-1007' })] }
+    expect(vaultNumberError('', unit)).toMatch(/Enter the number/)
+    expect(vaultNumberError('B', unit)).toMatch(/too short/)
+    expect(vaultNumberError('bb-1007', unit)).toMatch(/already logged/)
+    expect(vaultNumberError('BB-1008', unit)).toBe(null)
   })
 
-  it('survives a unit with no boxes field at all', () => {
-    expect(boxesOf({})).toEqual([])
-    expect(boxesOf(null)).toEqual([])
-    expect(completeBoxes({})).toEqual([])
-    expect(boxNumberError('BB-1', {})).toBe(null)
+  it('rejects a duplicate even against a vault that is only half logged', () => {
+    const unit = { vaults: [vault({ number: 'BB-1007', closed: null })] }
+    expect(vaultNumberError('BB-1007', unit)).toMatch(/already logged/)
+  })
+
+  it('survives a unit with no vaults field at all', () => {
+    expect(vaultsOf({})).toEqual([])
+    expect(vaultsOf(null)).toEqual([])
+    expect(completeVaults({})).toEqual([])
+    expect(vaultNumberError('BB-1', {})).toBe(null)
+  })
+})
+
+describe('the vault count check', () => {
+  const unit = { vaults: [vault({ number: 'A' }), vault({ number: 'B' })] }
+
+  it('passes when the count matches what is fully logged', () => {
+    expect(vaultCountMismatch(unit, 2)).toBe(null)
+    expect(vaultCountMismatch(unit, '2')).toBe(null)
+  })
+
+  it('reports both numbers when they disagree', () => {
+    expect(vaultCountMismatch(unit, 3)).toEqual({ said: 3, logged: 2 })
+    expect(vaultCountMismatch(unit, 1)).toEqual({ said: 1, logged: 2 })
+  })
+
+  it('counts only fully logged vaults, which is the gap it exists to catch', () => {
+    const half = { vaults: [vault({ number: 'A' }), vault({ number: 'B', closed: null })] }
+    expect(vaultCountMismatch(half, 2)).toEqual({ said: 2, logged: 1 })
+  })
+
+  it('says nothing before the mover has answered', () => {
+    expect(vaultCountMismatch(unit, undefined)).toBe(null)
+    expect(vaultCountMismatch(unit, '')).toBe(null)
+    expect(vaultCountMismatch(unit, 'three')).toBe(null)
   })
 })
 
 describe('mover checklist', () => {
-  it('is the photos, the two confirmations, and the repeatable boxes item', () => {
-    expect(LOADING_STEPS.map((s) => s.key)).toEqual(['load_unit_photo', 'load_sticker', 'load_number', 'load_boxes', 'load_after_photo'])
-    expect(LOADING_STEPS.find((s) => s.key === 'load_boxes').repeatable).toBe(true)
+  it('is the photos, the confirmations, the repeatable vaults item and the count', () => {
+    expect(LOADING_STEPS.map((s) => s.key)).toEqual(
+      ['load_unit_photo', 'load_sticker', 'load_number', 'load_vaults', 'load_vault_count', 'load_after_photo'],
+    )
+    expect(LOADING_STEPS.find((s) => s.key === 'load_vaults').repeatable).toBe(true)
   })
 
   it('nothing done on a freshly packed unit', () => {
-    expect(loadingProgress({})).toEqual({ done: 0, total: 5 })
+    expect(loadingProgress({})).toEqual({ done: 0, total: 6 })
     expect(loadingComplete({})).toBe(false)
   })
 
@@ -54,52 +107,79 @@ describe('mover checklist', () => {
       .toMatchObject({ done: true, by: 'Ali Mover', at: 500 })
   })
 
-  it('the boxes item completes on the first fully logged box, and counts them', () => {
-    const unit = { boxes: [box({ number: 'BB-1', at: 900, userName: 'Ali' }), box({ number: 'BB-2', at: 1900, userName: 'Sam' })] }
-    const item = loadingChecklist(unit).find((s) => s.key === 'load_boxes')
-    // Attributed to the first box actually completed, not the newest one.
-    expect(item).toMatchObject({ done: true, by: 'Ali', at: 900, count: 2 })
+  it('the vaults item reports the first one finished, and counts them', () => {
+    const unit = { vaults: [
+      vault({ number: 'BB-1', at: 800, open: shot(850, 'Ali'), closed: shot(900, 'Ali'), userName: 'Ali' }),
+      vault({ number: 'BB-2', at: 1800, open: shot(1850, 'Sam'), closed: shot(1900, 'Sam'), userName: 'Sam' }),
+    ] }
+    const item = loadingChecklist(unit).find((s) => s.key === 'load_vaults')
+    // Attributed to the first vault actually finished, not the newest one.
+    expect(item).toMatchObject({ done: true, by: 'Ali', at: 900, count: 2, started: 2 })
   })
 
-  it('a half-logged box does not satisfy the boxes item', () => {
-    const unit = { boxes: [box({ closedUrl: null })] }
-    expect(loadingChecklist(unit).find((s) => s.key === 'load_boxes')).toMatchObject({ done: false, count: 0 })
+  it('a half-logged vault holds the item open even when another is finished', () => {
+    const unit = { vaults: [vault({ number: 'A' }), vault({ number: 'B', closed: null })] }
+    const item = loadingChecklist(unit).find((s) => s.key === 'load_vaults')
+    expect(item).toMatchObject({ done: false, count: 1, started: 2 })
     expect(loadingComplete(unit)).toBe(false)
+  })
+
+  it('a vault with only a number does not satisfy the vaults item', () => {
+    const unit = { vaults: [vault({ open: null, closed: null })] }
+    expect(loadingChecklist(unit).find((s) => s.key === 'load_vaults'))
+      .toMatchObject({ done: false, count: 0, started: 1 })
   })
 
   const allSteps = {
     load_unit_photo: { userName: 'Ali', at: 1 },
     load_sticker: { userName: 'Ali', at: 2, value: 'Pink', matched: true },
     load_number: { userName: 'Ali', at: 3, value: '906', matched: true },
-    load_after_photo: { userName: 'Ali', at: 4 },
+    load_vault_count: { userName: 'Ali', at: 4, value: 1, matched: true },
+    load_after_photo: { userName: 'Ali', at: 5 },
   }
 
-  it('is complete only with every item and at least one full box', () => {
+  it('is complete only with every item and at least one full vault', () => {
     expect(loadingComplete({ steps: allSteps })).toBe(false)
-    expect(loadingComplete({ boxes: [box()] })).toBe(false)
-    expect(loadingComplete({ steps: allSteps, boxes: [box()] })).toBe(true)
+    expect(loadingComplete({ vaults: [vault()] })).toBe(false)
+    expect(loadingComplete({ steps: allSteps, vaults: [vault()] })).toBe(true)
   })
 
   it('a missing confirmation blocks completion', () => {
     const { load_number, ...missing } = allSteps
-    expect(loadingComplete({ steps: missing, boxes: [box()] })).toBe(false)
+    expect(loadingComplete({ steps: missing, vaults: [vault()] })).toBe(false)
+  })
+
+  // The whole reason for asking the count: every box ticked, and the unit
+  // still short a vault nobody logged.
+  it('blocks close-out when the count does not match what was logged', () => {
+    const steps = { ...allSteps, load_vault_count: { userName: 'Ali', at: 4, value: 3, matched: false } }
+    const unit = { steps, vaults: [vault({ number: 'A' }), vault({ number: 'B' })] }
+    expect(loadingChecklist(unit).every((s) => s.done)).toBe(true)
+    expect(loadingComplete(unit)).toBe(false)
+  })
+
+  it('lets the unit close once the count is corrected', () => {
+    const steps = { ...allSteps, load_vault_count: { userName: 'Ali', at: 4, value: 2, matched: true } }
+    expect(loadingComplete({ steps, vaults: [vault({ number: 'A' }), vault({ number: 'B' })] })).toBe(true)
   })
 
   it('surfaces what the mover typed and whether it matched', () => {
     const rows = loadingChecklist({ steps: allSteps })
     expect(rows.find((s) => s.key === 'load_sticker')).toMatchObject({ done: true, value: 'Pink', matched: true })
     expect(rows.find((s) => s.key === 'load_number')).toMatchObject({ done: true, value: '906', matched: true })
+    expect(rows.find((s) => s.key === 'load_vault_count')).toMatchObject({ done: true, value: 1, matched: true })
   })
 
-  it('handles the two-and-a-half boxes a real unit takes', () => {
-    const unit = { steps: allSteps, boxes: [box({ number: 'A' }), box({ number: 'B' }), box({ number: 'C' })] }
-    expect(loadingChecklist(unit).find((s) => s.key === 'load_boxes').count).toBe(3)
+  it('handles the two and a half vaults a real unit takes', () => {
+    const steps = { ...allSteps, load_vault_count: { userName: 'Ali', at: 4, value: 3, matched: true } }
+    const unit = { steps, vaults: [vault({ number: 'A' }), vault({ number: 'B' }), vault({ number: 'C' })] }
+    expect(loadingChecklist(unit).find((s) => s.key === 'load_vaults').count).toBe(3)
     expect(loadingComplete(unit)).toBe(true)
   })
 })
 
 // The point of typing the colour and number rather than confirming what is on
-// screen: a mover handed the wrong apartment's boxes is caught here.
+// screen: a mover handed the wrong apartment's load is caught here.
 describe('blind checks against what the packer recorded', () => {
   const unit = { number: '906', stickerColor: 'Pink' }
 
@@ -125,23 +205,23 @@ describe('blind checks against what the packer recorded', () => {
 // out without it: it is the only evidence of what condition the apartment was
 // left in.
 describe('after-loading photo', () => {
-  const box = () => ({ number: 'BB-1', openUrl: 'o', closedUrl: 'c', uid: 'm', userName: 'Ali', at: 1 })
   const beforeAfter = {
     load_unit_photo: { userName: 'Ali', at: 1 },
     load_sticker: { userName: 'Ali', at: 2, value: 'Pink', matched: true },
     load_number: { userName: 'Ali', at: 3, value: '906', matched: true },
+    load_vault_count: { userName: 'Ali', at: 4, value: 1, matched: true },
   }
 
   it('blocks close-out until it is taken', () => {
-    expect(loadingComplete({ steps: beforeAfter, boxes: [box()] })).toBe(false)
+    expect(loadingComplete({ steps: beforeAfter, vaults: [vault()] })).toBe(false)
   })
 
   it('completes the unit once it is there', () => {
     const steps = { ...beforeAfter, load_after_photo: { userName: 'Ali', at: 9 } }
-    expect(loadingComplete({ steps, boxes: [box()] })).toBe(true)
+    expect(loadingComplete({ steps, vaults: [vault()] })).toBe(true)
   })
 
-  it('is the last item on the list, after the boxes', () => {
+  it('is the last item on the list, after the vaults and the count', () => {
     expect(LOADING_STEPS[LOADING_STEPS.length - 1].key).toBe('load_after_photo')
   })
 

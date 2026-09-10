@@ -427,7 +427,7 @@ describe('units — warehouse receiving', () => {
   })
 
   it('the three arrival checks are allowed on a loaded unit', async () => {
-    for (const key of ['recv_number', 'recv_lastname', 'recv_boxes']) {
+    for (const key of ['recv_number', 'recv_lastname', 'recv_vaults']) {
       await seed('units', 'u1', baseUnit({ stage: 'loaded' }))
       await assertSucceeds(updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), recv(key)))
     }
@@ -475,10 +475,10 @@ describe('units — warehouse receiving', () => {
     )
   })
 
-  it('the warehouse may not edit the boxes or the tenant while verifying', async () => {
+  it('the warehouse may not edit the vaults or the tenant while verifying', async () => {
     await seed('units', 'u1', baseUnit({ stage: 'loaded' }))
     await assertFails(
-      updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), { ...recv('recv_boxes'), boxes: [{ number: 'BB-9' }] })
+      updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), { ...recv('recv_vaults'), vaults: [{ number: 'BB-9' }] })
     )
     await assertFails(
       updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), { ...recv('recv_lastname'), tenant: 'Someone Else' })
@@ -518,18 +518,38 @@ describe('units — mover load-out', () => {
     )
   })
 
-  it('logging a box allowed, and repeatable', async () => {
+  it('opening a vault allowed, and repeatable', async () => {
     await seed('units', 'u1', baseUnit({ stage: 'packed' }))
-    const box = (n) => ({ number: n, containerId: 'c1', openUrl: 'o', closedUrl: 'c', uid: MOVER, userName: 'Test mover-1', at: 1 })
+    const vault = (n) => ({ number: n, containerId: 'c1', uid: MOVER, userName: 'Test mover-1', at: 1 })
     await assertSucceeds(
       updateDoc(doc(dbAs(MOVER), 'units', 'u1'), {
-        boxes: arrayUnion(box('BB-1')),
+        vaults: arrayUnion(vault('BB-1')),
         containerIds: arrayUnion('c1'),
         'crew.movers': arrayUnion(MOVER),
       })
     )
     await assertSucceeds(
-      updateDoc(doc(dbAs(MOVER), 'units', 'u1'), { boxes: arrayUnion(box('BB-2')) })
+      updateDoc(doc(dbAs(MOVER), 'units', 'u1'), { vaults: arrayUnion(vault('BB-2')) })
+    )
+  })
+
+  // The photos land on an existing element, which arrayUnion cannot do, so
+  // this path rewrites the whole array. The rule has to allow that shape.
+  it('attaching a door photo rewrites the vaults array, which is allowed', async () => {
+    const opened = { number: 'BB-1', containerId: 'c1', uid: MOVER, userName: 'Test mover-1', at: 1 }
+    await seed('units', 'u1', baseUnit({ stage: 'packed', vaults: [opened] }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(MOVER), 'units', 'u1'), {
+        vaults: [{ ...opened, open: { url: 'u', kind: 'photo', uid: MOVER, userName: 'Test mover-1', at: 2 } }],
+        'crew.movers': arrayUnion(MOVER),
+      })
+    )
+  })
+
+  it('a packer may not touch the vaults', async () => {
+    await seed('units', 'u1', baseUnit({ stage: 'packed' }))
+    await assertFails(
+      updateDoc(doc(dbAs(PACKER), 'units', 'u1'), { vaults: arrayUnion({ number: 'BB-1' }) })
     )
   })
 
@@ -553,21 +573,21 @@ describe('units — mover load-out', () => {
     )
   })
 
-  it('logging a box may not also advance the stage', async () => {
+  it('opening a vault may not also advance the stage', async () => {
     await seed('units', 'u1', baseUnit({ stage: 'packed' }))
     await assertFails(
       updateDoc(doc(dbAs(MOVER), 'units', 'u1'), {
-        boxes: arrayUnion({ number: 'BB-1', openUrl: 'o', closedUrl: 'c' }),
+        vaults: arrayUnion({ number: 'BB-1' }),
         stage: 'picked_up',
       })
     )
   })
 
-  it('a mover may not clear an open flag while logging a box', async () => {
+  it('a mover may not clear an open flag while logging a vault', async () => {
     await seed('units', 'u1', baseUnit({ stage: 'packed', flag: { message: 'x', ts: 1, by: 'admin', open: true } }))
     await assertFails(
       updateDoc(doc(dbAs(MOVER), 'units', 'u1'), {
-        boxes: arrayUnion({ number: 'BB-1', openUrl: 'o', closedUrl: 'c' }),
+        vaults: arrayUnion({ number: 'BB-1' }),
         'flag.open': false,
       })
     )
@@ -597,7 +617,7 @@ describe('units — mover load-out', () => {
     await seed('units', 'u1', baseUnit({ stage: 'packed' }))
     await assertFails(
       updateDoc(doc(dbAs(MOVER), 'units', 'u1'), {
-        boxes: arrayUnion({ number: 'BB-1' }),
+        vaults: arrayUnion({ number: 'BB-1' }),
         tenant: 'Someone Else',
       })
     )

@@ -4,7 +4,7 @@ import { Modal } from '../ui.jsx'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import {
   RECEIVING_STEPS, receivingChecklist, receivingProgress, receivingComplete,
-  lastNameMismatch, unitNumberMismatch, boxSetDiff, parseBoxNumbers, completeBoxes,
+  lastNameMismatch, unitNumberMismatch, vaultSetDiff, parseVaultNumbers, completeVaults,
 } from '../lib/mutations.js'
 
 const SAVE_ERROR = "Couldn't save that. Check your signal and try again."
@@ -13,7 +13,7 @@ const SAVE_ERROR = "Couldn't save that. Check your signal and try again."
  *
  * All three answers are typed from what is physically on the dock, never
  * confirmed against something already on screen. This is the last point where
- * a box left on the truck, or a load out of the wrong apartment, can be caught
+ * a vault left on the truck, or a load out of the wrong apartment, can be caught
  * while the truck is still in the yard and the crew who loaded it are still
  * reachable. Nothing here blocks: a mismatch is recorded, flagged and passed
  * to the office, because refusing to book in a unit that is physically sitting
@@ -27,7 +27,7 @@ export default function ReceiveCard({ unit, toast }) {
   const checklist = receivingChecklist(unit)
   const progress = receivingProgress(unit)
   const ready = receivingComplete(unit)
-  const expected = completeBoxes(unit)
+  const expected = completeVaults(unit)
 
   const open = (key) => { setForm({}); setModal(key) }
   const close = () => { if (!busy) setModal(null) }
@@ -49,7 +49,7 @@ export default function ReceiveCard({ unit, toast }) {
   const save = () => {
     if (modal === 'recv_number') {
       const typed = String(form.number || '').trim()
-      if (!typed) return toast('Type the unit number from the paperwork on the boxes.')
+      if (!typed) return toast('Type the unit number from the paperwork on the vaults.')
       const bad = unitNumberMismatch(unit, typed)
       return run(
         () => dispatch({ type: 'completeReceiveStep', p: { unitId: unit.id, key: 'recv_number', value: typed, matched: !bad, expected: unit.number } }),
@@ -67,19 +67,19 @@ export default function ReceiveCard({ unit, toast }) {
       )
     }
 
-    if (modal === 'recv_boxes') {
-      const typed = parseBoxNumbers(form.boxes)
-      if (typed.length === 0) return toast('Type the number off each box you have received.')
-      const diff = boxSetDiff(unit, typed)
+    if (modal === 'recv_vaults') {
+      const typed = parseVaultNumbers(form.vaults)
+      if (typed.length === 0) return toast('Type the number off each vault you have received.')
+      const diff = vaultSetDiff(unit, typed)
       const parts = []
       if (diff.missing.length) parts.push(`missing ${diff.missing.join(', ')}`)
       if (diff.unexpected.length) parts.push(`unexpected ${diff.unexpected.join(', ')}`)
       return run(
         () => dispatch({ type: 'completeReceiveStep', p: {
-          unitId: unit.id, key: 'recv_boxes', value: typed.join(', '),
+          unitId: unit.id, key: 'recv_vaults', value: typed.join(', '),
           matched: diff.ok, expected: diff.expected.join(', '),
         } }),
-        diff.ok ? `All ${typed.length} box${typed.length === 1 ? '' : 'es'} verified ✓` : `⚑ Box mismatch flagged: ${parts.join(', ')}`,
+        diff.ok ? `All ${typed.length} vault${typed.length === 1 ? '' : 's'} verified ✓` : `⚑ Vault mismatch flagged: ${parts.join(', ')}`,
       )
     }
   }
@@ -90,8 +90,8 @@ export default function ReceiveCard({ unit, toast }) {
   )
 
   const step = RECEIVING_STEPS.find((s) => s.key === modal)
-  const typedBoxes = parseBoxNumbers(form.boxes)
-  const liveDiff = modal === 'recv_boxes' && typedBoxes.length ? boxSetDiff(unit, typedBoxes) : null
+  const typedVaults = parseVaultNumbers(form.vaults)
+  const liveDiff = modal === 'recv_vaults' && typedVaults.length ? vaultSetDiff(unit, typedVaults) : null
 
   return (
     <>
@@ -171,15 +171,15 @@ export default function ReceiveCard({ unit, toast }) {
             </div>
           )}
 
-          {modal === 'recv_boxes' && (
+          {modal === 'recv_vaults' && (
             <div className="field">
-              <label>Every box number you have received</label>
+              <label>Every vault number you have received</label>
               <textarea
                 className="input" rows={3} autoFocus placeholder="BB-1007, BB-1008"
-                value={form.boxes || ''} onChange={(e) => setForm({ ...form, boxes: e.target.value })}
+                value={form.vaults || ''} onChange={(e) => setForm({ ...form, boxes: e.target.value })}
               />
               <div className="muted" style={{ marginTop: 6, fontSize: 12.5 }}>
-                Read them off the boxes on the dock. Commas, spaces or new lines all work.
+                Read them off the vaults on the dock. Commas, spaces or new lines all work.
                 {expected.length > 0 && ` The movers logged ${expected.length} on this unit.`}
               </div>
               {liveDiff && !liveDiff.ok && (
@@ -190,7 +190,7 @@ export default function ReceiveCard({ unit, toast }) {
               )}
               {liveDiff && liveDiff.ok && (
                 <div className="muted" style={{ marginTop: 10, fontSize: 13, color: '#15803d' }}>
-                  ✓ All {liveDiff.expected.length} box{liveDiff.expected.length === 1 ? '' : 'es'} accounted for.
+                  ✓ All {liveDiff.expected.length} vault{liveDiff.expected.length === 1 ? '' : 's'} accounted for.
                 </div>
               )}
             </div>
