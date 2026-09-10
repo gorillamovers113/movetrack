@@ -869,7 +869,11 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
           await updateDoc(doc(db, 'unitSessions', open.id), { endedAt: now, endedReason: 'switched' })
         }
         await addDoc(collection(db, 'unitSessions'), {
-          unitId: p.unitId, uid: currentUser.uid, userName: currentUser.name,
+          // The role is stamped here rather than looked up later. Somebody who
+          // packs on Monday and moves on Tuesday would otherwise have Monday's
+          // hours silently reclassified the day their role changed, and the
+          // packing/loading split on a finished unit has to stay true.
+          unitId: p.unitId, uid: currentUser.uid, userName: currentUser.name, role: currentUser.role,
           day: businessDayKey(now), startedAt: now, endedAt: null, endedReason: null,
         })
         return
