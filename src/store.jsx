@@ -715,15 +715,28 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
         const number = normalizeVaultNumber(p.number)
         const part = p.part === 'open' || p.part === 'closed' ? p.part : null
         if (!part) throw new Error('Unknown vault photo.')
-        if (!p.url) throw new Error('That photo did not upload. Try again.')
+
+        // One door needs more than one shot: a full vault photographed from a
+        // single angle hides whatever is behind the first row. So the step
+        // takes as many as the mover wants to send.
+        const shots = (p.shots || []).filter((x) => x && x.url)
+        if (shots.length === 0) throw new Error('That photo did not upload. Try again.')
 
         const now = Date.now()
-        const shot = { url: p.url, kind: p.kind || 'photo', uid: currentUser.uid, userName: currentUser.name, at: now }
-        const media = attributeMedia([{
-          id: `vault-${part}-${now}`, kind: p.kind || 'photo', url: p.url,
-          label: `vault ${number} ${part === 'open' ? 'door open' : 'door closed'}`,
+        const side = part === 'open' ? 'door open' : 'door closed'
+        // The vault record keeps the first shot as its representative image
+        // and the count, so vaultComplete and every summary stay a simple
+        // check. Every shot is in unit.media, which is what the unit page and
+        // the reports read.
+        const shot = {
+          url: shots[0].url, kind: shots[0].kind || 'photo', count: shots.length,
+          uid: currentUser.uid, userName: currentUser.name, at: now,
+        }
+        const media = attributeMedia(shots.map((x, i) => ({
+          id: `vault-${part}-${now}-${i}`, kind: x.kind || 'photo', url: x.url,
+          label: `vault ${number} ${side}`,
           phase: `vault_${part}`,
-        }])
+        })))
 
         const ref = doc(db, 'units', p.unitId)
         await runTransaction(db, async (tx) => {
@@ -740,7 +753,7 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
             media: arrayUnion(...media),
           })
         })
-        return ev('step', `Unit ${unit.number} \u00b7 vault ${number} ${part === 'open' ? 'door open' : 'door closed'} \u2713`, { unitId: unit.id, step: 'load_vaults', media })
+        return ev('step', `Unit ${unit.number} \u00b7 vault ${number} ${side} \u2713${shots.length > 1 ? ` (${shots.length} shots)` : ''}`, { unitId: unit.id, step: 'load_vaults', media })
       }
       case 'finishLoading': {
         // The mover says the unit is fully loaded. Everything on the checklist

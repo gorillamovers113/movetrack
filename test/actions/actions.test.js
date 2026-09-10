@@ -30,6 +30,7 @@ vi.mock('../../src/firebase.js', () => ({
 }))
 
 const { makeDispatch } = await import('../../src/store.jsx')
+const { vaultComplete, completeVaults } = await import('../../src/lib/mutations.js')
 
 // Security rules are deliberately OPEN here, on their own project id. What
 // the rules permit is covered exhaustively in test/rules; mixing the two would
@@ -293,7 +294,7 @@ describe('logging a vault in three separate acts', () => {
     await seedPacked()
     const state = makeState({ units: [packed] })
     await run(MOVER, { type: 'startVault', p: { unitId: UNIT.id, number: 'BB-1' } }, state)
-    await run(MOVER, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-1', part: 'open', url: 'o.jpg' } }, state)
+    await run(MOVER, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-1', part: 'open', shots: [{ url: 'o.jpg', kind: 'photo' }] } }, state)
 
     let u = await unitRow()
     expect(u.vaults[0].open).toMatchObject({ url: 'o.jpg', kind: 'photo', userName: MOVER.name })
@@ -301,7 +302,7 @@ describe('logging a vault in three separate acts', () => {
 
     // A different mover shuts it, and that is who the closed shot is credited to.
     const other = { uid: 'mover-2', name: 'Sam Diaz', role: 'mover', status: 'active' }
-    await run(other, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'bb-1', part: 'closed', url: 'c.mp4', kind: 'video' } }, state)
+    await run(other, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'bb-1', part: 'closed', shots: [{ url: 'c.mp4', kind: 'video' }] } }, state)
 
     u = await unitRow()
     expect(u.vaults[0].open).toMatchObject({ userName: MOVER.name })
@@ -312,7 +313,7 @@ describe('logging a vault in three separate acts', () => {
   it('a photo for a vault nobody opened is refused rather than silently dropped', async () => {
     await seedPacked()
     await expect(
-      run(MOVER, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-9', part: 'open', url: 'o.jpg' } },
+      run(MOVER, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-9', part: 'open', shots: [{ url: 'o.jpg' }] } },
         makeState({ units: [packed] })),
     ).rejects.toThrow(/not on this unit/i)
   })
@@ -321,9 +322,11 @@ describe('logging a vault in three separate acts', () => {
     await seedPacked()
     const state = makeState({ units: [packed] })
     await run(MOVER, { type: 'startVault', p: { unitId: UNIT.id, number: 'BB-1' } }, state)
-    await expect(run(MOVER, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-1', part: 'side', url: 'x' } }, state))
+    await expect(run(MOVER, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-1', part: 'side', shots: [{ url: 'x' }] } }, state))
       .rejects.toThrow(/unknown vault photo/i)
-    await expect(run(MOVER, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-1', part: 'open', url: null } }, state))
+    await expect(run(MOVER, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-1', part: 'open', shots: [] } }, state))
+      .rejects.toThrow(/did not upload/i)
+    await expect(run(MOVER, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-1', part: 'open', shots: [{ url: null }] } }, state))
       .rejects.toThrow(/did not upload/i)
   })
 
@@ -336,8 +339,8 @@ describe('logging a vault in three separate acts', () => {
 
     const other = { uid: 'mover-2', name: 'Sam Diaz', role: 'mover', status: 'active' }
     await Promise.all([
-      run(MOVER, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-1', part: 'open', url: 'a.jpg' } }, state),
-      run(other, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-2', part: 'open', url: 'b.jpg' } }, state),
+      run(MOVER, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-1', part: 'open', shots: [{ url: 'a.jpg' }] } }, state),
+      run(other, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-2', part: 'open', shots: [{ url: 'b.jpg' }] } }, state),
     ])
 
     const u = await unitRow()
@@ -361,5 +364,56 @@ describe('logging a vault in three separate acts', () => {
     await expect(run(MOVER, { type: 'finishLoading', p: { unitId: UNIT.id } }, makeState({ units: [short] })))
       .rejects.toThrow(/counted 3 vaults but 1 is fully logged/i)
     expect((await unitRow()).stage).toBe('packed')
+  })
+})
+
+/* More than one shot per door.
+ *
+ * A full vault photographed from one angle hides whatever is behind the front
+ * row, so a door takes as many shots as the mover wants to send. The vault
+ * record keeps the first as its representative image and the count; every shot
+ * lands in unit.media, which is what the unit page and the reports read. */
+describe('several photos on one vault door', () => {
+  const packed = { ...UNIT, stage: 'packed' }
+
+  it('keeps every shot, and names the first as the vault record', async () => {
+    await setDoc(doc(db, 'units', UNIT.id), packed)
+    const state = makeState({ units: [packed] })
+    await run(MOVER, { type: 'startVault', p: { unitId: UNIT.id, number: 'BB-1' } }, state)
+    await run(MOVER, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-1', part: 'open', shots: [
+      { url: 'front.jpg', kind: 'photo' }, { url: 'back.jpg', kind: 'photo' }, { url: 'walkthrough.mp4', kind: 'video' },
+    ] } }, state)
+
+    const u = (await rows('units')).find((x) => x.id === UNIT.id)
+    expect(u.vaults[0].open).toMatchObject({ url: 'front.jpg', count: 3, userName: MOVER.name })
+
+    const shots = u.media.filter((m) => m.phase === 'vault_open')
+    expect(shots.map((m) => m.url)).toEqual(['front.jpg', 'back.jpg', 'walkthrough.mp4'])
+    expect(shots.every((m) => m.userName === MOVER.name)).toBe(true)
+    expect(shots.find((m) => m.url === 'walkthrough.mp4').kind).toBe('video')
+  })
+
+  it('still counts as one finished door, so the checklist is unchanged', async () => {
+    await setDoc(doc(db, 'units', UNIT.id), packed)
+    const state = makeState({ units: [packed] })
+    await run(MOVER, { type: 'startVault', p: { unitId: UNIT.id, number: 'BB-1' } }, state)
+    for (const part of ['open', 'closed']) {
+      await run(MOVER, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-1', part, shots: [{ url: `${part}-1.jpg` }, { url: `${part}-2.jpg` }] } }, state)
+    }
+    const u = (await rows('units')).find((x) => x.id === UNIT.id)
+    expect(vaultComplete(u.vaults[0])).toBe(true)
+    expect(completeVaults(u)).toHaveLength(1)
+  })
+
+  it('gives every shot a distinct id, so none is lost to a collision', async () => {
+    await setDoc(doc(db, 'units', UNIT.id), packed)
+    const state = makeState({ units: [packed] })
+    await run(MOVER, { type: 'startVault', p: { unitId: UNIT.id, number: 'BB-1' } }, state)
+    await run(MOVER, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-1', part: 'open', shots: [
+      { url: 'a.jpg' }, { url: 'b.jpg' }, { url: 'c.jpg' }, { url: 'd.jpg' },
+    ] } }, state)
+    const u = (await rows('units')).find((x) => x.id === UNIT.id)
+    const ids = u.media.filter((m) => m.phase === 'vault_open').map((m) => m.id)
+    expect(new Set(ids).size).toBe(4)
   })
 })

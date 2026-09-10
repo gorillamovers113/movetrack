@@ -46,38 +46,41 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
   // Packer "Finish packing" inventory-sheet photo: captured via the device
   // camera, resized + uploaded to Storage as soon as it's picked so the
   // upload runs while the packer is still filling in the piece count.
-  const [invPreview, setInvPreview] = useState(null)
-  const [invIsVideo, setInvIsVideo] = useState(false)
+  // A paper inventory runs to several sheets on a big apartment, so this takes
+  // as many as the packer needs to send rather than one.
+  const [invPreviews, setInvPreviews] = useState([])
   const [invUploading, setInvUploading] = useState(false)
-  const [invUrl, setInvUrl] = useState(null)
+  const [invShots, setInvShots] = useState([])
   const [invError, setInvError] = useState(null)
 
-  useEffect(() => () => { if (invPreview) URL.revokeObjectURL(invPreview) }, [invPreview])
+  useEffect(() => () => { invPreviews.forEach((p) => URL.revokeObjectURL(p.src)) }, [invPreviews])
 
   const resetInventoryCapture = () => {
-    setInvPreview(null)
-    setInvIsVideo(false)
+    setInvPreviews((prev) => { prev.forEach((p) => URL.revokeObjectURL(p.src)); return [] })
     setInvUploading(false)
-    setInvUrl(null)
+    setInvShots([])
     setInvError(null)
   }
 
-  const captureInventoryPhoto = async (file) => {
+  const captureInventoryPhoto = async (files) => {
     setInvError(null)
-    setInvPreview(URL.createObjectURL(file))
-    setInvUrl(null)
+    const list = [...files]
+    setInvPreviews((prev) => [...prev, ...list.map((f) => ({ src: URL.createObjectURL(f), video: f.type.startsWith('video') }))])
     setInvUploading(true)
     try {
-      // captureMedia resizes through a canvas, which decodes the file as an
-      // image and throws on an mp4. The slot accepts video, so video has to
-      // take the raw upload path instead.
-      const video = file.type.startsWith('video')
-      const stem = `units/${unitId}/inventory/${Date.now()}-${currentUser.uid}`
-      const url = video
-        ? await uploadFile(file, `${stem}.mp4`)
-        : (await captureMedia(file, `${stem}.jpg`)).url
-      setInvUrl(url)
-      setInvIsVideo(video)
+      // Sequential, not parallel: a phone on a stairwell signal uploading four
+      // files at once finishes none of them.
+      for (const file of list) {
+        // captureMedia resizes through a canvas, which decodes the file as an
+        // image and throws on an mp4. The slot accepts video, so video has to
+        // take the raw upload path instead.
+        const video = file.type.startsWith('video')
+        const stem = `units/${unitId}/inventory/${Date.now()}-${currentUser.uid}`
+        const url = video
+          ? await uploadFile(file, `${stem}.mp4`)
+          : (await captureMedia(file, `${stem}.jpg`)).url
+        setInvShots((prev) => [...prev, { url, kind: video ? 'video' : 'photo' }])
+      }
     } catch (err) {
       setInvError(err.message || 'Capture failed, try again.')
     } finally {
@@ -205,8 +208,9 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
     }
     if (stepKey === 'inventory') {
       if (invUploading) return toast('Still uploading the inventory sheet photo, wait a moment and try again.')
-      if (!invUrl) return toast('Take a photo of the paper inventory sheet.')
-      p.media = [{ id: `inv-${Date.now()}`, kind: invIsVideo ? 'video' : 'photo', url: invUrl, label: 'inventory', phase: 'inventory' }]
+      if (invShots.length === 0) return toast('Take a photo of the paper inventory sheet.')
+      const invAt = Date.now()
+      p.media = invShots.map((sh, i) => ({ id: `inv-${invAt}-${i}`, kind: sh.kind, url: sh.url, label: 'inventory', phase: 'inventory' }))
     }
     if (stepKey === 'numbers') {
       const rangeErr = inventoryRangeError(form.invFrom, form.invTo)
@@ -266,7 +270,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
     if (action.key === 'finishPacking') {
       if (!n || n < 1) return toast('Enter the total pieces packed.')
       if (invUploading) return toast('Still uploading the inventory sheet photo, wait a moment and try again.')
-      if (!invUrl) return toast('Take a photo of the paper inventory sheet to finish packing.')
+      if (invShots.length === 0) return toast('Take a photo of the paper inventory sheet to finish packing.')
       const rangeErr = inventoryRangeError(form.invFrom, form.invTo)
       if (rangeErr) return toast(rangeErr)
       // Required, otherwise a finished unit sits at 6 of 7 on the checklist
@@ -297,7 +301,8 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
         status = await submitWrite(dispatch({ type: 'startPacking', p: { unitId, stickerColor: form.stickerColor, media: beforeMedia } }))
       }
       if (action.key === 'finishPacking') {
-        const invMedia = [{ id: `inv-${Date.now()}`, kind: invIsVideo ? 'video' : 'photo', url: invUrl, label: 'inventory', phase: 'inventory', uid: currentUser.uid, ts: Date.now() }]
+        const invAt = Date.now()
+        const invMedia = invShots.map((sh, i) => ({ id: `inv-${invAt}-${i}`, kind: sh.kind, url: sh.url, label: 'inventory', phase: 'inventory', uid: currentUser.uid, ts: invAt }))
         // The inventory sheet plus whatever the packer shot of the finished unit.
         status = await submitWrite(dispatch({ type: 'finishPacking', p: {
           unitId, pieces: n,
@@ -665,22 +670,25 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
           {stepKey === 'inventory' && (
             <div className="field">
               <label>Photo of the paper inventory sheet</label>
-              {invPreview && (
+              {invPreviews.length > 0 ? (
                 <div className="dropzone camera-capture" style={{ display: 'block', marginBottom: 8 }}>
-                  <div className="inv-preview">
-                    {invIsVideo
-                      ? <video src={invPreview} className="inv-thumb" controls playsInline />
-                      : <img src={invPreview} alt="Inventory sheet" className="inv-thumb" />}
-                    <div className="muted" style={{ marginTop: 8 }}>
-                      {invUploading ? 'Saving…' : invUrl ? '✓ Saved, retake below if you need to' : invError || 'Not saved, try again'}
-                    </div>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {invPreviews.map((pv) => (
+                      pv.video
+                        ? <video key={pv.src} src={pv.src} className="inv-thumb" style={{ maxWidth: 110 }} controls playsInline />
+                        : <img key={pv.src} src={pv.src} alt="Inventory sheet" className="inv-thumb" style={{ maxWidth: 110 }} />
+                    ))}
+                  </div>
+                  <div className="muted" style={{ marginTop: 8 }}>
+                    {invUploading
+                      ? `Saving… ${invShots.length} of ${invPreviews.length}`
+                      : invError || `${invShots.length} saved. Add more below if there are extra sheets.`}
                   </div>
                 </div>
+              ) : (
+                <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>Photograph the paper inventory sheet. Add one shot per page.</div>
               )}
-              {!invPreview && (
-                <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>Photograph the paper inventory sheet.</div>
-              )}
-              <CaptureButtons onFiles={(files) => captureInventoryPhoto(files[0])} busy={invUploading} compact />
+              <CaptureButtons onFiles={captureInventoryPhoto} multiple busy={invUploading} compact />
             </div>
           )}
 
@@ -832,22 +840,25 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
                 <input className="input" type="number" min="1" inputMode="numeric" autoFocus placeholder="e.g. 42" value={form.pieces || ''} onChange={(e) => setForm({ ...form, pieces: e.target.value })} /></div>
               <div className="field">
                 <label>4. Photo of the paper inventory sheet</label>
-                {invPreview && (
+                {invPreviews.length > 0 ? (
                   <div className="dropzone camera-capture" style={{ display: 'block', marginBottom: 8 }}>
-                    <div className="inv-preview">
-                      {invIsVideo
-                        ? <video src={invPreview} className="inv-thumb" controls playsInline />
-                        : <img src={invPreview} alt="Inventory sheet" className="inv-thumb" />}
-                      <div className="muted" style={{ marginTop: 8 }}>
-                        {invUploading ? 'Saving…' : invUrl ? '✓ Saved, retake below if you need to' : invError || 'Not saved, try again'}
-                      </div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {invPreviews.map((pv) => (
+                        pv.video
+                          ? <video key={pv.src} src={pv.src} className="inv-thumb" style={{ maxWidth: 110 }} controls playsInline />
+                          : <img key={pv.src} src={pv.src} alt="Inventory sheet" className="inv-thumb" style={{ maxWidth: 110 }} />
+                      ))}
+                    </div>
+                    <div className="muted" style={{ marginTop: 8 }}>
+                      {invUploading
+                        ? `Saving… ${invShots.length} of ${invPreviews.length}`
+                        : invError || `${invShots.length} saved. Add more below if there are extra sheets.`}
                     </div>
                   </div>
+                ) : (
+                  <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>Photograph the paper inventory sheet. Add one shot per page.</div>
                 )}
-                {!invPreview && (
-                  <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>Photograph the paper inventory sheet.</div>
-                )}
-                <CaptureButtons onFiles={(files) => captureInventoryPhoto(files[0])} busy={invUploading} compact />
+                <CaptureButtons onFiles={captureInventoryPhoto} multiple busy={invUploading} compact />
               </div>
               <div className="field">
                 <label>5. Inventory sticker numbers{unit.stickerColor ? ` (${unit.stickerColor} roll)` : ''}</label>

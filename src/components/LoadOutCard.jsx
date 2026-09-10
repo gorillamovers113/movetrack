@@ -12,33 +12,36 @@ import {
 
 const SAVE_ERROR = "Couldn't save that. Check your signal and try again."
 
-/* One camera slot: shoots, resizes, uploads to Storage, hands back a URL.
+/* A camera slot that takes as many shots as the job needs.
  *
- * Kept local to this card because the mover takes three or more photos per
- * unit and each needs its own independent state. Uploading as soon as the
- * shot is taken means the write at the end is a URL, not an image, so a vault
- * photo saves in the time it takes to tap Save. */
-function PhotoSlot({ label, path, url, setUrl, hint, setKind }) {
-  const [preview, setPreview] = useState(null)
-  const [isVideo, setIsVideo] = useState(false)
+ * It was one photo per step, which is wrong for what these photos are for. A
+ * full vault shot from a single angle hides whatever is behind the front row,
+ * and an apartment does not fit in one frame. Each shot uploads to Storage the
+ * moment it is taken, so the write at the end is a list of URLs rather than a
+ * pile of images, and a step saves in the time it takes to tap Save.
+ */
+function PhotoSlot({ label, path, shots, setShots, hint }) {
+  const [previews, setPreviews] = useState([])
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
 
-  useEffect(() => () => { if (preview) URL.revokeObjectURL(preview) }, [preview])
+  useEffect(() => () => { previews.forEach((p) => URL.revokeObjectURL(p.src)) }, [previews])
 
-  const take = async (file) => {
+  const take = async (files) => {
     setErr(null)
-    setIsVideo(file.type.startsWith('video'))
-    setPreview(URL.createObjectURL(file))
-    setUrl(null)
+    const list = [...files]
+    setPreviews((prev) => [...prev, ...list.map((f) => ({ src: URL.createObjectURL(f), video: f.type.startsWith('video') }))])
     setBusy(true)
     try {
-      const video = file.type.startsWith('video')
-      if (setKind) setKind(video ? 'video' : 'photo')
-      const url = video
-        ? await uploadFile(file, path('mp4'))
-        : (await captureMedia(file, path('jpg'))).url
-      setUrl(url)
+      // Sequential, not parallel: a phone on a stairwell signal uploading four
+      // videos at once finishes none of them.
+      for (const file of list) {
+        const video = file.type.startsWith('video')
+        const url = video
+          ? await uploadFile(file, path(video ? 'mp4' : 'jpg'))
+          : (await captureMedia(file, path('jpg'))).url
+        setShots((prev) => [...prev, { url, kind: video ? 'video' : 'photo' }])
+      }
     } catch (e) {
       setErr(e.message || 'Capture failed, try again.')
     } finally {
@@ -46,23 +49,40 @@ function PhotoSlot({ label, path, url, setUrl, hint, setKind }) {
     }
   }
 
+  const clear = () => {
+    previews.forEach((p) => URL.revokeObjectURL(p.src))
+    setPreviews([])
+    setShots([])
+    setErr(null)
+  }
+
   return (
     <div className="field">
       <label>{label}</label>
-      {preview && (
+      {previews.length > 0 ? (
         <div className="dropzone camera-capture" style={{ display: 'block', marginBottom: 8 }}>
-          <div className="inv-preview">
-            {isVideo
-              ? <video src={preview} className="inv-thumb" controls playsInline />
-              : <img src={preview} alt={label} className="inv-thumb" />}
-            <div className="muted" style={{ marginTop: 8 }}>
-              {busy ? 'Saving…' : url ? '✓ Saved, retake below if you need to' : err || 'Not saved, try again'}
-            </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {previews.map((p) => (
+              p.video
+                ? <video key={p.src} src={p.src} className="inv-thumb" style={{ maxWidth: 110 }} controls playsInline />
+                : <img key={p.src} src={p.src} alt={label} className="inv-thumb" style={{ maxWidth: 110 }} />
+            ))}
+          </div>
+          <div className="muted" style={{ marginTop: 8 }}>
+            {busy
+              ? `Saving… ${shots.length} of ${previews.length}`
+              : err || `${shots.length} saved. Add more below, or start over.`}
           </div>
         </div>
+      ) : (
+        <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>{hint}</div>
       )}
-      {!preview && <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>{hint}</div>}
-      <CaptureButtons onFiles={(files) => take(files[0])} busy={busy} compact />
+      <CaptureButtons onFiles={take} multiple busy={busy} compact />
+      {previews.length > 0 && !busy && (
+        <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={clear}>
+          Start over
+        </button>
+      )}
     </div>
   )
 }
@@ -86,12 +106,9 @@ export default function LoadOutCard({ unit, toast }) {
   const [shot, setShot] = useState(null)       // { number, part } for one vault photo
   const [form, setForm] = useState({})
   const [busy, setBusy] = useState(false)
-  const [unitPhoto, setUnitPhoto] = useState(null)
-  const [unitPhotoKind, setUnitPhotoKind] = useState('photo')
-  const [afterPhoto, setAfterPhoto] = useState(null)
-  const [afterPhotoKind, setAfterPhotoKind] = useState('photo')
-  const [vaultPhoto, setVaultPhoto] = useState(null)
-  const [vaultPhotoKind, setVaultPhotoKind] = useState('photo')
+  const [unitShots, setUnitShots] = useState([])
+  const [afterShots, setAfterShots] = useState([])
+  const [vaultShots, setVaultShots] = useState([])
 
   const checklist = loadingChecklist(unit)
   const progress = loadingProgress(unit)
@@ -100,7 +117,7 @@ export default function LoadOutCard({ unit, toast }) {
   const countOff = vaultCountMismatch(unit, unit.steps?.load_vault_count?.value)
 
   const reset = () => {
-    setForm({}); setUnitPhoto(null); setAfterPhoto(null); setVaultPhoto(null)
+    setForm({}); setUnitShots([]); setAfterShots([]); setVaultShots([])
   }
   const open = (key) => { reset(); setShot(null); setModal(key) }
   const openShot = (number, part) => { reset(); setModal(null); setShot({ number, part }) }
@@ -121,36 +138,38 @@ export default function LoadOutCard({ unit, toast }) {
   }
 
   const saveShot = () => {
-    if (!vaultPhoto) return toast('Add a photo or video first.')
+    if (vaultShots.length === 0) return toast('Add a photo or video first.')
     const part = VAULT_PARTS.find((v) => v.key === shot.part)
     return run(
       () => dispatch({ type: 'logVaultPhoto', p: {
-        unitId: unit.id, number: shot.number, part: shot.part, url: vaultPhoto, kind: vaultPhotoKind,
+        unitId: unit.id, number: shot.number, part: shot.part, shots: vaultShots,
       } }),
-      `Vault ${shot.number} · ${part.label.toLowerCase()} saved ✓`,
+      `Vault ${shot.number} · ${part.label.toLowerCase()} saved ✓ (${vaultShots.length})`,
     )
   }
 
   const saveStep = () => {
     if (modal === 'load_unit_photo') {
-      if (!unitPhoto) return toast('Add a photo or video of the unit, fully packed.')
+      if (unitShots.length === 0) return toast('Add a photo or video of the unit, fully packed.')
+      const at = Date.now()
       return run(
         () => dispatch({ type: 'completeLoadStep', p: {
           unitId: unit.id, key: 'load_unit_photo',
-          media: [{ id: `lu-${Date.now()}`, kind: unitPhotoKind, url: unitPhoto, label: 'packed unit', phase: 'load_unit_photo' }],
+          media: unitShots.map((sh, i) => ({ id: `lu-${at}-${i}`, kind: sh.kind, url: sh.url, label: 'packed unit', phase: 'load_unit_photo' })),
         } }),
-        'Unit photo saved ✓',
+        `Unit photo saved ✓ (${unitShots.length})`,
       )
     }
 
     if (modal === 'load_after_photo') {
-      if (!afterPhoto) return toast('Add a photo or video of the unit once it is empty.')
+      if (afterShots.length === 0) return toast('Add a photo or video of the unit once it is empty.')
+      const at = Date.now()
       return run(
         () => dispatch({ type: 'completeLoadStep', p: {
           unitId: unit.id, key: 'load_after_photo',
-          media: [{ id: `la-${Date.now()}`, kind: afterPhotoKind, url: afterPhoto, label: 'unit after loading', phase: 'load_after_photo' }],
+          media: afterShots.map((sh, i) => ({ id: `la-${at}-${i}`, kind: sh.kind, url: sh.url, label: 'unit after loading', phase: 'load_after_photo' })),
         } }),
-        'After photo saved ✓',
+        `After photo saved ✓ (${afterShots.length})`,
       )
     }
 
@@ -332,7 +351,7 @@ export default function LoadOutCard({ unit, toast }) {
             <PhotoSlot
               label="The unit, fully packed and ready to go"
               hint="Tap for a photo or video of the packed unit"
-              path={path('load')} url={unitPhoto} setUrl={setUnitPhoto} setKind={setUnitPhotoKind}
+              path={path('load')} shots={unitShots} setShots={setUnitShots}
             />
           )}
 
@@ -340,7 +359,7 @@ export default function LoadOutCard({ unit, toast }) {
             <PhotoSlot
               label="The unit once everything is out"
               hint="Tap for a photo or video of the empty unit"
-              path={path('after')} url={afterPhoto} setUrl={setAfterPhoto} setKind={setAfterPhotoKind}
+              path={path('after')} shots={afterShots} setShots={setAfterShots}
             />
           )}
 
@@ -434,7 +453,7 @@ export default function LoadOutCard({ unit, toast }) {
             label={shot.part === 'open' ? 'Door open, showing what went in' : 'Door closed and sealed'}
             hint={VAULT_PARTS.find((v) => v.key === shot.part).hint}
             path={path(`vault-${shot.part}`)}
-            url={vaultPhoto} setUrl={setVaultPhoto} setKind={setVaultPhotoKind}
+            shots={vaultShots} setShots={setVaultShots}
           />
           <button
             className="btn btn-primary btn-lg" style={{ width: '100%', marginTop: 6 }}
