@@ -9,6 +9,7 @@ import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction
 import { DEFAULT_SCHEDULE, DEFAULT_RETURN_SCHEDULE, scheduleDocId } from './lib/schedule.js'
 import { stageOf } from './seed.js'
 import { mayPack, mayLoad } from './lib/roles.js'
+import { blockingUnit, blockedMessage } from './lib/focus.js'
 
 // meta/project doc default, used whenever the doc is absent (brand-new
 // project, or before an admin has touched return phase). Keeps name/address
@@ -474,6 +475,15 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
         const step = PACKING_STEPS.find((s) => s.key === key)
         if (!step) throw new Error('Unknown checklist item.')
 
+        // One apartment at a time. The optional note is exempt: it exists so a
+        // packer can record "tenant not home, come back after 2" against a
+        // door nobody has opened, and it deliberately does not start a unit,
+        // so it cannot be the thing that puts a photo on the wrong one.
+        if (!step.optional) {
+          const blocked = blockingUnit(state.units, currentUser, p.unitId, 'packing')
+          if (blocked) throw new Error(blockedMessage(blocked, 'packing'))
+        }
+
         const now = Date.now()
         p.media = attributeMedia(p.media || [])
         const patch = { [`steps.${key}`]: { uid: currentUser.uid, userName: currentUser.name, at: now } }
@@ -656,6 +666,9 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
         const step = LOADING_STEPS.find((s) => s.key === p.key)
         if (!step || step.repeatable) throw new Error('Unknown load step.')
 
+        const blockedLoad = blockingUnit(state.units, currentUser, p.unitId, 'loading')
+        if (blockedLoad) throw new Error(blockedMessage(blockedLoad, 'loading'))
+
         const now = Date.now()
         const entry = { uid: currentUser.uid, userName: currentUser.name, at: now }
         if (p.value != null) entry.value = p.value
@@ -682,6 +695,9 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
         // its own event with its own name and time, because it happens well
         // before the doors close and somebody other than the person who
         // finishes it may have been the one to start it.
+        const blockedVault = blockingUnit(state.units, currentUser, p.unitId, 'loading')
+        if (blockedVault) throw new Error(blockedMessage(blockedVault, 'loading'))
+
         const number = normalizeVaultNumber(p.number)
         const now = Date.now()
 
@@ -712,6 +728,9 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
         // arrayUnion cannot do. Read-modify-write in a transaction instead:
         // up to three movers work a unit at once, and two of them shooting
         // different vaults a second apart must not overwrite each other.
+        const blockedShot = blockingUnit(state.units, currentUser, p.unitId, 'loading')
+        if (blockedShot) throw new Error(blockedMessage(blockedShot, 'loading'))
+
         const number = normalizeVaultNumber(p.number)
         const part = p.part === 'open' || p.part === 'closed' ? p.part : null
         if (!part) throw new Error('Unknown vault photo.')

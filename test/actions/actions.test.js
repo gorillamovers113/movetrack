@@ -570,3 +570,74 @@ describe('correcting a mistyped checklist value', () => {
     expect(await rows('stepCorrections')).toHaveLength(0)
   })
 })
+
+/* One apartment at a time, at the write path.
+ *
+ * The queue greys out the others and the banner says why, but the refusal has
+ * to live where the write happens: a phone on a stale bundle still has the old
+ * screen, and the whole point is that this cannot happen again. */
+describe('starting a second unit while one is open', () => {
+  const packing = { ...UNIT, id: 'unit-1', number: '906', stage: 'packing', crew: { packers: [PACKER.uid], movers: [] } }
+  const fresh = { ...UNIT, id: 'unit-2', number: '902', stage: 'not_started', crew: { packers: [], movers: [] } }
+
+  beforeEach(async () => { await setDoc(doc(db, 'units', 'unit-2'), fresh) })
+
+  it('refuses, and names the unit in the way', async () => {
+    await setDoc(doc(db, 'units', 'unit-1'), packing)
+    await expect(
+      run(PACKER, { type: 'completeStep', p: { unitId: 'unit-2', key: 'door' } }, makeState({ units: [packing, fresh] })),
+    ).rejects.toThrow(/Finish unit 906 first/i)
+
+    // And wrote nothing, which is the part that matters.
+    const u = (await rows('units')).find((x) => x.id === 'unit-2')
+    expect(u.steps || {}).toEqual({})
+  })
+
+  it('still lets them get on with the unit they have open', async () => {
+    await setDoc(doc(db, 'units', 'unit-1'), packing)
+    await expect(
+      run(PACKER, { type: 'completeStep', p: { unitId: 'unit-1', key: 'rooms' } }, makeState({ units: [packing, fresh] })),
+    ).resolves.not.toThrow()
+  })
+
+  it('lets the next one start once the first is finished', async () => {
+    const done = { ...packing, stage: 'packed' }
+    await setDoc(doc(db, 'units', 'unit-1'), done)
+    await expect(
+      run(PACKER, { type: 'completeStep', p: { unitId: 'unit-2', key: 'door' } }, makeState({ units: [done, fresh] })),
+    ).resolves.not.toThrow()
+  })
+
+  // A note against a door nobody has opened is exactly what the optional item
+  // is for, and it does not start a unit, so it cannot misfile a photo.
+  it('never blocks the optional note', async () => {
+    await setDoc(doc(db, 'units', 'unit-1'), packing)
+    await expect(
+      run(PACKER, { type: 'completeStep', p: { unitId: 'unit-2', key: 'notes', note: 'Tenant not home' } }, makeState({ units: [packing, fresh] })),
+    ).resolves.not.toThrow()
+  })
+
+  it('holds on the mover side too, across every write a load can make', async () => {
+    const loading = { ...UNIT, id: 'unit-1', number: '906', stage: 'packed', crew: { packers: [], movers: [MOVER.uid] }, steps: { load_unit_photo: { at: 1, userName: MOVER.name } } }
+    const other = { ...UNIT, id: 'unit-2', number: '902', stage: 'packed', crew: { packers: [], movers: [] } }
+    await setDoc(doc(db, 'units', 'unit-1'), loading)
+    await setDoc(doc(db, 'units', 'unit-2'), other)
+    const state = makeState({ units: [loading, other] })
+
+    for (const action of [
+      { type: 'completeLoadStep', p: { unitId: 'unit-2', key: 'load_number', value: '902', matched: true } },
+      { type: 'startVault', p: { unitId: 'unit-2', number: 'BB-1' } },
+      { type: 'logVaultPhoto', p: { unitId: 'unit-2', number: 'BB-1', part: 'open', shots: [{ url: 'a.jpg' }] } },
+    ]) {
+      await expect(run(MOVER, action, state)).rejects.toThrow(/Finish unit 906 first/i)
+    }
+  })
+
+  it('does not block an admin, who is the one who untangles things', async () => {
+    const adminPacking = { ...packing, crew: { packers: [ADMIN.uid], movers: [] } }
+    await setDoc(doc(db, 'units', 'unit-1'), adminPacking)
+    await expect(
+      run(ADMIN, { type: 'completeStep', p: { unitId: 'unit-2', key: 'door' } }, makeState({ units: [adminPacking, fresh] })),
+    ).resolves.not.toThrow()
+  })
+})

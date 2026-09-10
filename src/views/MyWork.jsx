@@ -5,6 +5,7 @@ import { StagePill } from '../ui.jsx'
 import FindUnitButton from '../components/FindUnitButton.jsx'
 import ClockCard from '../components/ClockCard.jsx'
 import { canPack, canLoad, canReceive } from '../lib/roles.js'
+import { openPackingUnit, openLoadingUnit } from '../lib/focus.js'
 
 export default function MyWork({ openUnit, openContainer, toast }) {
   const { state, currentUser } = useStore()
@@ -67,6 +68,24 @@ export default function MyWork({ openUnit, openContainer, toast }) {
     if (u.stage === 'loaded' || u.stage === 'picked_up') return receivingProgress(u).done > 0
     return u.stage === 'packing'
   }
+  /* One apartment at a time, said out loud rather than only enforced.
+   *
+   * Refusing the write is not enough on its own: somebody who taps a second
+   * unit and gets an error learns the app is broken, not that they have work
+   * open. So the queue names what is holding them and greys the rest. */
+  const openPacking = openPackingUnit(state.units, currentUser)
+  const openLoading = openLoadingUnit(state.units, currentUser)
+  const lockFor = (u) => {
+    if (currentUser.role === 'admin') return null
+    if (u.stage === 'not_started' || u.stage === 'packing') {
+      return openPacking && openPacking.id !== u.id ? openPacking : null
+    }
+    if (u.stage === 'packed') {
+      return openLoading && openLoading.id !== u.id ? openLoading : null
+    }
+    return null
+  }
+
   const inProgress = mine.filter(started)
   const ready = mine.filter((u) => !started(u))
   // Somebody who packs and loads has both kinds of work waiting in one list,
@@ -126,8 +145,16 @@ export default function MyWork({ openUnit, openContainer, toast }) {
     <>
       <div className="section-title">{title} · {units.length}</div>
       <div className="cont-grid" style={{ marginBottom: 8 }}>
-        {units.map((u) => (
-          <div key={u.id} className="card cont-card" onClick={() => openUnit(u.id)}>
+        {units.map((u) => {
+          const lock = lockFor(u)
+          return (
+          <div
+            key={u.id}
+            className="card cont-card"
+            onClick={() => openUnit(u.id)}
+            style={lock ? { opacity: .55 } : undefined}
+            title={lock ? `Finish unit ${lock.number} first` : undefined}
+          >
             <div className="row">
               <span className="cont-num grow">Unit {u.number}</span>
               <StagePill stage={u.stage} short />
@@ -136,11 +163,16 @@ export default function MyWork({ openUnit, openContainer, toast }) {
             {u.note && <div className="muted" style={{ marginTop: 4 }}>⚠️ {u.note}</div>}
             {done ? (
               <button className="btn btn-ghost btn-sm" style={{ marginTop: 10, width: '100%' }}>View what you recorded →</button>
+            ) : lock ? (
+              <button className="btn btn-ghost btn-sm" style={{ marginTop: 10, width: '100%' }} disabled>
+                Finish unit {lock.number} first
+              </button>
             ) : (
               <button className="btn btn-primary btn-sm" style={{ marginTop: 10, width: '100%' }}>{queueLabel(u)} →</button>
             )}
           </div>
-        ))}
+          )
+        })}
       </div>
     </>
   )
@@ -153,6 +185,18 @@ export default function MyWork({ openUnit, openContainer, toast }) {
         <div><h1>My queue</h1><p>Units waiting on you, {currentUser.name.split(' ')[0]}</p></div>
         <FindUnitButton openUnit={openUnit} toast={toast} />
       </div>
+      {(openPacking || openLoading) && currentUser.role !== 'admin' && (
+        <div
+          className="card"
+          onClick={() => openUnit((openPacking || openLoading).id)}
+          style={{ padding: '12px 16px', marginBottom: 12, cursor: 'pointer', borderLeft: '3px solid var(--brand, #f59e0b)' }}
+        >
+          <b>Unit {(openPacking || openLoading).number} is open</b>
+          <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>
+            Finish it before starting another. One apartment at a time is what keeps a photo on the right unit.
+          </div>
+        </div>
+      )}
       {mine.length === 0 && finishedByMe.length === 0 && (
         <div className="card empty">
           <div className="big">🚪</div>
