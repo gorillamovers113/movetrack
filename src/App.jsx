@@ -68,7 +68,7 @@ function RemovedScreen() {
 }
 
 function Shell() {
-  const { state, currentUser, logout } = useStore()
+  const { state, currentUser, logout, dispatch } = useStore()
   // Defensive: Gate should only ever hand us an active, roled user, but guard
   // against a missing/unknown NAV[role] anyway rather than throwing.
   const nav = NAV[currentUser.role] || []
@@ -87,6 +87,11 @@ function Shell() {
   // and never touched history, so on an installed PWA a crew member's
   // instinctive back press dropped them out of MoveTrack entirely, mid-unit.
   const openUnit = (unitId) => {
+    // Checking into the unit is a side effect of opening it, so the crew never
+    // have to remember a separate action. Fire and forget, and failures are
+    // swallowed: a missing session is a reporting gap, and blocking somebody
+    // from opening a unit because of one would be a great deal worse.
+    Promise.resolve(dispatch({ type: 'openUnitSession', p: { unitId } })).catch(() => { /* reporting only */ })
     setView((v) => {
       if (v.name !== 'unit') {
         try { window.history.pushState({ mtUnit: true }, '') } catch { /* history unavailable */ }

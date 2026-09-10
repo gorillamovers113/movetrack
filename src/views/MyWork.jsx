@@ -3,6 +3,7 @@ import { nextPackingStep, packingProgress, loadingChecklist, loadingProgress, re
 import { useStore, canAct, containerAction, CONT_STATUS } from '../store.jsx'
 import { StagePill } from '../ui.jsx'
 import FindUnitButton from '../components/FindUnitButton.jsx'
+import ClockCard from '../components/ClockCard.jsx'
 
 export default function MyWork({ openUnit, openContainer, toast }) {
   const { state, currentUser } = useStore()
@@ -122,6 +123,8 @@ export default function MyWork({ openUnit, openContainer, toast }) {
 
   return (
     <>
+      {/* Returns null for every role except packer and mover, so no guard here. */}
+      <ClockCard toast={toast} />
       <div className="page-head">
         <div><h1>My queue</h1><p>Units waiting on you, {currentUser.name.split(' ')[0]}</p></div>
         <FindUnitButton openUnit={openUnit} toast={toast} />

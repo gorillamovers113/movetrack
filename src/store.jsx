@@ -1,8 +1,9 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, signOut, updateProfile } from 'firebase/auth'
-import { doc, setDoc, updateDoc, deleteDoc, addDoc, arrayUnion, onSnapshot, collection, query, orderBy, serverTimestamp, writeBatch } from 'firebase/firestore'
+import { doc, setDoc, updateDoc, deleteDoc, addDoc, arrayUnion, onSnapshot, collection, query, where, orderBy, serverTimestamp, writeBatch } from 'firebase/firestore'
 import { app, auth, db } from './firebase.js'
 import { captureMedia, uploadFile } from './lib/upload.js'
+import { businessDayKey, canClockInAt, lunchMinutesFor, openSessionFor, usesClock } from './lib/timeclock.js'
 import { stepRow, pushRows } from './lib/sheetBackup.js'
 import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction, sumCartons, PACKING_STEPS, REQUIRED_STEPS, packingChecklist, wouldCompletePacking, LOADING_STEPS, loadingComplete, normalizeBoxNumber, RECEIVING_STEPS, receivingComplete, readyToReceive } from './lib/mutations.js'
 import { DEFAULT_SCHEDULE, DEFAULT_RETURN_SCHEDULE, scheduleDocId } from './lib/schedule.js'
@@ -33,6 +34,8 @@ export function StoreProvider({ children }) {
   // Bumped by a listener error so the subscription effect re-runs and
   // rebuilds it, rather than that collection staying dead all session.
   const [subGeneration, setSubGeneration] = useState(0)
+  const [timeEntries, setTimeEntries] = useState([])
+  const [unitSessions, setUnitSessions] = useState([])
 
   // Live Firestore state: collection (+ one singleton doc) subscriptions
   // replace the old localStorage-backed reducer state. Each array holds
@@ -59,6 +62,7 @@ export function StoreProvider({ children }) {
       // Signed out, or signed up and waiting on approval. Nothing is
       // readable yet, so don't ask and don't leave stale data on screen.
       setUnits([]); setContainers([]); setOverflow([]); setEvents([]); setUsers([]); setSchedule([]); setProject(null)
+      setTimeEntries([]); setUnitSessions([])
       return
     }
     // Every listener gets an error handler. Without one a permission blip
@@ -76,11 +80,25 @@ export function StoreProvider({ children }) {
       onSnapshot(collection(db, 'users'), (s) => setUsers(s.docs.map((d) => ({ id: d.id, ...d.data() }))), onErr('users')),
       onSnapshot(collection(db, 'schedule'), (s) => setSchedule(s.docs.map((d) => ({ id: d.id, ...d.data() }))), onErr('schedule')),
       onSnapshot(doc(db, 'meta', 'project'), (d) => setProject(d.exists() ? { id: d.id, ...d.data() } : null), onErr('project')),
+      // Admin sees everyone; crew see only their own rows, because that is all
+      // the rules allow. An unscoped query for a packer is denied, and a denied
+      // listener never retries: that is the bug that emptied the whole board on
+      // the first morning.
+      onSnapshot(
+        currentUser.role === 'admin' ? collection(db, 'timeEntries')
+          : query(collection(db, 'timeEntries'), where('uid', '==', currentUser.uid)),
+        (s) => setTimeEntries(s.docs.map((d) => ({ id: d.id, ...d.data() }))), onErr('timeEntries'),
+      ),
+      onSnapshot(
+        currentUser.role === 'admin' ? collection(db, 'unitSessions')
+          : query(collection(db, 'unitSessions'), where('uid', '==', currentUser.uid)),
+        (s) => setUnitSessions(s.docs.map((d) => ({ id: d.id, ...d.data() }))), onErr('unitSessions'),
+      ),
     ]
     return () => subs.forEach((u) => u())
   }, [sessionKey, subGeneration])
 
-  const state = { units, containers, overflow, events, users, schedule, project: project || DEFAULT_PROJECT }
+  const state = { units, containers, overflow, events, users, schedule, timeEntries, unitSessions, project: project || DEFAULT_PROJECT }
 
   // Auth session: subscribe to the signed-in user's Firestore profile doc so
   // role/status changes (e.g. admin approval) show up live without a re-login.
@@ -475,6 +493,116 @@ export function StoreProvider({ children }) {
 
         await ev('stage', `Unit ${unit.number} received into the warehouse, ${(unit.boxes || []).length} box${(unit.boxes || []).length === 1 ? '' : 'es'} verified`, { unitId: unit.id, from: unit.stage, to: 'at_warehouse' })
         if (wrong.length) await ev('flag', `FLAG raised on unit ${unit.number}: ${wrong.join(' and ')} did not match on arrival`, { unitId: unit.id })
+        return
+      }
+      /* ----- time clock -----
+       * None of these write an events document, and that is deliberate. Every
+       * other action here logs to /events, whose read rule is isActive(), so
+       * the whole crew sees it in the Activity feed. Logging a correction there
+       * would announce "Corrected Liv's time" to everyone, and logging
+       * clock-ins would put every person's hours in front of every other
+       * person while time reports are admin only. The time collections are
+       * their own audit trail. Do not add ev(...) calls to these cases.
+       */
+      case 'clockIn': {
+        const now = Date.now()
+        if (!usesClock(currentUser.role)) throw new Error('Only packers and movers clock in.')
+        // Enforced here rather than in the rules: the exact local minute needs
+        // a timezone, which security rules do not have. See firestore.rules.
+        if (!canClockInAt(now)) throw new Error('The clock opens at 8:00am.')
+        const day = businessDayKey(now)
+        if (state.timeEntries.some((e) => e.uid === currentUser.uid && e.day === day)) {
+          throw new Error('You are already clocked in for today.')
+        }
+        await addDoc(collection(db, 'timeEntries'), {
+          uid: currentUser.uid, userName: currentUser.name, role: currentUser.role,
+          day, clockIn: now, clockOut: null,
+          lunchMinutes: 0, workedThroughLunch: false, source: 'self',
+        })
+        return
+      }
+      case 'clockOut': {
+        const now = Date.now()
+        const open = state.timeEntries.find((e) => e.uid === currentUser.uid && !e.clockOut)
+        if (!open) throw new Error('You are not clocked in.')
+
+        // Close whatever unit they were still standing in, so a day never ends
+        // with a session left running.
+        const session = openSessionFor(state.unitSessions, currentUser.uid)
+        if (session) {
+          await updateDoc(doc(db, 'unitSessions', session.id), { endedAt: now, endedReason: 'clockOut' })
+        }
+
+        await updateDoc(doc(db, 'timeEntries', open.id), {
+          clockOut: now,
+          lunchMinutes: lunchMinutesFor(now - open.clockIn, !!p.workedThroughLunch),
+          workedThroughLunch: !!p.workedThroughLunch,
+        })
+        return
+      }
+      case 'openUnitSession': {
+        // One unit at a time. Opening another closes the last, because the
+        // person has physically walked to a different apartment and the old one
+        // ended whether or not anybody tapped anything. Sessions that cannot
+        // overlap cannot double count, which is the only reason the per-unit
+        // numbers mean anything.
+        const now = Date.now()
+        if (!usesClock(currentUser.role)) return
+        const open = openSessionFor(state.unitSessions, currentUser.uid)
+        if (open && open.unitId === p.unitId) return
+        if (open) {
+          await updateDoc(doc(db, 'unitSessions', open.id), { endedAt: now, endedReason: 'switched' })
+        }
+        await addDoc(collection(db, 'unitSessions'), {
+          unitId: p.unitId, uid: currentUser.uid, userName: currentUser.name,
+          day: businessDayKey(now), startedAt: now, endedAt: null, endedReason: null,
+        })
+        return
+      }
+      case 'closeUnitSession': {
+        const open = openSessionFor(state.unitSessions, currentUser.uid)
+        if (!open) return
+        await updateDoc(doc(db, 'unitSessions', open.id), { endedAt: Date.now(), endedReason: 'manual' })
+        return
+      }
+      case 'adminAddTimeEntry': {
+        // Back-entry for a day the app was not used. No 8am floor: this records
+        // history, and history does not become false because it started early.
+        const target = state.users.find((u) => (u.uid || u.id) === p.uid)
+        if (!target) throw new Error('Pick a packer or mover.')
+        if (!usesClock(target.role)) throw new Error('Only packers and movers keep time.')
+        if (!p.clockIn || !p.clockOut) throw new Error('Enter a start and a finish time.')
+        if (p.clockOut <= p.clockIn) throw new Error('Finish time must be after start time.')
+        await addDoc(collection(db, 'timeEntries'), {
+          uid: target.uid || target.id, userName: target.name, role: target.role,
+          day: businessDayKey(p.clockIn), clockIn: p.clockIn, clockOut: p.clockOut,
+          lunchMinutes: Number.isFinite(p.lunchMinutes) && p.lunchMinutes !== null
+            ? Math.max(0, Math.floor(p.lunchMinutes))
+            : lunchMinutesFor(p.clockOut - p.clockIn, false),
+          workedThroughLunch: false,
+          source: 'admin', notes: (p.notes || '').trim(),
+          enteredBy: currentUser.uid, enteredAt: Date.now(),
+        })
+        return
+      }
+      case 'adminCorrectTimeEntry': {
+        // The old value goes to timeCorrections, never onto the entry. Crew can
+        // read their own entries, so a history stored there would be readable
+        // by them however the screen chooses to render it.
+        const entry = state.timeEntries.find((e) => e.id === p.entryId)
+        if (!entry) throw new Error('That entry is gone. Refresh and try again.')
+        const changes = p.changes || {}
+        const now = Date.now()
+        for (const field of Object.keys(changes)) {
+          if (entry[field] === changes[field]) continue
+          await addDoc(collection(db, 'timeCorrections'), {
+            entryId: entry.id, uid: entry.uid, day: entry.day, field,
+            oldValue: entry[field] === undefined ? null : entry[field],
+            newValue: changes[field],
+            byUid: currentUser.uid, byName: currentUser.name, at: now,
+          })
+        }
+        await updateDoc(doc(db, 'timeEntries', p.entryId), changes)
         return
       }
       case 'logEmpties': {
