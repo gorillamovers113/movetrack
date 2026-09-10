@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react'
 import { useStore } from '../store.jsx'
 import { timesheet, fmtDuration } from '../lib/reports.js'
 import TimeCorrectionModal from '../components/TimeCorrectionModal.jsx'
+import AddTimeEntryModal from '../components/AddTimeEntryModal.jsx'
 import { Modal } from '../ui.jsx'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import { fmtScheduleDate, todayKey, progressForDay, targetStageForWork, scheduleForPhase, DEFAULT_RETURN_SCHEDULE } from '../lib/schedule.js'
@@ -90,6 +91,7 @@ export default function Schedule({ toast }) {
   const now = Date.now()
   // The crew row an admin is adjusting, if any.
   const [editingTime, setEditingTime] = useState(null)
+  const [addingTo, setAddingTo] = useState(null)   // a date, for back-entering somebody's hours
   const key = todayKey()
 
   const phaseSchedule = useMemo(() => scheduleForPhase(state.schedule, phase), [state.schedule, phase])
@@ -202,8 +204,12 @@ export default function Schedule({ toast }) {
                   }}
                 >
                   {row}
-                  {crewOnDay.length > 0 && (
-                    <div style={{ padding: '0 18px 12px', display: 'flex', flexWrap: 'wrap', gap: '6px 16px' }}>
+                  {/* Rendered for an admin even when the list is empty: a day
+                      nobody clocked is precisely the day that needs somebody
+                      added to it, and hiding the control there put it out of
+                      reach in the one case it exists for. */}
+                  {(crewOnDay.length > 0 || isAdmin) && (
+                    <div style={{ padding: '0 18px 12px', display: 'flex', flexWrap: 'wrap', gap: '6px 16px', alignItems: 'center' }}>
                       {crewOnDay.map((r) => {
                         // Tapping a person opens the same correction modal the
                         // Timesheets page uses, so a start time can be fixed
@@ -231,6 +237,19 @@ export default function Schedule({ toast }) {
                           </Who>
                         )
                       })}
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          onClick={() => setAddingTo(day.date)}
+                          style={{ padding: '3px 8px', fontSize: 12.5 }}
+                        >
+                          ＋ Add someone
+                        </button>
+                      )}
+                      {crewOnDay.length === 0 && (
+                        <span className="muted" style={{ fontSize: 12.5 }}>Nobody clocked in on this day.</span>
+                      )}
                       {crewOnDay.length > 1 && (() => {
                         // Only finished days have a number. An open shift
                         // contributes nothing, because guessing how long
@@ -265,6 +284,9 @@ export default function Schedule({ toast }) {
       {editing && <DayEditModal day={editing} onClose={() => setEditing(null)} toast={toast} />}
       {editingTime && (
         <TimeCorrectionModal row={editingTime} toast={toast} onClose={() => setEditingTime(null)} />
+      )}
+      {addingTo && (
+        <AddTimeEntryModal date={addingTo} toast={toast} onClose={() => setAddingTo(null)} />
       )}
     </>
   )
