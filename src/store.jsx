@@ -724,18 +724,10 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
 
         const now = Date.now()
         const side = part === 'open' ? 'door open' : 'door closed'
-        // The vault record keeps the first shot as its representative image
-        // and the count, so vaultComplete and every summary stay a simple
-        // check. Every shot is in unit.media, which is what the unit page and
-        // the reports read.
-        const shot = {
-          url: shots[0].url, kind: shots[0].kind || 'photo', count: shots.length,
-          uid: currentUser.uid, userName: currentUser.name, at: now,
-        }
+        const label = `vault ${number} ${side}`
         const media = attributeMedia(shots.map((x, i) => ({
           id: `vault-${part}-${now}-${i}`, kind: x.kind || 'photo', url: x.url,
-          label: `vault ${number} ${side}`,
-          phase: `vault_${part}`,
+          label, phase: `vault_${part}`,
         })))
 
         const ref = doc(db, 'units', p.unitId)
@@ -746,6 +738,26 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
           const vaults = vaultsOf(data)
           const i = vaults.findIndex((v) => normalizeVaultNumber(v.number) === number)
           if (i === -1) throw new Error(`Vault ${number} is not on this unit yet.`)
+          // The record keeps the first shot as its representative image and a
+          // running count, so vaultComplete and every summary stay a simple
+          // check while unit.media carries all of them.
+          //
+          // The count is taken from the media already on the unit rather than
+          // from this batch, because a mover who comes back to the same door
+          // and adds two more is adding, not replacing. Counting only the
+          // batch reset it to two and made the earlier shots look lost.
+          const already = ((data.media || []).filter((m) => m && m.label === label)).length
+          const existing = vaults[i][part]
+          const shot = {
+            url: (existing && existing.url) || shots[0].url,
+            kind: (existing && existing.kind) || shots[0].kind || 'photo',
+            count: already + shots.length,
+            uid: (existing && existing.uid) || currentUser.uid,
+            userName: (existing && existing.userName) || currentUser.name,
+            at: (existing && existing.at) || now,
+            lastAt: now,
+            lastBy: currentUser.name,
+          }
           const next = vaults.map((v, j) => (j === i ? { ...v, [part]: shot } : v))
           tx.update(ref, {
             vaults: next,

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useStore, fmtTime } from '../store.jsx'
 import { Modal, CaptureButtons } from '../ui.jsx'
 import { captureMedia, uploadFile } from '../lib/upload.js'
@@ -25,7 +25,19 @@ function PhotoSlot({ label, path, shots, setShots, hint }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
 
-  useEffect(() => () => { previews.forEach((p) => URL.revokeObjectURL(p.src)) }, [previews])
+  /* Revoke on unmount only, and read the list from a ref rather than the dep.
+   *
+   * With [previews] as the dependency, React runs the CLEANUP before each
+   * re-run, so adding a second photo revoked the first one's blob URL while it
+   * was still on screen. The first preview went blank the instant a second was
+   * taken, which looks exactly like the app refusing to accept more than one
+   * photo. It was reported as that.
+   */
+  const live = useRef([])
+  useEffect(() => {
+    live.current = previews
+  }, [previews])
+  useEffect(() => () => { live.current.forEach((p) => URL.revokeObjectURL(p.src)) }, [])
 
   const take = async (files) => {
     setErr(null)
@@ -51,6 +63,7 @@ function PhotoSlot({ label, path, shots, setShots, hint }) {
 
   const clear = () => {
     previews.forEach((p) => URL.revokeObjectURL(p.src))
+    live.current = []
     setPreviews([])
     setShots([])
     setErr(null)
@@ -71,7 +84,7 @@ function PhotoSlot({ label, path, shots, setShots, hint }) {
           <div className="muted" style={{ marginTop: 8 }}>
             {busy
               ? `Saving… ${shots.length} of ${previews.length}`
-              : err || `${shots.length} saved. Add more below, or start over.`}
+              : err || `${shots.length} saved. Tap Photo or Video again to add another, as many as you need.`}
           </div>
         </div>
       ) : (
@@ -314,6 +327,10 @@ export default function LoadOutCard({ unit, toast }) {
                           title={got ? `${got.userName || 'Crew'} · ${fmtTime(got.at)}` : undefined}
                         >
                           {got ? '✓ ' : '📷 '}{part.label}
+                          {/* The running total, so it is obvious the door can
+                              take more than one and that earlier ones are still
+                              there. Tapping a done door adds to it. */}
+                          {got && got.count > 1 && <span className="muted"> · {got.count}</span>}
                         </button>
                       )
                     })}

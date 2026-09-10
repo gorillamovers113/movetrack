@@ -417,3 +417,63 @@ describe('several photos on one vault door', () => {
     expect(new Set(ids).size).toBe(4)
   })
 })
+
+/* Coming back to the same door and adding more.
+ *
+ * The count used to be taken from the batch being saved, so a mover who added
+ * two more shots to a door that already had three ended up with a record
+ * saying two, and the first three looked lost. They were never lost, but a
+ * count that goes backwards is a report nobody trusts. */
+describe('adding more shots to a door already photographed', () => {
+  const packed = { ...UNIT, stage: 'packed' }
+
+  it('accumulates rather than replacing', async () => {
+    await setDoc(doc(db, 'units', UNIT.id), packed)
+    const state = makeState({ units: [packed] })
+    await run(MOVER, { type: 'startVault', p: { unitId: UNIT.id, number: 'BB-1' } }, state)
+    await run(MOVER, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-1', part: 'open', shots: [{ url: 'a.jpg' }, { url: 'b.jpg' }, { url: 'c.jpg' }] } }, state)
+    await run(MOVER, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-1', part: 'open', shots: [{ url: 'd.jpg' }, { url: 'e.jpg' }] } }, state)
+
+    const u = (await rows('units')).find((x) => x.id === UNIT.id)
+    expect(u.vaults[0].open.count).toBe(5)
+    expect(u.media.filter((m) => m.phase === 'vault_open').map((m) => m.url))
+      .toEqual(['a.jpg', 'b.jpg', 'c.jpg', 'd.jpg', 'e.jpg'])
+  })
+
+  it('keeps the original credit and adds who touched it last', async () => {
+    await setDoc(doc(db, 'units', UNIT.id), packed)
+    const state = makeState({ units: [packed] })
+    const other = { uid: 'mover-2', name: 'Sam Diaz', role: 'mover', status: 'active' }
+    await run(MOVER, { type: 'startVault', p: { unitId: UNIT.id, number: 'BB-1' } }, state)
+    await run(MOVER, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-1', part: 'open', shots: [{ url: 'a.jpg' }] } }, state)
+    await run(other, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-1', part: 'open', shots: [{ url: 'b.jpg' }] } }, state)
+
+    const u = (await rows('units')).find((x) => x.id === UNIT.id)
+    expect(u.vaults[0].open).toMatchObject({ url: 'a.jpg', userName: MOVER.name, count: 2, lastBy: 'Sam Diaz' })
+  })
+
+  it('counts each door separately', async () => {
+    await setDoc(doc(db, 'units', UNIT.id), packed)
+    const state = makeState({ units: [packed] })
+    await run(MOVER, { type: 'startVault', p: { unitId: UNIT.id, number: 'BB-1' } }, state)
+    await run(MOVER, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-1', part: 'open', shots: [{ url: 'a.jpg' }, { url: 'b.jpg' }] } }, state)
+    await run(MOVER, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-1', part: 'closed', shots: [{ url: 'c.jpg' }] } }, state)
+
+    const u = (await rows('units')).find((x) => x.id === UNIT.id)
+    expect(u.vaults[0].open.count).toBe(2)
+    expect(u.vaults[0].closed.count).toBe(1)
+  })
+
+  it('counts each vault separately, even on the same unit', async () => {
+    await setDoc(doc(db, 'units', UNIT.id), packed)
+    const state = makeState({ units: [packed] })
+    await run(MOVER, { type: 'startVault', p: { unitId: UNIT.id, number: 'BB-1' } }, state)
+    await run(MOVER, { type: 'startVault', p: { unitId: UNIT.id, number: 'BB-2' } }, state)
+    await run(MOVER, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-1', part: 'open', shots: [{ url: 'a.jpg' }, { url: 'b.jpg' }] } }, state)
+    await run(MOVER, { type: 'logVaultPhoto', p: { unitId: UNIT.id, number: 'BB-2', part: 'open', shots: [{ url: 'c.jpg' }] } }, state)
+
+    const u = (await rows('units')).find((x) => x.id === UNIT.id)
+    expect(u.vaults.find((v) => v.number === 'BB-1').open.count).toBe(2)
+    expect(u.vaults.find((v) => v.number === 'BB-2').open.count).toBe(1)
+  })
+})

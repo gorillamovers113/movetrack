@@ -53,10 +53,17 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
   const [invShots, setInvShots] = useState([])
   const [invError, setInvError] = useState(null)
 
-  useEffect(() => () => { invPreviews.forEach((p) => URL.revokeObjectURL(p.src)) }, [invPreviews])
+  // Unmount only. With [invPreviews] as the dependency React runs the cleanup
+  // before each re-run, revoking a preview's blob URL while it is still on
+  // screen: page one went blank the moment page two was added, which looks
+  // exactly like the app refusing more than one photo.
+  const livePreviews = useRef([])
+  useEffect(() => { livePreviews.current = invPreviews }, [invPreviews])
+  useEffect(() => () => { livePreviews.current.forEach((p) => URL.revokeObjectURL(p.src)) }, [])
 
   const resetInventoryCapture = () => {
     setInvPreviews((prev) => { prev.forEach((p) => URL.revokeObjectURL(p.src)); return [] })
+    livePreviews.current = []
     setInvUploading(false)
     setInvShots([])
     setInvError(null)
@@ -682,7 +689,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
                   <div className="muted" style={{ marginTop: 8 }}>
                     {invUploading
                       ? `Saving… ${invShots.length} of ${invPreviews.length}`
-                      : invError || `${invShots.length} saved. Add more below if there are extra sheets.`}
+                      : invError || `${invShots.length} saved. Tap Photo again for each extra sheet.`}
                   </div>
                 </div>
               ) : (
@@ -852,7 +859,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
                     <div className="muted" style={{ marginTop: 8 }}>
                       {invUploading
                         ? `Saving… ${invShots.length} of ${invPreviews.length}`
-                        : invError || `${invShots.length} saved. Add more below if there are extra sheets.`}
+                        : invError || `${invShots.length} saved. Tap Photo again for each extra sheet.`}
                     </div>
                   </div>
                 ) : (
