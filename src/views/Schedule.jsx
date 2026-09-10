@@ -208,12 +208,28 @@ export default function Schedule({ toast }) {
                           {r.adminEntered && <span className="muted" style={{ fontSize: 11 }}>added</span>}
                         </span>
                       ))}
-                      {crewOnDay.length > 1 && (
-                        <span style={{ fontSize: 13, marginLeft: 'auto' }}>
-                          <span className="muted">Total </span>
-                          <b>{fmtDuration(crewOnDay.reduce((n, r) => n + r.workedMs, 0))}</b>
-                        </span>
-                      )}
+                      {crewOnDay.length > 1 && (() => {
+                        // Only finished days have a number. An open shift
+                        // contributes nothing, because guessing how long
+                        // somebody has worked before they say so is the one
+                        // thing this whole feature refuses to do. Printing
+                        // "Total 0m" beside two people who are actively on the
+                        // clock reads as "nobody did anything", so the count of
+                        // open shifts is shown instead of a total that is true
+                        // but says the wrong thing.
+                        const openCount = crewOnDay.filter((r) => r.open).length
+                        const doneMs = crewOnDay.reduce((n, r) => n + r.workedMs, 0)
+                        return (
+                          <span style={{ fontSize: 13, marginLeft: 'auto' }}>
+                            {doneMs > 0 && <><span className="muted">Total </span><b>{fmtDuration(doneMs)}</b></>}
+                            {openCount > 0 && (
+                              <span className="muted" style={{ marginLeft: doneMs > 0 ? 8 : 0 }}>
+                                {openCount} still on the clock
+                              </span>
+                            )}
+                          </span>
+                        )
+                      })()}
                     </div>
                   )}
                 </div>
