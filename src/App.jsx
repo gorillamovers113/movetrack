@@ -12,6 +12,7 @@ import Activity from './views/Activity.jsx'
 import MyWork from './views/MyWork.jsx'
 import Schedule from './views/Schedule.jsx'
 import Reports from './views/Reports.jsx'
+import Timesheets from './views/Timesheets.jsx'
 
 // Packers reach Overflow via the "＋ Report overflow item" button on a unit,
 // so it's left out of their nav to keep it lean (same reasoning as omitting
@@ -19,7 +20,7 @@ import Reports from './views/Reports.jsx'
 // (or just needs to see it) gets it in the nav. Schedule is for every role
 // (read-only for non-admins) since the crew needs to know today's floor.
 const NAV = {
-  admin: [['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['containers', '📦', 'Containers'], ['overflow', '🛋️', 'Overflow'], ['team', '👥', 'Team'], ['reports', '📊', 'Reports'], ['activity', '🕘', 'Activity']],
+  admin: [['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['containers', '📦', 'Containers'], ['overflow', '🛋️', 'Overflow'], ['team', '👥', 'Team'], ['reports', '📊', 'Reports'], ['timesheets', '⏱️', 'Timesheets'], ['activity', '🕘', 'Activity']],
   // Packers deliberately have no Dashboard or Activity: both list every
   // apartment and tenant in the building, and a packer needs the one door
   // they are standing at (reached by number from My queue). Their own recent
@@ -144,6 +145,9 @@ function Shell() {
       case 'overflow': return <Overflow openUnit={openUnit} focusId={view.focusId} clearFocus={() => setView((v) => ({ ...v, focusId: null }))} toast={toast} />
       case 'team': return <Team toast={toast} />
       case 'reports': return <Reports openUnit={openUnit} openContainer={openContainer} toast={toast} />
+      // Admin only, and Timesheets itself also returns null for anyone else,
+      // so the guard holds even if this nav list is edited later.
+      case 'timesheets': return <Timesheets toast={toast} />
       case 'activity': return <Activity openUnit={openUnit} openContainer={openContainer} />
       case 'mywork': return <MyWork openUnit={openUnit} openContainer={openContainer} toast={toast} />
       default: return null

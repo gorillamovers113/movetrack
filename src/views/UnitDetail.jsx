@@ -5,6 +5,7 @@ import { Modal, Lightbox, Uploader, EventRow, Avatar, StagePill } from '../ui.js
 import { captureMedia, uploadFile } from '../lib/upload.js'
 import { surnameOf, STICKER_COLORS, inventoryRangeError, overlappingUnits, inventoryRangeLabel, stickerHex, CARTON_TYPES, cartonsFromForm, sumCartons, cartonSummary, SUPPLY_TYPES, suppliesFromForm, sumSupplies, supplySummary, packingChecklist, packingProgress, packingComplete, nextPackingStep, PACKING_STEPS, readyToReceive } from '../lib/mutations.js'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
+import { unitLabour, fmtDuration } from '../lib/reports.js'
 import ReportOverflowButton from '../components/ReportOverflowButton.jsx'
 import LoadOutCard from '../components/LoadOutCard.jsx'
 import ReceiveCard from '../components/ReceiveCard.jsx'
@@ -552,6 +553,32 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
               </div>
             )}
           </div>
+
+          {/* Time on this unit. Admin only, like the timesheets it comes from.
+              Hidden entirely when nothing has been recorded, so a unit worked
+              before the clock existed shows nothing rather than a bare zero
+              that reads like nobody touched it. */}
+          {currentUser.role === 'admin' && (() => {
+            const labour = unitLabour(state.unitSessions, unitId, Date.now())
+            if (labour.totalMs === 0) return null
+            return (
+              <div className="card" style={{ padding: '16px 20px', marginBottom: 14 }}>
+                <div className="row" style={{ marginBottom: 6 }}>
+                  <div className="section-title grow" style={{ margin: 0 }}>Time on this unit</div>
+                  <span className="muted" style={{ fontWeight: 700 }}>{fmtDuration(labour.totalMs)}</span>
+                </div>
+                {labour.people.map((person) => (
+                  <div key={person.uid} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '4px 0', fontSize: 13.5 }}>
+                    <span className="grow">{person.userName}</span>
+                    <span className="muted" style={{ fontSize: 12.5 }}>
+                      {person.sessions} visit{person.sessions === 1 ? '' : 's'}
+                    </span>
+                    <b style={{ marginLeft: 10 }}>{fmtDuration(person.ms)}</b>
+                  </div>
+                ))}
+              </div>
+            )
+          })()}
 
           {canContribute && (
             <div className="card" style={{ padding: '16px 20px' }}>
