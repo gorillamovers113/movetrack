@@ -34,6 +34,7 @@ export const localValue = (ms) => {
 export default function TimeCorrectionModal({ row, onClose, toast }) {
   const { dispatch } = useStore()
   const [busy, setBusy] = useState(false)
+  const [confirmRemove, setConfirmRemove] = useState(false)
   const [form, setForm] = useState({
     start: localValue(row.clockIn),
     end: localValue(row.clockOut),
@@ -66,6 +67,26 @@ export default function TimeCorrectionModal({ row, onClose, toast }) {
     }
   }
 
+  /* Removing a day, offered only for one an admin typed.
+   *
+   * A punched entry is the crew member's own record of their own shift and
+   * gets corrected, not deleted. A back-entry is the admin's own data, and
+   * adding the same person twice is easy enough to do that there has to be a
+   * way back. */
+  const remove = async () => {
+    if (busy) return
+    setBusy(true)
+    try {
+      const status = await submitWrite(dispatch({ type: 'adminDeleteTimeEntry', p: { entryId: row.entryId } }))
+      toast(status === 'queued' ? QUEUED_MESSAGE : `${row.userName}'s day removed ✓`)
+      onClose()
+    } catch (err) {
+      toast(err.message || "Couldn't remove that.")
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <Modal title={`Adjust ${row.userName}`} sub={row.day} onClose={() => !busy && onClose()}>
       <div className="field">
@@ -89,6 +110,29 @@ export default function TimeCorrectionModal({ row, onClose, toast }) {
       <button className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={busy} onClick={save}>
         {busy ? 'Saving…' : 'Save'}
       </button>
+
+      {row.adminEntered && (
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line)' }}>
+          {confirmRemove ? (
+            <>
+              <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>
+                Remove this day for {row.userName} entirely? You added it, so it is yours to take back. What it
+                said is kept where only you can read it.
+              </div>
+              <button className="btn btn-danger btn-sm" style={{ width: '100%' }} disabled={busy} onClick={remove}>
+                {busy ? 'Removing…' : 'Yes, remove this day'}
+              </button>
+              <button className="btn btn-ghost btn-sm" style={{ width: '100%', marginTop: 6 }} onClick={() => setConfirmRemove(false)}>
+                Keep it
+              </button>
+            </>
+          ) : (
+            <button className="btn btn-ghost btn-sm" style={{ width: '100%' }} onClick={() => setConfirmRemove(true)}>
+              Remove this day
+            </button>
+          )}
+        </div>
+      )}
     </Modal>
   )
 }

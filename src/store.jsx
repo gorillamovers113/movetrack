@@ -969,6 +969,36 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
         await updateDoc(doc(db, 'timeEntries', p.entryId), changes)
         return
       }
+      case 'adminDeleteTimeEntry': {
+        /* Removing a day an admin entered.
+         *
+         * Only ever a day an admin TYPED. A punched entry is the crew
+         * member's own record of their own shift, and the answer to a wrong
+         * one is to correct it, not to make it disappear: these are pay
+         * records, and a record that can be deleted is not a record. An
+         * admin's own back-entry is different. Casey added Rogelio twice by
+         * mistake and one of those days never happened.
+         *
+         * The whole entry is kept in timeCorrections, where only admins can
+         * read it, so a removal is as auditable as a change.
+         */
+        const entry = state.timeEntries.find((e) => e.id === p.entryId)
+        if (!entry) throw new Error('That entry is gone. Refresh and try again.')
+        if (entry.source !== 'admin') {
+          throw new Error(`${entry.userName} clocked this day in themselves. Correct the times rather than removing their record.`)
+        }
+        await addDoc(collection(db, 'timeCorrections'), {
+          entryId: entry.id, uid: entry.uid, day: entry.day, field: 'deleted',
+          oldValue: JSON.stringify({
+            clockIn: entry.clockIn, clockOut: entry.clockOut,
+            lunchMinutes: entry.lunchMinutes, notes: entry.notes || '', source: entry.source,
+          }),
+          newValue: null,
+          byUid: currentUser.uid, byName: currentUser.name, at: Date.now(),
+        })
+        await deleteDoc(doc(db, 'timeEntries', p.entryId))
+        return
+      }
       case 'adminCorrectStep': {
         /* An admin fixes a value a crew member typed wrong.
          *

@@ -711,3 +711,60 @@ describe('moving a photo to the right unit', () => {
     expect((await unitRow('unit-1')).media).toHaveLength(2)
   })
 })
+
+/* Removing a day an admin entered.
+ *
+ * Casey added Rogelio twice by mistake and one of those days never happened.
+ * A back-entry is the admin's own data and has to have a way back; a punched
+ * entry is the crew member's own record of their own shift and does not. */
+describe('removing a back-entered day', () => {
+  const day = {
+    clockIn: Date.parse('2026-09-10T16:00:00Z'),
+    clockOut: Date.parse('2026-09-10T23:00:00Z'),
+    notes: 'Added twice by mistake',
+  }
+
+  it('removes it, and keeps what it said where only an admin can read it', async () => {
+    await run(ADMIN, { type: 'adminAddTimeEntry', p: { uid: MOVER.uid, ...day } })
+    const [entry] = await rows('timeEntries')
+
+    await run(ADMIN, { type: 'adminDeleteTimeEntry', p: { entryId: entry.id } }, makeState({ timeEntries: [entry] }))
+
+    expect(await rows('timeEntries')).toHaveLength(0)
+    const [record] = await rows('timeCorrections')
+    expect(record).toMatchObject({ entryId: entry.id, uid: MOVER.uid, field: 'deleted', byUid: ADMIN.uid })
+    expect(JSON.parse(record.oldValue)).toMatchObject({ clockIn: day.clockIn, clockOut: day.clockOut, notes: day.notes })
+  })
+
+  // The line that matters: a punched shift is not the admin's to erase.
+  it('refuses a day the crew member clocked in themselves', async () => {
+    await run(MOVER, { type: 'clockIn' })
+    const [punched] = await rows('timeEntries')
+    expect(punched.source).toBe('self')
+
+    await expect(
+      run(ADMIN, { type: 'adminDeleteTimeEntry', p: { entryId: punched.id } }, makeState({ timeEntries: [punched] })),
+    ).rejects.toThrow(/clocked this day in themselves/i)
+
+    expect(await rows('timeEntries')).toHaveLength(1)
+    expect(await rows('timeCorrections')).toHaveLength(0)
+  })
+
+  it('removes only the duplicate, leaving the real one alone', async () => {
+    await run(ADMIN, { type: 'adminAddTimeEntry', p: { uid: MOVER.uid, ...day } })
+    await run(ADMIN, { type: 'adminAddTimeEntry', p: { uid: MOVER.uid, ...day } })
+    const both = await rows('timeEntries')
+    expect(both).toHaveLength(2)
+
+    await run(ADMIN, { type: 'adminDeleteTimeEntry', p: { entryId: both[0].id } }, makeState({ timeEntries: both }))
+    const left = await rows('timeEntries')
+    expect(left).toHaveLength(1)
+    expect(left[0].id).toBe(both[1].id)
+  })
+
+  it('says so plainly when the entry is already gone', async () => {
+    await expect(
+      run(ADMIN, { type: 'adminDeleteTimeEntry', p: { entryId: 'ghost' } }, makeState({ timeEntries: [] })),
+    ).rejects.toThrow(/gone/i)
+  })
+})
