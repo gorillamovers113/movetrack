@@ -436,8 +436,40 @@ export function vaultComplete(vault) {
     && vault.open && vault.open.url && vault.closed && vault.closed.url)
 }
 
+/* Vaults on a unit, including any written by a phone still on the old build.
+ *
+ * A crew phone left open does not reload, so after a deploy it keeps running
+ * the bundle it launched with. Víctor was mid-load when the vault split
+ * shipped: his app still wrote the old single-shot `boxes` shape, the rules no
+ * longer allowed that key, and he got "Missing or insufficient permissions"
+ * standing at a sealed vault.
+ *
+ * Re-allowing the key alone would have been worse than the error, because his
+ * work would have landed somewhere nothing reads. So the old shape is mapped
+ * forward here instead: one write, one record, visible everywhere.
+ */
+function fromLegacyBox(box) {
+  const who = { uid: box.uid, userName: box.userName, at: box.at }
+  return {
+    number: box.number,
+    containerId: box.containerId,
+    uid: box.uid,
+    userName: box.userName,
+    at: box.at,
+    ...(box.openUrl ? { open: { url: box.openUrl, kind: 'photo', ...who } } : {}),
+    ...(box.closedUrl ? { closed: { url: box.closedUrl, kind: 'photo', ...who } } : {}),
+    legacy: true,
+  }
+}
+
 export function vaultsOf(unit) {
-  return ((unit && unit.vaults) || []).filter(Boolean)
+  const vaults = ((unit && unit.vaults) || []).filter(Boolean)
+  const legacy = ((unit && unit.boxes) || []).filter(Boolean)
+  if (legacy.length === 0) return vaults
+
+  // A vault logged both ways keeps the new record: it is the richer one.
+  const seen = new Set(vaults.map((v) => normalizeCode(v.number)))
+  return [...vaults, ...legacy.filter((b) => !seen.has(normalizeCode(b.number))).map(fromLegacyBox)]
 }
 
 export function completeVaults(unit) {

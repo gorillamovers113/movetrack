@@ -126,7 +126,12 @@ service cloud.firestore {
           && resource.data.stage == 'packed'
           && request.resource.data.stage == 'packed'
           && request.resource.data.diff(resource.data).affectedKeys()
-               .hasOnly(['steps', 'media', 'vaults', 'containerIds', 'crew'])
+               // 'boxes' is the pre-vault shape. Kept allowed because a crew
+               // phone that was already open when the vault split deployed is
+               // still writing it, and a mover standing at a sealed vault must
+               // not be told "insufficient permissions". vaultsOf() in
+               // mutations.js maps those records forward so nothing is lost.
+               .hasOnly(['steps', 'media', 'vaults', 'boxes', 'containerIds', 'crew'])
           && moverCrewChangeOK();
     }
 

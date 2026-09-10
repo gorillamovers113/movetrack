@@ -13,6 +13,7 @@ import MyWork from './views/MyWork.jsx'
 import Schedule from './views/Schedule.jsx'
 import Reports from './views/Reports.jsx'
 import Timesheets from './views/Timesheets.jsx'
+import UpdateBar from './components/UpdateBar.jsx'
 
 // Packers reach Overflow via the "＋ Report overflow item" button on a unit,
 // so it's left out of their nav to keep it lean (same reasoning as omitting
@@ -201,6 +202,7 @@ function Shell() {
       </div>
 
       <nav className="bottom-nav"><NavButtons mobile /></nav>
+      <UpdateBar />
       <Toast msg={toastMsg} />
     </div>
   )

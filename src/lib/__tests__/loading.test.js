@@ -231,3 +231,65 @@ describe('after-loading photo', () => {
       .toMatchObject({ done: true, by: 'Sam Diaz', at: 4242 })
   })
 })
+
+/* Records written by a phone still on the pre-vault build.
+ *
+ * A crew phone does not reload, so after the vault split deployed Víctor's app
+ * kept writing the old single-shot `boxes` shape. Re-allowing the key without
+ * this mapping would have been worse than the permission error it replaced:
+ * his work would have landed somewhere nothing reads. */
+describe('the old boxes shape', () => {
+  const legacyBox = (over = {}) => ({
+    number: 'BB-7371', containerId: 'c1', openUrl: 'o.jpg', closedUrl: 'c.jpg',
+    uid: 'm1', userName: 'Víctor Mendez', at: 1000, ...over,
+  })
+
+  it('reads as a finished vault, with the photos where the new code looks', () => {
+    const [v] = vaultsOf({ boxes: [legacyBox()] })
+    expect(v).toMatchObject({ number: 'BB-7371', userName: 'Víctor Mendez', legacy: true })
+    expect(v.open).toMatchObject({ url: 'o.jpg', kind: 'photo', userName: 'Víctor Mendez' })
+    expect(v.closed).toMatchObject({ url: 'c.jpg', kind: 'photo' })
+    expect(vaultComplete(v)).toBe(true)
+  })
+
+  it('counts on the checklist and lets the unit close', () => {
+    const steps = {
+      load_unit_photo: { userName: 'V', at: 1 },
+      load_sticker: { userName: 'V', at: 2, value: 'Orange', matched: true },
+      load_number: { userName: 'V', at: 3, value: '906', matched: true },
+      load_vault_count: { userName: 'V', at: 4, value: 1, matched: true },
+      load_after_photo: { userName: 'V', at: 5 },
+    }
+    const unit = { steps, boxes: [legacyBox()] }
+    expect(completeVaults(unit)).toHaveLength(1)
+    expect(loadingComplete(unit)).toBe(true)
+  })
+
+  it('stays incomplete when only one door was shot', () => {
+    const [v] = vaultsOf({ boxes: [legacyBox({ closedUrl: null })] })
+    expect(vaultComplete(v)).toBe(false)
+    expect(v.closed).toBeUndefined()
+  })
+
+  it('does not duplicate a vault logged both ways, and the new record wins', () => {
+    const unit = {
+      vaults: [{ number: 'BB-7371', uid: 'm1', userName: 'Víctor Mendez', at: 9 }],
+      boxes: [legacyBox({ number: 'bb-7371' })],
+    }
+    const list = vaultsOf(unit)
+    expect(list).toHaveLength(1)
+    expect(list[0].legacy).toBeUndefined()
+  })
+
+  it('carries both shapes when they are genuinely different vaults', () => {
+    const unit = {
+      vaults: [{ number: 'BB-1', uid: 'm1', userName: 'V', at: 9 }],
+      boxes: [legacyBox({ number: 'BB-2' })],
+    }
+    expect(vaultsOf(unit).map((v) => v.number)).toEqual(['BB-1', 'BB-2'])
+  })
+
+  it('blocks a duplicate number typed against a legacy record', () => {
+    expect(vaultNumberError('bb-7371', { boxes: [legacyBox()] })).toMatch(/already logged/)
+  })
+})

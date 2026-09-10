@@ -32,5 +32,8 @@
         "node": true
       }
     }
-  ]
+  ],
+  "globals": {
+    "__BUILD_ID__": "readonly"
+  }
 }

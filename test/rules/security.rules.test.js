@@ -546,6 +546,21 @@ describe('units — mover load-out', () => {
     )
   })
 
+  /* The pre-vault shape, still written by any phone that was already open
+   * when the vault split deployed. Removing this key from the allowlist put a
+   * mover in front of a sealed vault getting "Missing or insufficient
+   * permissions". It stays allowed until every phone has been reloaded. */
+  it('a mover on the old build can still log a box', async () => {
+    await seed('units', 'u1', baseUnit({ stage: 'packed' }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(MOVER), 'units', 'u1'), {
+        boxes: arrayUnion({ number: 'BB-7371', containerId: 'c1', openUrl: 'o', closedUrl: 'c', uid: MOVER, userName: 'Test mover-1', at: 1 }),
+        containerIds: arrayUnion('c1'),
+        'crew.movers': arrayUnion(MOVER),
+      })
+    )
+  })
+
   it('a packer may not touch the vaults', async () => {
     await seed('units', 'u1', baseUnit({ stage: 'packed' }))
     await assertFails(
