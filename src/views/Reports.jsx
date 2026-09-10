@@ -4,6 +4,7 @@ import { useStore, fmtTime, fmtAgo } from '../store.jsx'
 import { allRows, pushRows } from '../lib/sheetBackup.js'
 import { Avatar, EventRow, Lightbox } from '../ui.jsx'
 import { computeAllReports, summarizeRoster, fmtDuration, reportsToCSV } from '../lib/reports.js'
+import JobSummaryCard from '../components/JobSummaryCard.jsx'
 
 // Small download helper mirroring the pattern in store.jsx's
 // exportActivityCSV, kept here since Reports is pure read-only analytics
@@ -173,6 +174,8 @@ export default function Reports({ openUnit, openContainer, toast }) {
           )}
         </div>
       )}
+
+      <JobSummaryCard openUnit={openUnit} />
 
       {reports.length === 0 ? (
         <div className="card"><div className="empty"><div className="big">📊</div>No team members yet. Reports will fill in once the roster is active.</div></div>

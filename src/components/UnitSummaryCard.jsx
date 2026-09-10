@@ -118,24 +118,25 @@ export default function UnitSummaryCard({ unit }) {
           {s.inventory.range && <span className="muted"> · stickers #{s.inventory.range}</span>}
           {s.inventory.stickerColor && <span className="muted"> · {s.inventory.stickerColor}</span>}
         </Line>
-        <Line label="Cartons">
-          {s.materials.cartons > 0
-            ? <>{s.materials.cartons} <span className="muted">· {s.materials.cartonSummary}</span></>
-            : <span className="muted">None recorded</span>}
-        </Line>
         <Line label="Materials">
-          {s.materials.supplies > 0
-            ? <>{s.materials.supplies} <span className="muted">· {s.materials.supplySummary}</span></>
+          {s.materials.lines.length > 0
+            ? s.materials.lines.map((m) => `${m.count} ${m.label.toLowerCase()}`).join(', ')
             : <span className="muted">None recorded</span>}
         </Line>
         <Line label="Vaults">
           {s.vaults.started > 0
-            ? <>
-                {s.vaults.complete} of {s.vaults.started} finished
-                <span className="muted"> · {s.vaults.numbers.join(', ')}</span>
-              </>
+            ? `${s.vaults.started} vault${s.vaults.started === 1 ? '' : 's'} used`
             : <span className="muted">None yet</span>}
         </Line>
+        {s.vaults.list.map((v) => (
+          <Line key={v.number} label="">
+            <b>{v.number}</b>
+            <span className="muted">
+              {' · '}{v.by.length ? v.by.join(', ') : 'Crew'}
+              {!v.complete && ' · not finished'}
+            </span>
+          </Line>
+        ))}
         <Line label="Media">
           {s.media.photos + s.media.videos > 0
             ? `${s.media.photos} photo${s.media.photos === 1 ? '' : 's'}, ${s.media.videos} video${s.media.videos === 1 ? '' : 's'}`
