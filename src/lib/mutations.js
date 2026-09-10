@@ -380,6 +380,11 @@ export const LOADING_STEPS = [
   { key: 'load_sticker', label: 'Inventory sticker colour' },
   { key: 'load_number', label: 'Unit number' },
   { key: 'load_boxes', label: 'Boxes loaded, logged and photographed', repeatable: true },
+  // The empty apartment, once everything is out. This is the shot that answers
+  // "was anything left behind" and "what condition was it left in", and it can
+  // only be taken at one moment: after the last box goes and before the crew
+  // walk away.
+  { key: 'load_after_photo', label: 'Photo of the unit after loading, empty' },
 ]
 
 // The colour and the number are entered by the mover and checked against what

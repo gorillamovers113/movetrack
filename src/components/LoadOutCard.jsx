@@ -81,6 +81,8 @@ export default function LoadOutCard({ unit, toast }) {
   const [busy, setBusy] = useState(false)
   const [unitPhoto, setUnitPhoto] = useState(null)
   const [unitPhotoKind, setUnitPhotoKind] = useState('photo')
+  const [afterPhoto, setAfterPhoto] = useState(null)
+  const [afterPhotoKind, setAfterPhotoKind] = useState('photo')
   const [openUrl, setOpenUrl] = useState(null)
   const [closedUrl, setClosedUrl] = useState(null)
 
@@ -90,7 +92,7 @@ export default function LoadOutCard({ unit, toast }) {
   const ready = loadingComplete(unit)
 
   const open = (key) => {
-    setForm({}); setUnitPhoto(null); setOpenUrl(null); setClosedUrl(null); setModal(key)
+    setForm({}); setUnitPhoto(null); setAfterPhoto(null); setOpenUrl(null); setClosedUrl(null); setModal(key)
   }
   const close = () => { if (!busy) setModal(null) }
 
@@ -117,6 +119,17 @@ export default function LoadOutCard({ unit, toast }) {
           media: [{ id: `lu-${Date.now()}`, kind: unitPhotoKind, url: unitPhoto, label: 'packed unit', phase: 'load_unit_photo' }],
         } }),
         'Unit photo saved ✓',
+      )
+    }
+
+    if (modal === 'load_after_photo') {
+      if (!afterPhoto) return toast('Add a photo or video of the unit once it is empty.')
+      return run(
+        () => dispatch({ type: 'completeLoadStep', p: {
+          unitId: unit.id, key: 'load_after_photo',
+          media: [{ id: `la-${Date.now()}`, kind: afterPhotoKind, url: afterPhoto, label: 'unit after loading', phase: 'load_after_photo' }],
+        } }),
+        'After photo saved ✓',
       )
     }
 
@@ -258,6 +271,14 @@ export default function LoadOutCard({ unit, toast }) {
               label="The unit, fully packed and ready to go"
               hint="Tap for a photo or video of the packed unit"
               path={path('load')} url={unitPhoto} setUrl={setUnitPhoto} setKind={setUnitPhotoKind}
+            />
+          )}
+
+          {modal === 'load_after_photo' && (
+            <PhotoSlot
+              label="The unit once everything is out"
+              hint="Tap for a photo or video of the empty unit"
+              path={path('after')} url={afterPhoto} setUrl={setAfterPhoto} setKind={setAfterPhotoKind}
             />
           )}
 

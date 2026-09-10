@@ -38,13 +38,13 @@ describe('box records', () => {
 })
 
 describe('mover checklist', () => {
-  it('is the photo, the two confirmations, and the repeatable boxes item', () => {
-    expect(LOADING_STEPS.map((s) => s.key)).toEqual(['load_unit_photo', 'load_sticker', 'load_number', 'load_boxes'])
+  it('is the photos, the two confirmations, and the repeatable boxes item', () => {
+    expect(LOADING_STEPS.map((s) => s.key)).toEqual(['load_unit_photo', 'load_sticker', 'load_number', 'load_boxes', 'load_after_photo'])
     expect(LOADING_STEPS.find((s) => s.key === 'load_boxes').repeatable).toBe(true)
   })
 
   it('nothing done on a freshly packed unit', () => {
-    expect(loadingProgress({})).toEqual({ done: 0, total: 4 })
+    expect(loadingProgress({})).toEqual({ done: 0, total: 5 })
     expect(loadingComplete({})).toBe(false)
   })
 
@@ -71,6 +71,7 @@ describe('mover checklist', () => {
     load_unit_photo: { userName: 'Ali', at: 1 },
     load_sticker: { userName: 'Ali', at: 2, value: 'Pink', matched: true },
     load_number: { userName: 'Ali', at: 3, value: '906', matched: true },
+    load_after_photo: { userName: 'Ali', at: 4 },
   }
 
   it('is complete only with every item and at least one full box', () => {
@@ -117,5 +118,36 @@ describe('blind checks against what the packer recorded', () => {
     expect(stickerMismatch(unit, '')).toBe(null)
     expect(unitNumberMismatch({}, '906')).toBe(null)
     expect(unitNumberMismatch(unit, '')).toBe(null)
+  })
+})
+
+// The empty-unit shot is the last thing that happens, and a unit is not closed
+// out without it: it is the only evidence of what condition the apartment was
+// left in.
+describe('after-loading photo', () => {
+  const box = () => ({ number: 'BB-1', openUrl: 'o', closedUrl: 'c', uid: 'm', userName: 'Ali', at: 1 })
+  const beforeAfter = {
+    load_unit_photo: { userName: 'Ali', at: 1 },
+    load_sticker: { userName: 'Ali', at: 2, value: 'Pink', matched: true },
+    load_number: { userName: 'Ali', at: 3, value: '906', matched: true },
+  }
+
+  it('blocks close-out until it is taken', () => {
+    expect(loadingComplete({ steps: beforeAfter, boxes: [box()] })).toBe(false)
+  })
+
+  it('completes the unit once it is there', () => {
+    const steps = { ...beforeAfter, load_after_photo: { userName: 'Ali', at: 9 } }
+    expect(loadingComplete({ steps, boxes: [box()] })).toBe(true)
+  })
+
+  it('is the last item on the list, after the boxes', () => {
+    expect(LOADING_STEPS[LOADING_STEPS.length - 1].key).toBe('load_after_photo')
+  })
+
+  it('records who took it and when, like every other item', () => {
+    const unit = { steps: { load_after_photo: { userName: 'Sam Diaz', at: 4242 } } }
+    expect(loadingChecklist(unit).find((s) => s.key === 'load_after_photo'))
+      .toMatchObject({ done: true, by: 'Sam Diaz', at: 4242 })
   })
 })

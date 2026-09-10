@@ -174,7 +174,282 @@ export function StoreProvider({ children }) {
     ts: m.ts || Date.now(),
   }))
 
-  async function dispatch({ type, p = {} }) {
+  const dispatch = makeDispatch({ db, currentUser, state, ev, attributeMedia })
+
+  const signup = async ({ name, email, password }) => {
+    // signupInProgress is set for this whole span (start through the setDoc
+    // attempt below, success or fail) so the self-heal in the
+    // onAuthStateChanged handler above sits out while this call owns the
+    // doc-create, see the long comment up there for why: onAuthStateChanged
+    // fires as soon as createUserWithEmailAndPassword resolves, before our
+    // own setDoc below has landed, and without this guard both writes would
+    // race to create the same brand-new doc.
+    signupInProgress = true
+    try {
+      const cred = await createUserWithEmailAndPassword(auth, email, password)
+      await updateProfile(cred.user, { displayName: name })
+      // Deliberately not caught here: if this setDoc fails, the error
+      // propagates up to Login's doRegister, which surfaces it and resets
+      // busy so the person can retry. The onAuthStateChanged self-heal above
+      // is the backstop for the case where they don't retry (or the tab
+      // closes) and the Auth account is left with no matching pending doc,
+      // it picks the orphan up on the next load, once signupInProgress is
+      // back to false.
+      await setDoc(doc(db, 'users', cred.user.uid), { uid: cred.user.uid, name, email, role: null, status: 'pending', createdAt: serverTimestamp() })
+    } finally {
+      signupInProgress = false
+    }
+  }
+  const login = (email, password) => signInWithEmailAndPassword(auth, email, password)
+  // Password reset goes through our own function so the email carries the
+  // Gorilla logo and comes from gorillamovers.com. Firebase's built-in sender
+  // (noreply@…firebaseapp.com) scored as spam in testing, and its template
+  // cannot hold an image.
+  //
+  // Falls back to Firebase's own sender if the function is unreachable: an
+  // unbranded email that arrives beats a branded one that doesn't, especially
+  // for someone locked out mid-move.
+  const resetPassword = async (email) => {
+    try {
+      const { getFunctions, httpsCallable } = await import('firebase/functions')
+      const call = httpsCallable(getFunctions(app), 'sendPasswordReset')
+      await call({ email })
+    } catch (err) {
+      console.warn('[resetPassword] branded send unavailable, falling back', err?.message)
+      await sendPasswordResetEmail(auth, email)
+    }
+  }
+  const logout = () => signOut(auth)
+
+  const api = useMemo(() => ({
+    state,
+    dispatch,
+    currentUser,
+    signup,
+    login,
+    resetPassword,
+    logout,
+  }), [state, currentUser])
+
+  return <Ctx.Provider value={api}>{children}</Ctx.Provider>
+}
+
+export const useStore = () => useContext(Ctx)
+
+// ---- helpers ----
+
+export function fmtTime(ts) {
+  const d = new Date(ts)
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) + ' · ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+}
+export function fmtAgo(ts) {
+  const s = (Date.now() - ts) / 1000
+  if (s < 90) return 'just now'
+  if (s < 3600) return `${Math.round(s / 60)}m ago`
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`
+  return `${Math.round(s / 86400)}d ago`
+}
+
+export function canAct(user, unit, returnPhase = false) {
+  // Returns the action available to this user on this unit right now, or null.
+  // Outbound one-way lifecycle: not_started → packing → packed → loaded → picked_up → at_warehouse.
+  // at_warehouse/back_on_site/unloaded also try the return-leg mirror first
+  // (nextReturnUnitAction); a unit still mid-outbound (not yet at_warehouse)
+  // keeps getting its normal outbound action either way, so a project can
+  // have units on both legs at once. returnPhase defaults to false so every
+  // existing call site (canAct(user, unit)) keeps behaving like before this
+  // feature.
+  //
+  // ENTRY vs CONTINUATION: only the transition FROM at_warehouse INTO the
+  // return leg (loadForReturn) requires returnPhase to be on. A unit already
+  // on a return stage (back_on_site, unloaded) is mid-round-trip and keeps
+  // getting its next return action regardless of returnPhase, so an admin
+  // can safely toggle the phase off without stranding in-progress work (see
+  // docs/superpowers/specs/2026-08-27-return-leg-correctness-fixes.md #2).
+  if (!user) return null
+  const role = user.role
+  const enteringReturnLeg = unit.stage === 'at_warehouse'
+  if (!enteringReturnLeg || returnPhase) {
+    const ret = nextReturnUnitAction(role, unit.stage)
+    if (ret) return ret
+  }
+  const admin = role === 'admin'
+  switch (unit.stage) {
+    case 'not_started': return admin || role === 'packer' ? { key: 'startPacking', label: 'Start packing' } : null
+    case 'packing': return admin || role === 'packer' ? { key: 'finishPacking', label: 'Finish packing' } : null
+    case 'packed': return admin || role === 'mover' ? { key: 'loadUnit', label: 'Load into a BigBox' } : null
+    // Both stages go to the warehouse. 'loaded' is here because the drivers do
+    // not use the app, so nothing ever marks a unit picked up and the
+    // warehouse would otherwise never see any work waiting.
+    case 'loaded':
+    case 'picked_up': return admin || role === 'warehouse' ? { key: 'receiveUnit', label: 'Book into warehouse' } : null
+    default: return null
+  }
+}
+
+export function containerAction(user, cont, _returnPhase = false) {
+  // Container status lifecycle: empty → filling → full → picked_up → at_warehouse.
+  // The swap (full → picked_up) and warehouse receive (picked_up → at_warehouse)
+  // are batch/dedicated screens, not a single-container quick action, so they
+  // return null here rather than a one-tap action, this only covers the
+  // simple in-place transition (filling → full). Same story on the return
+  // leg: dispatchReturn/deliverReturn are dedicated screens, so only
+  // return_filling gets a quick action here.
+  //
+  // return_filling → return_full (markReturnFull) is a CONTINUATION: the
+  // container only reaches return_filling via loadForReturn, which is
+  // itself the entry point and already gated on returnPhase there (and in
+  // the rules). Once a container is on the return leg, markReturnFull stays
+  // available regardless of returnPhase so an admin toggling the phase off
+  // mid-return can't strand it. returnPhase is accepted for API symmetry
+  // with canAct/overflowAction but isn't needed to gate anything here.
+  if (!user) return null
+  const ret = nextReturnContainerAction(user.role, cont.status)
+  if (ret) return ret
+  const admin = user.role === 'admin'
+  switch (cont.status) {
+    case 'filling':
+      return admin || user.role === 'mover' ? { key: 'markContainerFull', label: 'Mark full, ready for pickup' } : null
+    default:
+      return null
+  }
+}
+
+export const CONT_STATUS = {
+  empty: { label: 'Empty on site', color: '#8a93a2' },
+  filling: { label: 'Filling', color: '#8b5cf6' },
+  full: { label: 'Full · ready', color: '#f59e0b' },
+  picked_up: { label: 'In transit', color: '#f97316' },
+  at_warehouse: { label: 'At warehouse', color: '#3b82f6' },
+  // Return leg (cool-to-warm palette, distinct from the outbound colors
+  // above, so the board reads direction at a glance).
+  return_filling: { label: 'Filling for return', color: '#0891b2' },
+  return_full: { label: 'Full · ready for dispatch', color: '#0ea5e9' },
+  return_transit: { label: 'In transit to site', color: '#6366f1' },
+  back_on_site: { label: 'Back on site', color: '#22c55e' },
+  returned_empty: { label: 'Returned, empty', color: '#15803d' },
+}
+
+export function overflowAction(user, item, returnPhase = false) {
+  // Overflow lifecycle: identified → prepped → in_transit → at_warehouse.
+  // Only the prepped → in_transit hop is a simple one-tap transition (no
+  // form): identify/prep/receive all need a bit of input (description,
+  // required photo, warehouse location) so they get dedicated forms in
+  // Overflow.jsx instead of a quick action here, matching how
+  // containerAction() only covers container's filling → full hop.
+  //
+  // ENTRY vs CONTINUATION, same rule as canAct: only the transition FROM
+  // at_warehouse INTO the return leg (transportOverflowBack) requires
+  // returnPhase to be on. An item already at rt_transit is mid-round-trip
+  // and keeps getting returnOverflow regardless of returnPhase.
+  if (!user) return null
+  const enteringReturnLeg = item.stage === 'at_warehouse'
+  if (!enteringReturnLeg || returnPhase) {
+    const ret = nextReturnOverflowAction(user.role, item.stage)
+    if (ret) return ret
+  }
+  const admin = user.role === 'admin'
+  switch (item.stage) {
+    case 'prepped':
+      return admin || user.role === 'mover' ? { key: 'transportOverflow', label: 'Load & transport to warehouse' } : null
+    default:
+      return null
+  }
+}
+
+export const OVERFLOW_STATUS = {
+  identified: { label: 'Needs prep', color: '#8a93a2' },
+  prepped: { label: 'Ready to transport', color: '#8b5cf6' },
+  in_transit: { label: 'In transit', color: '#f97316' },
+  at_warehouse: { label: 'At warehouse', color: '#3b82f6' },
+  // Return leg, same cool-to-warm palette as CONT_STATUS above.
+  rt_transit: { label: 'In transit to site', color: '#6366f1' },
+  returned: { label: 'Returned', color: '#15803d' },
+}
+
+// Turns picked/captured files into media objects for a unit, container or
+// overflow item.
+//
+// These go to Firebase Storage and the doc keeps only a URL. They used to be
+// embedded in the Firestore document as base64 data URLs, which is a hard
+// dead end: a Firestore document cannot exceed 1 MiB, base64 inflates bytes
+// by a third, and a resized photo is ~200 KB embedded. Unit 906 reached
+// 866 KB on four photos, so the fifth would have been rejected outright, and
+// a room walkthrough of a real apartment is a dozen. Videos were worse
+// still: a 12 MB clip is ~16 MB encoded and could never have saved at all,
+// on a checklist item that explicitly asks for video.
+//
+// captureMedia still falls back to a (smaller) embedded copy when Storage is
+// unreachable, so a packer with no signal is never blocked. Video has no
+// such fallback because none is possible, and says so plainly.
+export async function filesToMedia(fileList, labelPrefix = '', pathPrefix = 'units/loose') {
+  const uid = auth.currentUser ? auth.currentUser.uid : 'anon'
+  const files = Array.from(fileList)
+  const out = []
+  for (const f of files) {
+    const stamp = `${Date.now()}-${out.length}`
+    if (f.type.startsWith('video')) {
+      if (f.size > 15 * 1024 * 1024) {
+        alert(`${f.name} is over 15 MB, so it was skipped. Shorter clips and photos upload fine.`)
+        continue
+      }
+      const url = await uploadFile(f, `${pathPrefix}/${stamp}-${uid}.mp4`)
+      out.push({ id: `up-${stamp}`, kind: 'video', label: labelPrefix || f.name, url, storage: true })
+    } else if (f.type.startsWith('image')) {
+      const { url, storage } = await captureMedia(f, `${pathPrefix}/${stamp}-${uid}.jpg`)
+      out.push({ id: `up-${stamp}`, kind: 'photo', label: labelPrefix || f.name, url, storage })
+    }
+  }
+  return out
+}
+
+// Bytes a unit's media currently occupies inside its own Firestore document.
+// Only embedded (data:) URLs count: a Storage URL is a couple of hundred
+// characters no matter how big the photo is.
+export function embeddedMediaBytes(unit) {
+  return ((unit && unit.media) || [])
+    .reduce((n, m) => n + (m && typeof m.url === 'string' && m.url.startsWith('data:') ? m.url.length : 0), 0)
+}
+
+export function exportActivityCSV(events, units, containers) {
+  const uById = Object.fromEntries(units.map((u) => [u.id, u]))
+  const cById = Object.fromEntries(containers.map((c) => [c.id, c]))
+  const esc = (s) => '"' + String(s ?? '').replace(/"/g, '""') + '"'
+  const rows = [['Date', 'Time', 'User', 'Role', 'Action', 'Unit', 'Tenant', 'Container'].join(',')]
+  for (const e of [...events].sort((a, b) => b.ts - a.ts)) {
+    const d = new Date(e.ts)
+    const u = e.unitId ? uById[e.unitId] : null
+    rows.push([
+      esc(d.toLocaleDateString('en-US')), esc(d.toLocaleTimeString('en-US')),
+      esc(e.userName), esc(e.role), esc(e.action),
+      esc(u ? u.number : ''), esc(u ? u.tenant : ''), esc(e.containerId && cById[e.containerId] ? cById[e.containerId].number : ''),
+    ].join(','))
+  }
+  const blob = new Blob([rows.join('\n')], { type: 'text/csv' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = `movetrack-activity-${new Date().toISOString().slice(0, 10)}.csv`
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
+
+
+/* The dispatch switch, lifted out of StoreProvider so it can be driven by a
+ * test against the Firestore emulator.
+ *
+ * Nothing about the body changed: it is the same code, taking its five
+ * dependencies as an argument instead of closing over them. The reason is
+ * that two bugs shipped in one day which typechecked, built, and passed every
+ * unit test, and still broke on a crew phone, because no test had ever called
+ * a real action. test/actions/ now does exactly that.
+ */
+export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
+  // Derived purely from currentUser, so it lives here rather than being passed
+  // in. The lint caught this one during the extraction, which is the whole
+  // reason no-undef is switched on.
+  const actor = () => ({ uid: currentUser.uid, userName: currentUser.name, role: currentUser.role })
+
+  return async function dispatch({ type, p = {} }) {
     const unit = p.unitId ? state.units.find((u) => u.id === p.unitId) : null
     const cont0 = p.containerId ? state.containers.find((c) => c.id === p.containerId) : null
     const over0 = p.overflowId ? state.overflow.find((o) => o.id === p.overflowId) : null
@@ -1059,260 +1334,4 @@ export function StoreProvider({ children }) {
         return
     }
   }
-
-  const signup = async ({ name, email, password }) => {
-    // signupInProgress is set for this whole span (start through the setDoc
-    // attempt below, success or fail) so the self-heal in the
-    // onAuthStateChanged handler above sits out while this call owns the
-    // doc-create, see the long comment up there for why: onAuthStateChanged
-    // fires as soon as createUserWithEmailAndPassword resolves, before our
-    // own setDoc below has landed, and without this guard both writes would
-    // race to create the same brand-new doc.
-    signupInProgress = true
-    try {
-      const cred = await createUserWithEmailAndPassword(auth, email, password)
-      await updateProfile(cred.user, { displayName: name })
-      // Deliberately not caught here: if this setDoc fails, the error
-      // propagates up to Login's doRegister, which surfaces it and resets
-      // busy so the person can retry. The onAuthStateChanged self-heal above
-      // is the backstop for the case where they don't retry (or the tab
-      // closes) and the Auth account is left with no matching pending doc,
-      // it picks the orphan up on the next load, once signupInProgress is
-      // back to false.
-      await setDoc(doc(db, 'users', cred.user.uid), { uid: cred.user.uid, name, email, role: null, status: 'pending', createdAt: serverTimestamp() })
-    } finally {
-      signupInProgress = false
-    }
-  }
-  const login = (email, password) => signInWithEmailAndPassword(auth, email, password)
-  // Password reset goes through our own function so the email carries the
-  // Gorilla logo and comes from gorillamovers.com. Firebase's built-in sender
-  // (noreply@…firebaseapp.com) scored as spam in testing, and its template
-  // cannot hold an image.
-  //
-  // Falls back to Firebase's own sender if the function is unreachable: an
-  // unbranded email that arrives beats a branded one that doesn't, especially
-  // for someone locked out mid-move.
-  const resetPassword = async (email) => {
-    try {
-      const { getFunctions, httpsCallable } = await import('firebase/functions')
-      const call = httpsCallable(getFunctions(app), 'sendPasswordReset')
-      await call({ email })
-    } catch (err) {
-      console.warn('[resetPassword] branded send unavailable, falling back', err?.message)
-      await sendPasswordResetEmail(auth, email)
-    }
-  }
-  const logout = () => signOut(auth)
-
-  const api = useMemo(() => ({
-    state,
-    dispatch,
-    currentUser,
-    signup,
-    login,
-    resetPassword,
-    logout,
-  }), [state, currentUser])
-
-  return <Ctx.Provider value={api}>{children}</Ctx.Provider>
-}
-
-export const useStore = () => useContext(Ctx)
-
-// ---- helpers ----
-
-export function fmtTime(ts) {
-  const d = new Date(ts)
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) + ' · ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
-}
-export function fmtAgo(ts) {
-  const s = (Date.now() - ts) / 1000
-  if (s < 90) return 'just now'
-  if (s < 3600) return `${Math.round(s / 60)}m ago`
-  if (s < 86400) return `${Math.round(s / 3600)}h ago`
-  return `${Math.round(s / 86400)}d ago`
-}
-
-export function canAct(user, unit, returnPhase = false) {
-  // Returns the action available to this user on this unit right now, or null.
-  // Outbound one-way lifecycle: not_started → packing → packed → loaded → picked_up → at_warehouse.
-  // at_warehouse/back_on_site/unloaded also try the return-leg mirror first
-  // (nextReturnUnitAction); a unit still mid-outbound (not yet at_warehouse)
-  // keeps getting its normal outbound action either way, so a project can
-  // have units on both legs at once. returnPhase defaults to false so every
-  // existing call site (canAct(user, unit)) keeps behaving like before this
-  // feature.
-  //
-  // ENTRY vs CONTINUATION: only the transition FROM at_warehouse INTO the
-  // return leg (loadForReturn) requires returnPhase to be on. A unit already
-  // on a return stage (back_on_site, unloaded) is mid-round-trip and keeps
-  // getting its next return action regardless of returnPhase, so an admin
-  // can safely toggle the phase off without stranding in-progress work (see
-  // docs/superpowers/specs/2026-08-27-return-leg-correctness-fixes.md #2).
-  if (!user) return null
-  const role = user.role
-  const enteringReturnLeg = unit.stage === 'at_warehouse'
-  if (!enteringReturnLeg || returnPhase) {
-    const ret = nextReturnUnitAction(role, unit.stage)
-    if (ret) return ret
-  }
-  const admin = role === 'admin'
-  switch (unit.stage) {
-    case 'not_started': return admin || role === 'packer' ? { key: 'startPacking', label: 'Start packing' } : null
-    case 'packing': return admin || role === 'packer' ? { key: 'finishPacking', label: 'Finish packing' } : null
-    case 'packed': return admin || role === 'mover' ? { key: 'loadUnit', label: 'Load into a BigBox' } : null
-    // Both stages go to the warehouse. 'loaded' is here because the drivers do
-    // not use the app, so nothing ever marks a unit picked up and the
-    // warehouse would otherwise never see any work waiting.
-    case 'loaded':
-    case 'picked_up': return admin || role === 'warehouse' ? { key: 'receiveUnit', label: 'Book into warehouse' } : null
-    default: return null
-  }
-}
-
-export function containerAction(user, cont, _returnPhase = false) {
-  // Container status lifecycle: empty → filling → full → picked_up → at_warehouse.
-  // The swap (full → picked_up) and warehouse receive (picked_up → at_warehouse)
-  // are batch/dedicated screens, not a single-container quick action, so they
-  // return null here rather than a one-tap action, this only covers the
-  // simple in-place transition (filling → full). Same story on the return
-  // leg: dispatchReturn/deliverReturn are dedicated screens, so only
-  // return_filling gets a quick action here.
-  //
-  // return_filling → return_full (markReturnFull) is a CONTINUATION: the
-  // container only reaches return_filling via loadForReturn, which is
-  // itself the entry point and already gated on returnPhase there (and in
-  // the rules). Once a container is on the return leg, markReturnFull stays
-  // available regardless of returnPhase so an admin toggling the phase off
-  // mid-return can't strand it. returnPhase is accepted for API symmetry
-  // with canAct/overflowAction but isn't needed to gate anything here.
-  if (!user) return null
-  const ret = nextReturnContainerAction(user.role, cont.status)
-  if (ret) return ret
-  const admin = user.role === 'admin'
-  switch (cont.status) {
-    case 'filling':
-      return admin || user.role === 'mover' ? { key: 'markContainerFull', label: 'Mark full, ready for pickup' } : null
-    default:
-      return null
-  }
-}
-
-export const CONT_STATUS = {
-  empty: { label: 'Empty on site', color: '#8a93a2' },
-  filling: { label: 'Filling', color: '#8b5cf6' },
-  full: { label: 'Full · ready', color: '#f59e0b' },
-  picked_up: { label: 'In transit', color: '#f97316' },
-  at_warehouse: { label: 'At warehouse', color: '#3b82f6' },
-  // Return leg (cool-to-warm palette, distinct from the outbound colors
-  // above, so the board reads direction at a glance).
-  return_filling: { label: 'Filling for return', color: '#0891b2' },
-  return_full: { label: 'Full · ready for dispatch', color: '#0ea5e9' },
-  return_transit: { label: 'In transit to site', color: '#6366f1' },
-  back_on_site: { label: 'Back on site', color: '#22c55e' },
-  returned_empty: { label: 'Returned, empty', color: '#15803d' },
-}
-
-export function overflowAction(user, item, returnPhase = false) {
-  // Overflow lifecycle: identified → prepped → in_transit → at_warehouse.
-  // Only the prepped → in_transit hop is a simple one-tap transition (no
-  // form): identify/prep/receive all need a bit of input (description,
-  // required photo, warehouse location) so they get dedicated forms in
-  // Overflow.jsx instead of a quick action here, matching how
-  // containerAction() only covers container's filling → full hop.
-  //
-  // ENTRY vs CONTINUATION, same rule as canAct: only the transition FROM
-  // at_warehouse INTO the return leg (transportOverflowBack) requires
-  // returnPhase to be on. An item already at rt_transit is mid-round-trip
-  // and keeps getting returnOverflow regardless of returnPhase.
-  if (!user) return null
-  const enteringReturnLeg = item.stage === 'at_warehouse'
-  if (!enteringReturnLeg || returnPhase) {
-    const ret = nextReturnOverflowAction(user.role, item.stage)
-    if (ret) return ret
-  }
-  const admin = user.role === 'admin'
-  switch (item.stage) {
-    case 'prepped':
-      return admin || user.role === 'mover' ? { key: 'transportOverflow', label: 'Load & transport to warehouse' } : null
-    default:
-      return null
-  }
-}
-
-export const OVERFLOW_STATUS = {
-  identified: { label: 'Needs prep', color: '#8a93a2' },
-  prepped: { label: 'Ready to transport', color: '#8b5cf6' },
-  in_transit: { label: 'In transit', color: '#f97316' },
-  at_warehouse: { label: 'At warehouse', color: '#3b82f6' },
-  // Return leg, same cool-to-warm palette as CONT_STATUS above.
-  rt_transit: { label: 'In transit to site', color: '#6366f1' },
-  returned: { label: 'Returned', color: '#15803d' },
-}
-
-// Turns picked/captured files into media objects for a unit, container or
-// overflow item.
-//
-// These go to Firebase Storage and the doc keeps only a URL. They used to be
-// embedded in the Firestore document as base64 data URLs, which is a hard
-// dead end: a Firestore document cannot exceed 1 MiB, base64 inflates bytes
-// by a third, and a resized photo is ~200 KB embedded. Unit 906 reached
-// 866 KB on four photos, so the fifth would have been rejected outright, and
-// a room walkthrough of a real apartment is a dozen. Videos were worse
-// still: a 12 MB clip is ~16 MB encoded and could never have saved at all,
-// on a checklist item that explicitly asks for video.
-//
-// captureMedia still falls back to a (smaller) embedded copy when Storage is
-// unreachable, so a packer with no signal is never blocked. Video has no
-// such fallback because none is possible, and says so plainly.
-export async function filesToMedia(fileList, labelPrefix = '', pathPrefix = 'units/loose') {
-  const uid = auth.currentUser ? auth.currentUser.uid : 'anon'
-  const files = Array.from(fileList)
-  const out = []
-  for (const f of files) {
-    const stamp = `${Date.now()}-${out.length}`
-    if (f.type.startsWith('video')) {
-      if (f.size > 15 * 1024 * 1024) {
-        alert(`${f.name} is over 15 MB, so it was skipped. Shorter clips and photos upload fine.`)
-        continue
-      }
-      const url = await uploadFile(f, `${pathPrefix}/${stamp}-${uid}.mp4`)
-      out.push({ id: `up-${stamp}`, kind: 'video', label: labelPrefix || f.name, url, storage: true })
-    } else if (f.type.startsWith('image')) {
-      const { url, storage } = await captureMedia(f, `${pathPrefix}/${stamp}-${uid}.jpg`)
-      out.push({ id: `up-${stamp}`, kind: 'photo', label: labelPrefix || f.name, url, storage })
-    }
-  }
-  return out
-}
-
-// Bytes a unit's media currently occupies inside its own Firestore document.
-// Only embedded (data:) URLs count: a Storage URL is a couple of hundred
-// characters no matter how big the photo is.
-export function embeddedMediaBytes(unit) {
-  return ((unit && unit.media) || [])
-    .reduce((n, m) => n + (m && typeof m.url === 'string' && m.url.startsWith('data:') ? m.url.length : 0), 0)
-}
-
-export function exportActivityCSV(events, units, containers) {
-  const uById = Object.fromEntries(units.map((u) => [u.id, u]))
-  const cById = Object.fromEntries(containers.map((c) => [c.id, c]))
-  const esc = (s) => '"' + String(s ?? '').replace(/"/g, '""') + '"'
-  const rows = [['Date', 'Time', 'User', 'Role', 'Action', 'Unit', 'Tenant', 'Container'].join(',')]
-  for (const e of [...events].sort((a, b) => b.ts - a.ts)) {
-    const d = new Date(e.ts)
-    const u = e.unitId ? uById[e.unitId] : null
-    rows.push([
-      esc(d.toLocaleDateString('en-US')), esc(d.toLocaleTimeString('en-US')),
-      esc(e.userName), esc(e.role), esc(e.action),
-      esc(u ? u.number : ''), esc(u ? u.tenant : ''), esc(e.containerId && cById[e.containerId] ? cById[e.containerId].number : ''),
-    ].join(','))
-  }
-  const blob = new Blob([rows.join('\n')], { type: 'text/csv' })
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob)
-  a.download = `movetrack-activity-${new Date().toISOString().slice(0, 10)}.csv`
-  a.click()
-  URL.revokeObjectURL(a.href)
 }
