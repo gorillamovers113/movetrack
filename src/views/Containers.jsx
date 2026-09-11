@@ -126,8 +126,8 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
     <>
       <div className="page-head">
         <div>
-          <h1>Containers</h1>
-          <p>{totalCount} on the board, chain of custody for every BigBox container</p>
+          <h1>Vaults</h1>
+          <p>{totalCount} on the board, chain of custody for every vault</p>
         </div>
         {(isMover || isWarehouse) && (
           <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
@@ -146,7 +146,7 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
       {totalCount === 0 && (
         <div className="card empty">
           <div className="big">📦</div>
-          No containers on site yet.{isMover ? ' Log the empties BigBox dropped off to get started.' : ''}
+          No vaults on site yet.{isMover ? ' Log the empties the driver dropped off to get started.' : ''}
         </div>
       )}
 
@@ -282,7 +282,7 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
 
           {open.status === 'picked_up' && (
             <div className="muted" style={{ marginTop: 16 }}>
-              In transit to the warehouse. Use "Receive incoming BigBox" above to check it in (the number is confirmed blind, so it isn't shown here).
+              In transit to the warehouse. Use the receive button above to check it in (the number is confirmed blind, so it is not shown here).
             </div>
           )}
 

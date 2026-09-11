@@ -191,7 +191,7 @@ export default function Overflow({ openUnit, focusId, clearFocus, toast }) {
       <div className="page-head">
         <div>
           <h1>Overflow</h1>
-          <p>{totalCount} item{totalCount === 1 ? '' : 's'} too big for a BigBox container. Gorilla Movers transports these directly to the warehouse</p>
+          <p>{totalCount} item{totalCount === 1 ? '' : 's'} too big for a vault. Gorilla Movers transports these directly to the warehouse</p>
         </div>
         <ReportOverflowButton toast={toast} />
       </div>

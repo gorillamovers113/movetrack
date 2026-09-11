@@ -23,16 +23,16 @@ import { recordSession } from './lib/telemetry.js'
 // (or just needs to see it) gets it in the nav. Schedule is for every role
 // (read-only for non-admins) since the crew needs to know today's floor.
 const NAV = {
-  admin: [['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['containers', '📦', 'Containers'], ['overflow', '🛋️', 'Overflow'], ['team', '👥', 'Team'], ['reports', '📊', 'Reports'], ['timesheets', '⏱️', 'Timesheets'], ['activity', '🕘', 'Activity'], ['access', '🔎', 'Access log']],
+  admin: [['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['containers', '📦', 'Vaults'], ['overflow', '🛋️', 'Overflow'], ['team', '👥', 'Team'], ['reports', '📊', 'Reports'], ['timesheets', '⏱️', 'Timesheets'], ['activity', '🕘', 'Activity'], ['access', '🔎', 'Access log']],
   // Packers deliberately have no Dashboard or Activity: both list every
   // apartment and tenant in the building, and a packer needs the one door
   // they are standing at (reached by number from My queue). Their own recent
   // actions are shown inside My queue.
   packer: [['mywork', '✓', 'My queue'], ['schedule', '📅', 'Schedule']],
-  mover: [['mywork', '✓', 'My queue'], ['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['containers', '📦', 'Containers'], ['overflow', '🛋️', 'Overflow'], ['activity', '🕘', 'Activity']],
-  driver: [['mywork', '✓', 'My queue'], ['containers', '📦', 'Containers'], ['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['activity', '🕘', 'Activity']],
-  warehouse: [['mywork', '✓', 'My queue'], ['containers', '📦', 'Containers'], ['overflow', '🛋️', 'Overflow'], ['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['activity', '🕘', 'Activity']],
-  viewer: [['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['containers', '📦', 'Containers'], ['overflow', '🛋️', 'Overflow'], ['reports', '📊', 'Reports'], ['activity', '🕘', 'Activity']],
+  mover: [['mywork', '✓', 'My queue'], ['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['containers', '📦', 'Vaults'], ['overflow', '🛋️', 'Overflow'], ['activity', '🕘', 'Activity']],
+  driver: [['mywork', '✓', 'My queue'], ['containers', '📦', 'Vaults'], ['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['activity', '🕘', 'Activity']],
+  warehouse: [['mywork', '✓', 'My queue'], ['containers', '📦', 'Vaults'], ['overflow', '🛋️', 'Overflow'], ['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['activity', '🕘', 'Activity']],
+  viewer: [['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['containers', '📦', 'Vaults'], ['overflow', '🛋️', 'Overflow'], ['reports', '📊', 'Reports'], ['activity', '🕘', 'Activity']],
 }
 
 function PendingScreen() {

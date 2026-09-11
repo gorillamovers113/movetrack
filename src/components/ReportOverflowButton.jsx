@@ -45,7 +45,7 @@ export default function ReportOverflowButton({ unitId, toast, fullWidth = false 
       {open && (
         <Modal
           title="Report an overflow item"
-          sub="Too big for a BigBox container. Gorilla Movers will transport it to the warehouse directly."
+          sub="Too big for a vault. Gorilla Movers will transport it to the warehouse directly."
           onClose={close}
         >
           {unitId ? (

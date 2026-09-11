@@ -24,7 +24,7 @@ import { fmtDuration } from '../lib/reports.js'
 const LIVE_MS = 10 * 60 * 1000
 
 const VIEW_NAMES = {
-  dashboard: 'Dashboard', schedule: 'Schedule', containers: 'Containers', overflow: 'Overflow',
+  dashboard: 'Dashboard', schedule: 'Schedule', containers: 'Vaults', overflow: 'Overflow',
   team: 'Team', reports: 'Reports', timesheets: 'Timesheets', activity: 'Activity',
   mywork: 'My queue', unit: 'A unit', container: 'A container', access: 'Access log',
 }
