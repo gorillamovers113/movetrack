@@ -59,6 +59,15 @@
         ".git",
         "*.local"
       ]
+    },
+    {
+      "source": "functions-telemetry",
+      "codebase": "telemetry",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "*.local"
+      ]
     }
   ]
 }

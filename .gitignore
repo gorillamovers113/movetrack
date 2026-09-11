@@ -30,3 +30,4 @@ dist-ssr
 
 # SDD scratch workspace
 .superpowers/
+functions-telemetry/node_modules
