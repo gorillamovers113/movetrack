@@ -962,3 +962,94 @@ describe('booking vaults in at the dock', () => {
     expect(events.find((e) => e.type === 'stage').action).toMatch(/1 of 2 vaults booked in, 1 short/)
   })
 })
+
+/* Parking a unit that cannot be finished yet.
+ *
+ * A resident refused access until the move-out morning and their unit sat
+ * open, blocking a whole floor. That is a worse failure than the one the
+ * one-apartment-at-a-time lock prevents, and it has nothing to do with the
+ * crew. */
+describe('pausing a unit', () => {
+  const packing = { ...UNIT, id: 'unit-1', number: '906', stage: 'packing', crew: { packers: [PACKER.uid], movers: [] } }
+  const other = { ...UNIT, id: 'unit-2', number: '902', stage: 'not_started', crew: { packers: [], movers: [] } }
+  const unitRow = async (id) => (await rows('units')).find((u) => u.id === id)
+
+  beforeEach(async () => {
+    await setDoc(doc(db, 'units', 'unit-1'), packing)
+    await setDoc(doc(db, 'units', 'unit-2'), other)
+  })
+
+  it('records who paused it and what they are waiting for', async () => {
+    await run(PACKER, { type: 'pauseUnit', p: { unitId: 'unit-1', reason: 'No access to the unit yet' } },
+      makeState({ units: [packing, other] }))
+
+    const u = await unitRow('unit-1')
+    expect(u.paused).toMatchObject({ reason: 'No access to the unit yet', userName: PACKER.name })
+    // Paused is not finished. The unit must not have moved.
+    expect(u.stage).toBe('packing')
+  })
+
+  // The whole point: the floor keeps moving.
+  it('releases the hold so the next apartment can start', async () => {
+    await run(PACKER, { type: 'pauseUnit', p: { unitId: 'unit-1', reason: 'Resident still using furniture' } },
+      makeState({ units: [packing, other] }))
+    const after = await rows('units')
+    await expect(
+      run(PACKER, { type: 'completeStep', p: { unitId: 'unit-2', key: 'door' } }, makeState({ units: after })),
+    ).resolves.not.toThrow()
+  })
+
+  it('insists on a reason, because the next person has nothing else to go on', async () => {
+    await expect(
+      run(PACKER, { type: 'pauseUnit', p: { unitId: 'unit-1', reason: '   ' } }, makeState({ units: [packing, other] })),
+    ).rejects.toThrow(/say why/i)
+    expect((await unitRow('unit-1')).paused).toBeUndefined()
+  })
+
+  it('refuses to pause the same unit twice', async () => {
+    await run(PACKER, { type: 'pauseUnit', p: { unitId: 'unit-1', reason: 'No access' } }, makeState({ units: [packing, other] }))
+    const after = await rows('units')
+    await expect(
+      run(PACKER, { type: 'pauseUnit', p: { unitId: 'unit-1', reason: 'again' } }, makeState({ units: after })),
+    ).rejects.toThrow(/already paused/i)
+  })
+
+  it('refuses to pause a unit that has already moved on', async () => {
+    const gone = { ...packing, stage: 'loaded' }
+    await setDoc(doc(db, 'units', 'unit-1'), gone)
+    await expect(
+      run(PACKER, { type: 'pauseUnit', p: { unitId: 'unit-1', reason: 'too late' } }, makeState({ units: [gone] })),
+    ).rejects.toThrow(/already moved on/i)
+  })
+
+  it('picks it back up, and the pause is gone rather than blanked', async () => {
+    await run(PACKER, { type: 'pauseUnit', p: { unitId: 'unit-1', reason: 'No access' } }, makeState({ units: [packing, other] }))
+    const paused = await rows('units')
+    await run(PACKER, { type: 'resumeUnit', p: { unitId: 'unit-1' } }, makeState({ units: paused }))
+    expect((await unitRow('unit-1')).paused).toBeUndefined()
+  })
+
+  // Resuming re-arms the lock, so say so before they resume rather than after.
+  it('will not resume one unit while another is already open', async () => {
+    const pausedUnit = { ...packing, paused: { reason: 'No access', uid: PACKER.uid, userName: PACKER.name, at: 1 } }
+    const busy = { ...other, stage: 'packing', crew: { packers: [PACKER.uid], movers: [] } }
+    await setDoc(doc(db, 'units', 'unit-1'), pausedUnit)
+    await setDoc(doc(db, 'units', 'unit-2'), busy)
+    await expect(
+      run(PACKER, { type: 'resumeUnit', p: { unitId: 'unit-1' } }, makeState({ units: [pausedUnit, busy] })),
+    ).rejects.toThrow(/Finish unit 902 first/i)
+  })
+
+  it('says so plainly when there is nothing to resume', async () => {
+    await expect(
+      run(PACKER, { type: 'resumeUnit', p: { unitId: 'unit-1' } }, makeState({ units: [packing, other] })),
+    ).rejects.toThrow(/not paused/i)
+  })
+
+  it('lets an admin pause a unit they are not working', async () => {
+    await expect(
+      run(ADMIN, { type: 'pauseUnit', p: { unitId: 'unit-1', reason: 'Waiting on the building' } },
+        makeState({ units: [packing, other] })),
+    ).resolves.not.toThrow()
+  })
+})

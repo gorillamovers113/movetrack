@@ -115,7 +115,7 @@ service cloud.firestore {
           && resource.data.stage == request.resource.data.stage
           && (resource.data.stage == 'packing' || resource.data.stage == 'not_started')
           && request.resource.data.diff(resource.data).affectedKeys()
-               .hasOnly(['steps', 'media', 'stickerColor', 'inventoryFrom', 'inventoryTo', 'inventoryDigits', 'materials', 'supplies', 'pieces', 'crew'])
+               .hasOnly(['steps', 'media', 'stickerColor', 'inventoryFrom', 'inventoryTo', 'inventoryDigits', 'materials', 'supplies', 'pieces', 'crew', 'paused'])
           && crewChangeOK();
     }
 
@@ -157,7 +157,7 @@ service cloud.firestore {
                // still writing it, and a mover standing at a sealed vault must
                // not be told "insufficient permissions". vaultsOf() in
                // mutations.js maps those records forward so nothing is lost.
-               .hasOnly(['steps', 'media', 'vaults', 'boxes', 'containerIds', 'crew'])
+               .hasOnly(['steps', 'media', 'vaults', 'boxes', 'containerIds', 'crew', 'paused'])
           && moverCrewChangeOK();
     }
 

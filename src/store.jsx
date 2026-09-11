@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, signOut, updateProfile } from 'firebase/auth'
-import { doc, setDoc, updateDoc, deleteDoc, addDoc, arrayUnion, onSnapshot, collection, query, where, orderBy, serverTimestamp, writeBatch, runTransaction } from 'firebase/firestore'
+import { doc, setDoc, updateDoc, deleteDoc, deleteField, addDoc, arrayUnion, onSnapshot, collection, query, where, orderBy, serverTimestamp, writeBatch, runTransaction } from 'firebase/firestore'
 import { app, auth, db } from './firebase.js'
 import { captureMedia, uploadFile } from './lib/upload.js'
 import { businessDayKey, canClockInAt, lunchMinutesFor, openSessionFor, usesClock, tracksUnitTime } from './lib/timeclock.js'
@@ -10,7 +10,7 @@ import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction
 import { DEFAULT_SCHEDULE, DEFAULT_RETURN_SCHEDULE, scheduleDocId } from './lib/schedule.js'
 import { stageOf } from './seed.js'
 import { mayPack, mayLoad } from './lib/roles.js'
-import { blockingUnit, blockedMessage } from './lib/focus.js'
+import { blockingUnit, blockedMessage, isPaused } from './lib/focus.js'
 
 // meta/project doc default, used whenever the doc is absent (brand-new
 // project, or before an admin has touched return phase). Keeps name/address
@@ -1051,6 +1051,42 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
         })
         await deleteDoc(doc(db, 'timeEntries', p.entryId))
         return
+      }
+      case 'pauseUnit': {
+        /* Parking a unit that cannot be finished yet.
+         *
+         * A resident who will not give access until the move-out morning, or
+         * who is still sleeping in the bed and eating off the plates, is not
+         * a crew problem and must not stop the floor. Pausing records why,
+         * releases the one-apartment-at-a-time hold, and keeps every bit of
+         * the partial work exactly where it is.
+         *
+         * It does not advance the unit and does not fake a completion. A
+         * paused unit is unfinished and says so.
+         */
+        if (isPaused(unit)) throw new Error(`Unit ${unit.number} is already paused.`)
+        if (unit.stage !== 'packing' && unit.stage !== 'packed' && unit.stage !== 'not_started') {
+          throw new Error(`Unit ${unit.number} has already moved on, so there is nothing to pause.`)
+        }
+        const reason = String(p.reason || '').trim()
+        if (!reason) throw new Error('Say why it is paused, so whoever picks it up knows what they are waiting for.')
+
+        await updateDoc(doc(db, 'units', p.unitId), {
+          paused: { reason, uid: currentUser.uid, userName: currentUser.name, at: Date.now() },
+        })
+        return ev('note', `Unit ${unit.number} paused: ${reason}`, { unitId: unit.id })
+      }
+      case 'resumeUnit': {
+        if (!isPaused(unit)) throw new Error(`Unit ${unit.number} is not paused.`)
+        // A crew member with something else open would immediately be blocked
+        // on this one, so say that now rather than after they have resumed it.
+        const blocked = blockingUnit(state.units, currentUser, p.unitId,
+          unit.stage === 'packed' ? 'loading' : 'packing')
+        if (blocked) throw new Error(blockedMessage(blocked, unit.stage === 'packed' ? 'loading' : 'packing'))
+
+        const was = unit.paused
+        await updateDoc(doc(db, 'units', p.unitId), { paused: deleteField() })
+        return ev('note', `Unit ${unit.number} picked back up${was?.reason ? ` (was paused: ${was.reason})` : ''}`, { unitId: unit.id })
       }
       case 'adminCorrectStep': {
         /* An admin fixes a value a crew member typed wrong.

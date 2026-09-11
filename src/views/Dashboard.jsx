@@ -2,8 +2,9 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { STAGES, stageOf, ROLES } from '../seed.js'
 import { surnameOf, loadingChecklist, loadingProgress, completeVaults, LOADING_STEPS } from '../lib/mutations.js'
 import ClockCard from '../components/ClockCard.jsx'
+import { isPaused } from '../lib/focus.js'
 import { activeCrew } from '../lib/reports.js'
-import { useStore } from '../store.jsx'
+import { useStore, fmtAgo } from '../store.jsx'
 import { Avatar } from '../ui.jsx'
 import { todayKey, findScheduleDay, nextScheduleDay, fmtScheduleDate, progressForDay, scheduleForPhase, targetStageForWork } from '../lib/schedule.js'
 import BuildingView from './BuildingView.jsx'
@@ -108,6 +109,51 @@ function TodayBanner({ toast }) {
  * anyone has actually started on it. This panel answers the question the board
  * cannot: which units a mover has picked up, who has it, and how far through.
  */
+/* Units parked and waiting on somebody else.
+ *
+ * A paused unit stops blocking its own crew, which is the point, but a thing
+ * that blocks nobody is a thing that gets forgotten. This is the list that
+ * makes sure somebody goes back for them, and it says who is being waited on
+ * rather than just that the unit is not done.
+ */
+function Paused({ openUnit }) {
+  const { state, currentUser } = useStore()
+  if (!currentUser || !['admin', 'viewer'].includes(currentUser.role)) return null
+
+  const parked = state.units
+    .filter(isPaused)
+    .sort((a, b) => (a.paused.at || 0) - (b.paused.at || 0))
+  if (parked.length === 0) return null
+
+  return (
+    <div className="card" style={{ padding: '16px 20px', marginBottom: 14, borderLeft: '3px solid #f59e0b' }}>
+      <div className="row" style={{ marginBottom: 2 }}>
+        <div className="section-title grow" style={{ margin: 0 }}>Paused, waiting to be picked back up</div>
+        <span className="muted" style={{ fontWeight: 700 }}>{parked.length}</span>
+      </div>
+      {parked.map((u) => (
+        <div
+          key={u.id}
+          onClick={() => openUnit(u.id)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0',
+            borderTop: '1px solid var(--line)', cursor: 'pointer',
+          }}
+        >
+          <span className="cont-num" style={{ flex: 'none' }}>{u.number}</span>
+          <span className="grow" style={{ minWidth: 0 }}>
+            <span className="muted">{surnameOf(u.tenant)}</span>
+            <span style={{ display: 'block', fontSize: 12.5 }} className="muted">{u.paused.reason}</span>
+          </span>
+          <span className="muted" style={{ flex: 'none', fontSize: 12.5 }}>
+            {u.paused.userName || 'Crew'}{u.paused.at ? ` · ${fmtAgo(u.paused.at)}` : ''}
+          </span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function LoadingNow({ openUnit }) {
   const { state, currentUser } = useStore()
   if (!currentUser || !['admin', 'viewer'].includes(currentUser.role)) return null
@@ -279,6 +325,7 @@ export default function Dashboard({ openUnit, toast }) {
           at lunchtime, his open shift had nowhere to be closed from. */}
       <ClockCard toast={toast} />
       <OnTheFloor openUnit={openUnit} />
+      <Paused openUnit={openUnit} />
       <LoadingNow openUnit={openUnit} />
 
       <div className="kpis">

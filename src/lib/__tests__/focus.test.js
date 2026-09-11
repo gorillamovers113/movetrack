@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { openPackingUnit, openLoadingUnit, blockingUnit, blockedMessage } from '../focus.js'
+import { openPackingUnit, openLoadingUnit, blockingUnit, blockedMessage, isPaused } from '../focus.js'
 
 /* One apartment at a time.
  *
@@ -16,6 +16,7 @@ const unit = (over) => ({
   id: over.id, number: over.number, stage: over.stage || 'not_started',
   crew: { packers: over.packers || [], movers: over.movers || [] },
   steps: over.steps || {}, vaults: over.vaults || [],
+  ...(over.paused ? { paused: over.paused } : {}),
 })
 
 describe('the unit somebody still has open', () => {
@@ -102,5 +103,61 @@ describe('what blocks starting another', () => {
   it('names the unit in the message, because "blocked" is not actionable', () => {
     expect(blockedMessage(units[0], 'packing')).toMatch(/906/)
     expect(blockedMessage(units[0], 'loading')).toMatch(/loading/)
+  })
+})
+
+/* A unit parked because it cannot be finished yet.
+ *
+ * One apartment at a time works, and then a resident refused access until the
+ * move-out morning and their unit sat open blocking a whole floor. That is a
+ * worse failure than the one the lock prevents, and it has nothing to do with
+ * the crew. */
+describe('pausing a unit', () => {
+  const parked = (over = {}) => unit({
+    id: 'a', number: '906', stage: 'packing', packers: ['liv'],
+    ...over,
+    paused: { reason: 'No access to the unit yet', uid: 'liv', userName: 'Liv Post', at: 100 },
+  })
+
+  it('recognises one that is parked, and one that is not', () => {
+    expect(isPaused(parked())).toBe(true)
+    expect(isPaused(unit({ id: 'a', number: '906' }))).toBe(false)
+    expect(isPaused({ paused: {} })).toBe(false)
+    expect(isPaused(null)).toBe(false)
+  })
+
+  it('stops it counting as the unit somebody has open', () => {
+    expect(openPackingUnit([parked()], LIV)).toBe(null)
+  })
+
+  // The whole point: the floor keeps moving.
+  it('lets the next apartment be started', () => {
+    const units = [parked(), unit({ id: 'b', number: '902', stage: 'not_started' })]
+    expect(blockingUnit(units, LIV, 'b', 'packing')).toBe(null)
+  })
+
+  it('does the same on the mover side', () => {
+    const started = unit({
+      id: 'a', number: '906', stage: 'packed', movers: ['vic'],
+      steps: { load_unit_photo: { at: 1 } },
+      paused: { reason: 'Truck is full, finishing tomorrow', uid: 'vic', userName: 'V', at: 100 },
+    })
+    expect(openLoadingUnit([started], VIC)).toBe(null)
+    expect(blockingUnit([started, unit({ id: 'b', number: '902', stage: 'packed' })], VIC, 'b', 'loading')).toBe(null)
+  })
+
+  // Paused is not finished. It must still read as unfinished everywhere else.
+  it('does not advance the unit or fake a completion', () => {
+    expect(parked().stage).toBe('packing')
+  })
+
+  it('blocks again the moment it is picked back up', () => {
+    const { paused, ...resumed } = parked()
+    const units = [resumed, unit({ id: 'b', number: '902', stage: 'not_started' })]
+    expect(blockingUnit(units, LIV, 'b', 'packing').number).toBe('906')
+  })
+
+  it('tells somebody they can pause, rather than only that they are stuck', () => {
+    expect(blockedMessage(unit({ id: 'a', number: '906' }), 'packing')).toMatch(/pause it if you cannot/)
   })
 })

@@ -27,6 +27,30 @@ import { canPack, canLoad } from './roles.js'
 
 const uidOf = (user) => user && (user.uid || user.id)
 
+/* A unit parked because it cannot be finished yet.
+ *
+ * One apartment at a time stops a photo landing on the wrong unit, and it
+ * works. What it could not express is the ordinary case where a unit cannot
+ * be finished for reasons that have nothing to do with the crew: a resident
+ * who will not give access until the move-out morning, or who is still
+ * sleeping in the bed and eating off the plates. That unit sat open and
+ * blocked the whole floor.
+ *
+ * Pausing says "not finished, not being worked on, and here is why". It does
+ * not advance the unit, does not fake a completion, and does not lose the
+ * partial work. It only stops the unit holding up everything else.
+ */
+export function isPaused(unit) {
+  return !!(unit && unit.paused && unit.paused.at)
+}
+
+export const PAUSE_REASONS = [
+  'Resident still using furniture',
+  'No access to the unit yet',
+  'Finishing on move-out day',
+  'Resident asked us to come back',
+]
+
 // A unit somebody has started packing and not finished. The stage IS the
 // state: the first checklist item moves it to 'packing' and the last moves it
 // to 'packed', so a unit sitting at 'packing' with your name on it is by
@@ -36,6 +60,7 @@ export function openPackingUnit(units, user) {
   if (!uid || !canPack(user.role)) return null
   return (units || []).find((u) => u
     && u.stage === 'packing'
+    && !isPaused(u)
     && ((u.crew && u.crew.packers) || []).includes(uid)) || null
 }
 
@@ -48,6 +73,7 @@ export function openLoadingUnit(units, user) {
   if (!uid || !canLoad(user.role)) return null
   return (units || []).find((u) => u
     && u.stage === 'packed'
+    && !isPaused(u)
     && ((u.crew && u.crew.movers) || []).includes(uid)
     && loadingProgress(u).done > 0) || null
 }
@@ -69,5 +95,5 @@ export function blockingUnit(units, user, targetUnitId, kind) {
 
 export function blockedMessage(open, kind) {
   const what = kind === 'loading' ? 'loading' : 'packing'
-  return `Finish unit ${open.number} first. You have it open for ${what}, and one apartment at a time is how a photo ends up on the right one.`
+  return `Finish unit ${open.number} first, or pause it if you cannot. You have it open for ${what}, and one apartment at a time is how a photo ends up on the right one.`
 }

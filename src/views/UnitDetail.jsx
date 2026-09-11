@@ -10,6 +10,7 @@ import ReportOverflowButton from '../components/ReportOverflowButton.jsx'
 import LoadOutCard from '../components/LoadOutCard.jsx'
 import UnitSummaryCard from '../components/UnitSummaryCard.jsx'
 import MediaFilingCard from '../components/MediaFilingCard.jsx'
+import PauseUnitCard from '../components/PauseUnitCard.jsx'
 import { mayPack, mayLoad } from '../lib/roles.js'
 import ReceiveCard from '../components/ReceiveCard.jsx'
 import { crewOnUnit } from '../lib/reports.js'
@@ -463,6 +464,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
             </div>
           )}
 
+          <PauseUnitCard unit={unit} toast={toast} />
           {onLoadOut && <LoadOutCard unit={unit} toast={toast} />}
           {onReceiving && <ReceiveCard unit={unit} toast={toast} />}
 
