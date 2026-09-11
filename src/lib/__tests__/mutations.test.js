@@ -3,7 +3,7 @@ import {
   makeEvent, boxMismatch, nextStage, nextOverflowStage,
   nextReturnStage, nextReturnOverflowStage,
   nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction,
-  matchContainerByNumber, surnameOf,
+  matchContainerByNumber, surnameOf, sortContainers, containerSortKey,
   STICKER_COLORS, stickerHex, inventoryRangeLabel, inventoryRangeError, overlappingUnits,
   CARTON_TYPES, sumCartons, cartonsFromForm, cartonSummary,
   SUPPLY_TYPES, sumSupplies, suppliesFromForm, supplySummary,
@@ -607,5 +607,65 @@ describe('video counts as evidence', () => {
       const step = PACKING_STEPS.find((s) => s.key === key)
       expect(step.label.toLowerCase()).not.toMatch(/\bphoto\b(?!s or video)/)
     }
+  })
+})
+
+/* Reading order for the vault list.
+ *
+ * It came back in whatever order Firestore felt like, which is fine for three
+ * vaults and useless for fifty. Worse, a unit can take more than one vault and
+ * those were scattered, so the two halves of one apartment could sit at
+ * opposite ends of the page with nothing to say they belonged together. */
+describe('sorting the vaults', () => {
+  const units = [
+    { id: 'u1', number: '901', tenant: 'Anna Kilgore' },
+    { id: 'u2', number: '902', tenant: 'Qingbo Niu' },
+    { id: 'u3', number: '906', tenant: 'Maria Ochoa' },
+    { id: 'u4', number: '1002', tenant: 'Sam Abbott' },
+  ]
+  const vault = (number, unitIds = []) => ({ id: `c-${number}`, number, unitIds })
+  const order = (list) => sortContainers(list, units).map((c) => c.number)
+
+  it('reads by tenant surname, which is what is on the paperwork', () => {
+    // Kilgore, Niu, Ochoa.
+    expect(order([vault('B', ['u2']), vault('A', ['u1']), vault('C', ['u3'])]))
+      .toEqual(['A', 'B', 'C'])
+  })
+
+  it('keeps one apartment’s vaults together and in order', () => {
+    const list = [vault('8038', ['u2']), vault('1007', ['u1']), vault('4735', ['u2']), vault('7371', ['u1'])]
+    // Kilgore (901) before Niu (902), and each unit's vaults adjacent.
+    expect(order(list)).toEqual(['1007', '7371', '4735', '8038'])
+  })
+
+  it('compares unit numbers as numbers, not as text', () => {
+    const sameName = [
+      { id: 'a', number: '902', tenant: 'Sam Abbott' },
+      { id: 'b', number: '1002', tenant: 'Sam Abbott' },
+    ]
+    expect(sortContainers([vault('X', ['b']), vault('Y', ['a'])], sameName).map((c) => c.number))
+      .toEqual(['Y', 'X'])   // 902 before 1002
+  })
+
+  it('compares vault numbers as numbers too', () => {
+    const list = [vault('10', ['u1']), vault('9', ['u1']), vault('100', ['u1'])]
+    expect(order(list)).toEqual(['9', '10', '100'])
+  })
+
+  // Empties are a pool of spares, not gaps in the list.
+  it('puts empty vaults last, in number order', () => {
+    const list = [vault('9', []), vault('1007', ['u3']), vault('2', []), vault('8038', ['u1'])]
+    expect(order(list)).toEqual(['8038', '1007', '2', '9'])
+  })
+
+  it('does not fall over on a vault whose unit has been removed', () => {
+    const list = [vault('X', ['ghost']), vault('Y', ['u1'])]
+    expect(order(list)).toEqual(['Y', 'X'])
+  })
+
+  it('survives junk without throwing', () => {
+    expect(sortContainers(null, units)).toEqual([])
+    expect(sortContainers([null, vault('A', ['u1'])], units).map((c) => c.number)).toEqual(['A'])
+    expect(sortContainers([vault('A')], null).map((c) => c.number)).toEqual(['A'])
   })
 })

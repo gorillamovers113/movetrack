@@ -658,3 +658,46 @@ export function receivingComplete(unit) {
 export function readyToReceive(unit) {
   return !!unit && (unit.stage === 'loaded' || unit.stage === 'picked_up')
 }
+
+/* Reading order for the vault list.
+ *
+ * The list came back in whatever order Firestore felt like, which is fine for
+ * three vaults and useless for fifty. Worse, a unit can take more than one
+ * vault, and those were scattered: the two halves of one apartment could sit
+ * at opposite ends of the page with no way to tell they belonged together.
+ *
+ * Sorted by tenant surname, then unit number, then vault number. Surname
+ * first because that is what somebody on the dock is holding: a name on
+ * paperwork. Unit number second so one tenant's apartments stay in order, and
+ * vault number last so an apartment's vaults are always adjacent and always
+ * in the same order.
+ *
+ * Empty vaults have no tenant to sort by and go to the end, in number order,
+ * where they read as a pool of spares rather than gaps in the list.
+ */
+export function containerSortKey(container, units) {
+  const on = ((container && container.unitIds) || [])
+    .map((id) => (units || []).find((u) => u && u.id === id))
+    .filter(Boolean)
+    .sort((a, b) => String(a.number).localeCompare(String(b.number), undefined, { numeric: true }))
+  const first = on[0]
+  return {
+    empty: !first,
+    surname: first ? surnameOf(first.tenant).toLowerCase() : '',
+    unit: first ? String(first.number) : '',
+    number: String((container && container.number) || ''),
+  }
+}
+
+export function sortContainers(containers, units) {
+  return (containers || [])
+    .filter(Boolean)
+    .map((c) => ({ c, k: containerSortKey(c, units) }))
+    .sort((a, b) => {
+      if (a.k.empty !== b.k.empty) return a.k.empty ? 1 : -1
+      return a.k.surname.localeCompare(b.k.surname)
+        || a.k.unit.localeCompare(b.k.unit, undefined, { numeric: true })
+        || a.k.number.localeCompare(b.k.number, undefined, { numeric: true })
+    })
+    .map((x) => x.c)
+}

@@ -8,6 +8,7 @@ import BigBoxSwapButton from '../components/BigBoxSwapButton.jsx'
 import DeliverReturnButton from '../components/DeliverReturnButton.jsx'
 import ReceiveContainerButton from '../components/ReceiveContainerButton.jsx'
 import { mayLoad } from '../lib/roles.js'
+import { sortContainers } from '../lib/mutations.js'
 
 // Lifecycle order the pool view groups by, matches CONT_STATUS in store.jsx:
 // empty (on site) → filling → full/ready → picked_up (in transit) → at_warehouse,
@@ -43,8 +44,11 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
   const groups = useMemo(() => {
     const g = {}
     for (const c of state.containers) (g[c.status] = g[c.status] || []).push(c)
+    // Sorted within each status rather than across it: the grouping is the
+    // lifecycle and that has to stay. Inside a group they read by tenant.
+    for (const status of Object.keys(g)) g[status] = sortContainers(g[status], state.units)
     return g
-  }, [state.containers])
+  }, [state.containers, state.units])
 
   const open = openId ? state.containers.find((c) => c.id === openId) : null
 
