@@ -117,13 +117,24 @@ export default function Login() {
           {mode === 'forgot-sent' ? (
             <>
               <h2>Check your email ✓</h2>
-              <p>We sent a password reset link to <b>{email}</b>. Follow it to set a new password, then come back and sign in.</p>
+              {/* The sender is named because it is not a name anybody
+                  recognises, and an unrecognised sender is how a reset email
+                  gets left unread or binned. Spam is called out for the same
+                  reason: this one scores badly and lands there often. */}
+              <p>
+                We sent a reset link to <b>{email}</b>. Follow it to set a new password, then come back and sign in.
+              </p>
+              <p className="muted" style={{ fontSize: 13.5 }}>
+                It comes from <b>noreply@movetrack-gorilla.firebaseapp.com</b>, which is easy to miss, so check your
+                spam folder if it is not there in a minute. The link works once and expires in an hour. If it does
+                not arrive at all, text Casey and he will sort it out.
+              </p>
               <button className="btn btn-ghost" style={{ width: '100%', marginTop: 16 }} onClick={() => switchMode('signin')}>← Back to sign in</button>
             </>
           ) : mode === 'forgot' ? (
             <>
               <h2>Reset your password</h2>
-              <p>Enter the email on your account and we'll send you a reset link.</p>
+              <p>Enter the email on your account and we will send you a reset link.</p>
               <div className="field"><label>Email</label>
                 <input className="input" autoFocus type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" onKeyDown={(e) => e.key === 'Enter' && doReset()} /></div>
               <button className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={busy} onClick={doReset}>{busy ? 'Sending…' : 'Send reset link'}</button>
