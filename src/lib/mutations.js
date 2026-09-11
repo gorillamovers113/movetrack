@@ -133,20 +133,44 @@ export function stickerHex(name) {
 }
 
 // "1-42" for display, or null when the unit has no range recorded yet.
+/* How many digits the stickers on the roll are printed to.
+ *
+ * Gorilla's rolls start at 000, not 1. Storing the numbers is right, but
+ * showing "0-23" against a sticker that reads "000" makes a packer do a
+ * translation at the exact moment they are checking one against the other.
+ * So the width the packer typed is kept alongside, and only when they
+ * actually typed leading zeros.
+ */
+export function inventoryDigitsFrom(fromRaw, toRaw) {
+  const padded = [fromRaw, toRaw]
+    .map((v) => String(v ?? '').trim())
+    .filter((v) => /^0\d/.test(v))
+  if (padded.length === 0) return null
+  return Math.max(...[fromRaw, toRaw].map((v) => String(v ?? '').trim().length))
+}
+
 export function inventoryRangeLabel(unit) {
   const from = unit?.inventoryFrom
   const to = unit?.inventoryTo
   if (!Number.isFinite(from) || !Number.isFinite(to)) return null
-  return from === to ? String(from) : `${from}-${to}`
+  const digits = Number.isFinite(unit?.inventoryDigits) ? unit.inventoryDigits : 0
+  const show = (n) => String(n).padStart(digits, '0')
+  return from === to ? show(from) : `${show(from)}-${show(to)}`
 }
 
 // Validates the range a packer types when finishing a unit. Returns an error
 // string to show, or null when it is good.
 export function inventoryRangeError(from, to) {
+  // Blank first, because Number('') is 0, not NaN. Once zero became a legal
+  // sticker the old `< 1` check stopped catching an empty box, and an
+  // untouched field would have been recorded as sticker 000.
+  const blank = (v) => v == null || String(v).trim() === ''
+  if (blank(from) || blank(to)) return 'Enter the first and last inventory number.'
   const f = Number(from)
   const t = Number(to)
   if (!Number.isInteger(f) || !Number.isInteger(t)) return 'Enter the first and last inventory number.'
-  if (f < 1 || t < 1) return 'Inventory numbers start at 1.'
+  // Zero is a real sticker. Gorilla's rolls start at 000.
+  if (f < 0 || t < 0) return 'Inventory numbers cannot be negative.'
   if (t < f) return 'The last number cannot be lower than the first.'
   return null
 }

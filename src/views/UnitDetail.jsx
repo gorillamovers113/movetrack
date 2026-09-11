@@ -3,7 +3,7 @@ import { STAGES, stageOf } from '../seed.js'
 import { useStore, canAct, filesToMedia, fmtTime, CONT_STATUS } from '../store.jsx'
 import { Modal, Lightbox, Uploader, EventRow, Avatar, StagePill, CaptureButtons } from '../ui.jsx'
 import { captureMedia, uploadFile } from '../lib/upload.js'
-import { surnameOf, STICKER_COLORS, inventoryRangeError, overlappingUnits, inventoryRangeLabel, stickerHex, CARTON_TYPES, cartonsFromForm, sumCartons, cartonSummary, SUPPLY_TYPES, suppliesFromForm, sumSupplies, supplySummary, packingChecklist, packingProgress, packingComplete, nextPackingStep, PACKING_STEPS, readyToReceive } from '../lib/mutations.js'
+import { surnameOf, STICKER_COLORS, inventoryRangeError, overlappingUnits, inventoryRangeLabel, inventoryDigitsFrom, stickerHex, CARTON_TYPES, cartonsFromForm, sumCartons, cartonSummary, SUPPLY_TYPES, suppliesFromForm, sumSupplies, supplySummary, packingChecklist, packingProgress, packingComplete, nextPackingStep, PACKING_STEPS, readyToReceive } from '../lib/mutations.js'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import { unitLabour, fmtDuration } from '../lib/reports.js'
 import ReportOverflowButton from '../components/ReportOverflowButton.jsx'
@@ -227,6 +227,8 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
       if (!n || n < 1) return toast('Enter the total pieces packed.')
       p.inventoryFrom = parseInt(form.invFrom, 10)
       p.inventoryTo = parseInt(form.invTo, 10)
+      const digits = inventoryDigitsFrom(form.invFrom, form.invTo)
+      if (digits) p.inventoryDigits = digits
       p.pieces = n
     }
     if (stepKey === 'materials') {
@@ -316,6 +318,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
           unitId, pieces: n,
           media: [...invMedia, ...media.map((m) => ({ ...m, phase: 'packed' }))],
           inventoryFrom: parseInt(form.invFrom, 10), inventoryTo: parseInt(form.invTo, 10),
+          ...(inventoryDigitsFrom(form.invFrom, form.invTo) ? { inventoryDigits: inventoryDigitsFrom(form.invFrom, form.invTo) } : {}),
           materials: cartonsFromForm(form),
         } }))
       }
@@ -706,10 +709,10 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
               <div className="field">
                 <label>Sticker numbers used{unit.stickerColor ? ` (${unit.stickerColor} roll)` : ''}</label>
                 <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-                  <input className="input" type="number" min="1" inputMode="numeric" autoFocus placeholder="first" style={{ flex: 1 }}
+                  <input className="input" type="number" min="0" inputMode="numeric" autoFocus placeholder="first" style={{ flex: 1 }}
                     value={form.invFrom || ''} onChange={(e) => setForm({ ...form, invFrom: e.target.value })} />
                   <span className="muted">to</span>
-                  <input className="input" type="number" min="1" inputMode="numeric" placeholder="last" style={{ flex: 1 }}
+                  <input className="input" type="number" min="0" inputMode="numeric" placeholder="last" style={{ flex: 1 }}
                     value={form.invTo || ''} onChange={(e) => setForm({ ...form, invTo: e.target.value })} />
                 </div>
                 {rangeClash.length > 0 && (
@@ -872,10 +875,10 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
               <div className="field">
                 <label>5. Inventory sticker numbers{unit.stickerColor ? ` (${unit.stickerColor} roll)` : ''}</label>
                 <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-                  <input className="input" type="number" min="1" inputMode="numeric" placeholder="first" style={{ flex: 1 }}
+                  <input className="input" type="number" min="0" inputMode="numeric" placeholder="first" style={{ flex: 1 }}
                     value={form.invFrom || ''} onChange={(e) => setForm({ ...form, invFrom: e.target.value })} />
                   <span className="muted">to</span>
-                  <input className="input" type="number" min="1" inputMode="numeric" placeholder="last" style={{ flex: 1 }}
+                  <input className="input" type="number" min="0" inputMode="numeric" placeholder="last" style={{ flex: 1 }}
                     value={form.invTo || ''} onChange={(e) => setForm({ ...form, invTo: e.target.value })} />
                 </div>
                 {rangeClash.length > 0 && (

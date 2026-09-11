@@ -3,7 +3,7 @@ import {
   makeEvent, boxMismatch, nextStage, nextOverflowStage,
   nextReturnStage, nextReturnOverflowStage,
   nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction,
-  matchContainerByNumber, surnameOf, sortContainers, containerSortKey,
+  matchContainerByNumber, surnameOf, sortContainers, containerSortKey, inventoryDigitsFrom,
   STICKER_COLORS, stickerHex, inventoryRangeLabel, inventoryRangeError, overlappingUnits,
   CARTON_TYPES, sumCartons, cartonsFromForm, cartonSummary,
   SUPPLY_TYPES, sumSupplies, suppliesFromForm, supplySummary,
@@ -192,7 +192,9 @@ describe('inventory stickers', () => {
     expect(inventoryRangeError(1, 42)).toBe(null)
     expect(inventoryRangeError('1', '42')).toBe(null)
     expect(inventoryRangeError('', '')).toBeTruthy()
-    expect(inventoryRangeError(0, 5)).toBeTruthy()      // stickers start at 1
+    // Zero is a real sticker now: Gorilla's rolls are printed from 000.
+    expect(inventoryRangeError(0, 5)).toBe(null)
+    expect(inventoryRangeError(-1, 5)).toBeTruthy()
     expect(inventoryRangeError(42, 1)).toBeTruthy()     // backwards
     expect(inventoryRangeError('abc', 5)).toBeTruthy()
   })
@@ -667,5 +669,54 @@ describe('sorting the vaults', () => {
     expect(sortContainers(null, units)).toEqual([])
     expect(sortContainers([null, vault('A', ['u1'])], units).map((c) => c.number)).toEqual(['A'])
     expect(sortContainers([vault('A')], null).map((c) => c.number)).toEqual(['A'])
+  })
+})
+
+/* Inventory numbers that start at 000.
+ *
+ * The rolls Gorilla use are printed 000, 001, 002. The app refused zero and
+ * insisted the first sticker was 1, which is not what is on the roll, and
+ * showing "0-23" against a sticker reading "000" makes a packer translate at
+ * the exact moment they are checking one against the other. */
+describe('inventory ranges starting at zero', () => {
+  it('accepts zero as a first sticker', () => {
+    expect(inventoryRangeError('000', '023')).toBe(null)
+    expect(inventoryRangeError(0, 23)).toBe(null)
+    expect(inventoryRangeError('0', '0')).toBe(null)
+  })
+
+  it('still refuses a negative, a blank and a backwards range', () => {
+    expect(inventoryRangeError(-1, 5)).toMatch(/negative/)
+    expect(inventoryRangeError('', '5')).toMatch(/Enter the first and last/)
+    expect(inventoryRangeError('abc', '5')).toMatch(/Enter the first and last/)
+    expect(inventoryRangeError(10, 3)).toMatch(/cannot be lower/)
+  })
+
+  it('remembers how wide the stickers are printed, only when they are padded', () => {
+    expect(inventoryDigitsFrom('000', '023')).toBe(3)
+    expect(inventoryDigitsFrom('001', '112')).toBe(3)
+    expect(inventoryDigitsFrom('0001', '0023')).toBe(4)
+    // Nobody typed a leading zero, so there is nothing to preserve.
+    expect(inventoryDigitsFrom('1', '23')).toBe(null)
+    expect(inventoryDigitsFrom('10', '23')).toBe(null)
+    expect(inventoryDigitsFrom('0', '9')).toBe(null)
+  })
+
+  it('shows the range the way the roll is printed', () => {
+    expect(inventoryRangeLabel({ inventoryFrom: 0, inventoryTo: 23, inventoryDigits: 3 })).toBe('000-023')
+    expect(inventoryRangeLabel({ inventoryFrom: 0, inventoryTo: 0, inventoryDigits: 3 })).toBe('000')
+  })
+
+  it('leaves an unpadded range exactly as it was', () => {
+    expect(inventoryRangeLabel({ inventoryFrom: 1, inventoryTo: 23 })).toBe('1-23')
+    expect(inventoryRangeLabel({ inventoryFrom: 0, inventoryTo: 23 })).toBe('0-23')
+    expect(inventoryRangeLabel({})).toBe(null)
+  })
+
+  // A range starting at zero is a real range, not an empty one.
+  it('counts a zero-based range as overlapping another on the same roll', () => {
+    const units = [{ id: 'a', stickerColor: 'Green', inventoryFrom: 0, inventoryTo: 23 }]
+    expect(overlappingUnits(units, { unitId: 'b', stickerColor: 'Green', from: '0', to: '5' })).toHaveLength(1)
+    expect(overlappingUnits(units, { unitId: 'b', stickerColor: 'Green', from: '24', to: '40' })).toHaveLength(0)
   })
 })
