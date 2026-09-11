@@ -85,17 +85,7 @@ export default function UpdateBar() {
   if (!stale) return null
 
   return (
-    <button
-      type="button"
-      onClick={() => window.location.reload()}
-      style={{
-        position: 'fixed', left: 12, right: 12, bottom: 'calc(env(safe-area-inset-bottom, 0px) + 74px)',
-        zIndex: 80, display: 'flex', alignItems: 'center', gap: 10,
-        padding: '12px 16px', borderRadius: 12, border: 'none',
-        background: '#111827', color: '#fff', fontFamily: 'inherit', fontSize: 14,
-        boxShadow: '0 8px 24px rgba(0,0,0,.28)', cursor: 'pointer', textAlign: 'left',
-      }}
-    >
+    <button type="button" className="updatebar" onClick={() => window.location.reload()}>
       <span aria-hidden>⬆</span>
       <span style={{ flex: 1 }}>
         <b>MoveTrack has been updated.</b>

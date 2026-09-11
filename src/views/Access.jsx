@@ -34,7 +34,7 @@ function Line({ label, children }) {
   return (
     <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '3px 0', fontSize: 13 }}>
       <span className="muted" style={{ flex: 'none', minWidth: 92 }}>{label}</span>
-      <span style={{ minWidth: 0, flex: 1 }}>{children}</span>
+      <span style={{ minWidth: 0, flex: 1, overflowWrap: 'anywhere' }}>{children}</span>
     </div>
   )
 }
