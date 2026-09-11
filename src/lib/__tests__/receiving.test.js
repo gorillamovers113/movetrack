@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
-  RECEIVING_STEPS, lastNameMismatch, vaultSetDiff, parseVaultNumbers,
-  receivingChecklist, receivingProgress, receivingComplete, readyToReceive,
+  RECEIVING_STEPS, lastNameMismatch,
+  receivingChecklist, receivingComplete, receivingDiff, receivedVaults, receivedVaultError,
 } from '../mutations.js'
 
 const shot = { url: 'u', kind: 'photo', uid: 'm1', userName: 'Ali', at: 1 }
@@ -13,102 +13,124 @@ describe('warehouse checks', () => {
     expect(RECEIVING_STEPS.map((s) => s.key)).toEqual(['recv_number', 'recv_lastname', 'recv_vaults'])
   })
 
-  it('matches the last name, not the whole name, and ignores case', () => {
+  // A unit's vaults come off a truck one at a time, sometimes an hour apart.
+  it('books the vaults in one at a time, not as one list', () => {
+    expect(RECEIVING_STEPS.find((s) => s.key === 'recv_vaults').repeatable).toBe(true)
+  })
+
+  it('reads a last name the way a person reads it off paperwork', () => {
     expect(lastNameMismatch(unit, 'ochoa')).toBe(null)
     expect(lastNameMismatch(unit, ' Ochoa ')).toBe(null)
-    expect(lastNameMismatch(unit, 'Maria')).toEqual({ recorded: 'Ochoa', entered: 'Maria' })
+    expect(lastNameMismatch(unit, 'Niu')).toEqual({ recorded: 'Ochoa', entered: 'Niu' })
   })
 
-  it('takes the last word as the surname, so middle names do not break it', () => {
-    expect(lastNameMismatch({ tenant: 'Fang Jing Yang' }, 'Yang')).toBe(null)
-    expect(lastNameMismatch({ tenant: 'Wendell P. Round' }, 'Round')).toBe(null)
-  })
-
-  it('says nothing when there is nothing to compare', () => {
-    expect(lastNameMismatch({}, 'Ochoa')).toBe(null)
+  it('says nothing when there is no name to compare against', () => {
     expect(lastNameMismatch(unit, '')).toBe(null)
+    expect(lastNameMismatch({}, 'Ochoa')).toBe(null)
   })
 })
 
-describe('box reconciliation', () => {
-  it('accepts the boxes the mover logged, in any order or case', () => {
-    expect(vaultSetDiff(unit, ['bb-1008', 'BB-1007']).ok).toBe(true)
+/* What the dock is still waiting on, and what turned up that should not have.
+ *
+ * Expected comes from what the movers actually finished logging on site, not
+ * from what anybody remembers loading. */
+describe('what has arrived against what was loaded', () => {
+  const arrived = (n, matched = true) => ({ number: n, matched, uid: 'w1', userName: 'Jeremy Williams', at: 1 })
+
+  it('is not ok until every logged vault has landed', () => {
+    expect(receivingDiff({ ...unit, received: [arrived('BB-1007')] }))
+      .toMatchObject({ missing: ['BB-1008'], unexpected: [], ok: false })
+    expect(receivingDiff({ ...unit, received: [arrived('BB-1007'), arrived('BB-1008')] }))
+      .toMatchObject({ missing: [], unexpected: [], ok: true })
   })
 
-  it('reports a box still on the truck', () => {
-    const d = vaultSetDiff(unit, ['BB-1007'])
-    expect(d.ok).toBe(false)
-    expect(d.missing).toEqual(['BB-1008'])
-    expect(d.unexpected).toEqual([])
+  it('reads a number the way a person reads it off the side', () => {
+    expect(receivingDiff({ ...unit, received: [arrived('bb-1007 '), arrived('BB-1008')] }).ok).toBe(true)
   })
 
-  it('reports a box belonging to someone else', () => {
-    const d = vaultSetDiff(unit, ['BB-1007', 'BB-1008', 'BB-9999'])
-    expect(d.ok).toBe(false)
-    expect(d.missing).toEqual([])
+  it('names a vault that arrived but was never loaded against this unit', () => {
+    const d = receivingDiff({ ...unit, received: [arrived('BB-1007'), arrived('BB-1008'), arrived('BB-9999')] })
     expect(d.unexpected).toEqual(['BB-9999'])
+    // Still ok: everything expected is here. The stray is flagged separately,
+    // because refusing to book in a unit that is physically on the dock helps
+    // nobody.
+    expect(d.ok).toBe(true)
   })
 
-  it('reports both directions at once', () => {
-    const d = vaultSetDiff(unit, ['BB-9999'])
-    expect(d.missing).toEqual(['BB-1007', 'BB-1008'])
-    expect(d.unexpected).toEqual(['BB-9999'])
+  it('ignores a vault the movers never finished logging', () => {
+    const half = { ...unit, vaults: [vault('BB-1'), { number: 'BB-2', open: shot }], received: [arrived('BB-1')] }
+    expect(receivingDiff(half).ok).toBe(true)
   })
 
-  it('ignores a vault the mover never finished logging', () => {
-    const half = { vaults: [vault('BB-1'), { number: 'BB-2', open: shot }] }
-    expect(vaultSetDiff(half, ['BB-1']).ok).toBe(true)
+  it('is not ok on a unit where nothing was loaded and nothing arrived', () => {
+    expect(receivingDiff({ vaults: [], received: [] }).ok).toBe(false)
   })
 
-  it('reads however someone types a list on a phone', () => {
-    expect(parseVaultNumbers('bb-1, BB-2  bb-3\nBB-4;BB-5')).toEqual(['BB-1', 'BB-2', 'BB-3', 'BB-4', 'BB-5'])
-    expect(parseVaultNumbers('')).toEqual([])
-    expect(parseVaultNumbers(null)).toEqual([])
-  })
-
-  it('counts a duplicate typed twice only once', () => {
-    expect(vaultSetDiff(unit, ['BB-1007', 'BB-1007', 'BB-1008']).ok).toBe(true)
+  it('does not fall over on junk', () => {
+    expect(receivingDiff({}).ok).toBe(false)
+    expect(receivedVaults(null)).toEqual([])
+    expect(receivedVaults({ received: [null] })).toEqual([])
   })
 })
 
-describe('receiving checklist', () => {
-  const steps = {
-    recv_number: { userName: 'Robin', at: 1, value: '906', matched: true },
-    recv_lastname: { userName: 'Robin', at: 2, value: 'Ochoa', matched: true },
-    recv_vaults: { userName: 'Robin', at: 3, value: 'BB-1007, BB-1008', matched: true },
-  }
+describe('booking a vault in at the dock', () => {
+  const withOne = { ...unit, received: [{ number: 'BB-1007', matched: true, at: 1 }] }
 
-  it('starts empty and completes only when all three are done', () => {
-    expect(receivingProgress({})).toEqual({ done: 0, total: 3 })
-    expect(receivingComplete({})).toBe(false)
-    expect(receivingComplete({ steps })).toBe(true)
+  it('refuses a blank, a stub, and one already booked in', () => {
+    expect(receivedVaultError('', withOne)).toMatch(/Enter the number/)
+    expect(receivedVaultError('B', withOne)).toMatch(/too short/)
+    expect(receivedVaultError('bb-1007', withOne)).toMatch(/already booked in/)
+    expect(receivedVaultError('BB-1008', withOne)).toBe(null)
   })
 
-  it('carries who checked it, when, what they typed and whether it matched', () => {
-    const row = receivingChecklist({ steps }).find((s) => s.key === 'recv_lastname')
-    expect(row).toMatchObject({ done: true, by: 'Robin', at: 2, value: 'Ochoa', matched: true })
-  })
-
-  it('a mismatch still counts as done, it is recorded not blocked', () => {
-    const bad = { steps: { ...steps, recv_number: { userName: 'Robin', at: 1, value: '905', matched: false } } }
-    expect(receivingComplete(bad)).toBe(true)
-    expect(receivingChecklist(bad).find((s) => s.key === 'recv_number').matched).toBe(false)
+  // A stray is recorded and flagged, never refused: it is on the dock either
+  // way and the office needs to know it arrived.
+  it('accepts a number that is not on this unit, for flagging', () => {
+    expect(receivedVaultError('BB-9999', withOne)).toBe(null)
   })
 })
 
-describe('what the warehouse can receive', () => {
-  it('accepts a loaded unit, because the drivers do not use the app', () => {
-    expect(readyToReceive({ stage: 'loaded' })).toBe(true)
+describe('the receiving checklist', () => {
+  const done = (key) => ({ [key]: { userName: 'Jeremy Williams', at: 1, value: 'x', matched: true } })
+
+  it('counts the vaults row as done only when they are all here', () => {
+    const partial = { ...unit, steps: { ...done('recv_number'), ...done('recv_lastname') }, received: [{ number: 'BB-1007', at: 1 }] }
+    const row = receivingChecklist(partial).find((r) => r.key === 'recv_vaults')
+    expect(row).toMatchObject({ done: false, count: 1, expected: 2, missing: ['BB-1008'] })
+    expect(receivingComplete(partial)).toBe(false)
   })
 
-  it('still accepts a picked-up unit, for the day a driver does', () => {
-    expect(readyToReceive({ stage: 'picked_up' })).toBe(true)
-  })
-
-  it('refuses anything the movers have not finished', () => {
-    for (const stage of ['not_started', 'packing', 'packed', 'at_warehouse']) {
-      expect(readyToReceive({ stage })).toBe(false)
+  it('completes once the last one lands', () => {
+    const all = {
+      ...unit,
+      steps: { ...done('recv_number'), ...done('recv_lastname') },
+      received: [{ number: 'BB-1007', at: 1 }, { number: 'BB-1008', at: 2 }],
     }
-    expect(readyToReceive(null)).toBe(false)
+    expect(receivingChecklist(all).find((r) => r.key === 'recv_vaults').done).toBe(true)
+    expect(receivingComplete(all)).toBe(true)
+  })
+
+  // A unit sitting half-received forever is worse than one booked in short
+  // with a flag on it, because only one of those gets chased.
+  it('completes when the manager says the rest did not come', () => {
+    const short = {
+      ...unit,
+      steps: {
+        ...done('recv_number'), ...done('recv_lastname'),
+        recv_vaults_short: { userName: 'Jeremy Williams', at: 3, missing: ['BB-1008'] },
+      },
+      received: [{ number: 'BB-1007', at: 1 }],
+    }
+    expect(receivingChecklist(short).find((r) => r.key === 'recv_vaults')).toMatchObject({ done: true, short: true })
+    expect(receivingComplete(short)).toBe(true)
+  })
+
+  it('credits the first vault booked in, and counts them all', () => {
+    const u = { ...unit, received: [
+      { number: 'BB-1008', userName: 'Jeremy Williams', at: 900 },
+      { number: 'BB-1007', userName: 'Robin Vale', at: 100 },
+    ] }
+    expect(receivingChecklist(u).find((r) => r.key === 'recv_vaults'))
+      .toMatchObject({ by: 'Robin Vale', at: 100, count: 2 })
   })
 })

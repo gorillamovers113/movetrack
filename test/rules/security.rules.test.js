@@ -2149,3 +2149,71 @@ describe('step corrections', () => {
     )
   })
 })
+
+/* The dock's vault-by-vault record.
+ *
+ * 'received' is what the warehouse says arrived; 'vaults' is what the movers
+ * logged on site. The whole check is one against the other, so the warehouse
+ * must never be able to edit the thing it is checking against. */
+describe('booking vaults in at the warehouse', () => {
+  it('a warehouse user may add to received while the unit is still on the truck', async () => {
+    await seed('units', 'u1', baseUnit({ stage: 'loaded' }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), {
+        received: arrayUnion({ number: 'BB-1', matched: true, uid: WAREHOUSE, userName: 'Test warehouse-1', at: 1 }),
+      })
+    )
+  })
+
+  it('but may not touch what the movers logged on site', async () => {
+    await seed('units', 'u1', baseUnit({ stage: 'loaded', vaults: [{ number: 'BB-1' }] }))
+    await assertFails(
+      updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), { vaults: [] })
+    )
+    await assertFails(
+      updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), { vaults: arrayUnion({ number: 'BB-2' }) })
+    )
+  })
+
+  /* Booking a vault in and taking the unit into the warehouse in one write is
+   * ALLOWED, and always has been: the warehouse owns the loaded ->
+   * at_warehouse transition outright. That the three checks are done first is
+   * enforced in receiveUnit, not here, for the same reason one-unit-at-a-time
+   * is: it is a workflow constraint and the warehouse is not the adversary.
+   * Written down so nobody reads the absence as an oversight. */
+  it('may take the unit into the warehouse, which is its own transition', async () => {
+    await seed('units', 'u1', baseUnit({ stage: 'loaded' }))
+    await assertSucceeds(
+      updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), {
+        received: arrayUnion({ number: 'BB-1' }),
+        stage: 'at_warehouse',
+      })
+    )
+  })
+
+  it('may not skip a unit straight from packed into the warehouse', async () => {
+    await seed('units', 'u1', baseUnit({ stage: 'packed' }))
+    await assertFails(
+      updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), { stage: 'at_warehouse' })
+    )
+  })
+
+  it('may not clear a flag while booking one in', async () => {
+    await seed('units', 'u1', baseUnit({ stage: 'loaded', flag: { message: 'x', ts: 1, by: 'a', open: true } }))
+    await assertFails(
+      updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u1'), {
+        received: arrayUnion({ number: 'BB-1' }),
+        'flag.open': false,
+      })
+    )
+  })
+
+  it('nobody else books a vault in', async () => {
+    await seed('units', 'u1', baseUnit({ stage: 'loaded' }))
+    for (const who of [MOVER, PACKER, BOTH, VIEWER]) {
+      await assertFails(
+        updateDoc(doc(dbAs(who), 'units', 'u1'), { received: arrayUnion({ number: 'BB-1' }) })
+      )
+    }
+  })
+})

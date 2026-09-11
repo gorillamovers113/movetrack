@@ -171,9 +171,14 @@ service cloud.firestore {
               && request.resource.data.crew.movers.hasOnly(resource.data.crew.movers.concat([request.auth.uid])));
     }
     // The warehouse manager's three arrival checks (unit number, tenant's last
-    // name, box numbers) are each saved on their own while the unit is still
-    // on the truck's side of the line, so each carries its own name and time.
-    // The unit only becomes 'at_warehouse' once all three are recorded.
+    // name, and each vault) are each saved on their own while the unit is
+    // still on the truck's side of the line, so each carries its own name and
+    // time. The unit only becomes 'at_warehouse' once all three are recorded.
+    //
+    // 'received' is the vault-by-vault dock record. It is separate from
+    // 'vaults', which is what the movers logged on site: the point of the
+    // whole check is comparing one against the other, so the warehouse must
+    // never be able to edit what it is checking against.
     //
     // Narrow in the same way as the packer and mover paths, and again `flag`
     // is deliberately absent: a mismatch is recorded on the step and raised as
@@ -182,7 +187,7 @@ service cloud.firestore {
       return hasRole('warehouse')
           && resource.data.stage == request.resource.data.stage
           && (resource.data.stage == 'loaded' || resource.data.stage == 'picked_up')
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['steps']);
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['steps', 'received']);
     }
     function unitReturnTransitionOK(role, before, after) {
       return (role == 'warehouse'

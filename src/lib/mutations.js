@@ -591,7 +591,12 @@ export function loadingComplete(unit) {
 export const RECEIVING_STEPS = [
   { key: 'recv_number', label: 'Unit number' },
   { key: 'recv_lastname', label: "Tenant's last name" },
-  { key: 'recv_vaults', label: 'Vault numbers received' },
+  // Repeatable, like the mover's side. A unit's vaults come off a truck one
+  // at a time, sometimes an hour apart, so one box asking for the whole set
+  // forced the manager to either wait for the last one or write down a number
+  // they had not yet seen. Each vault is now checked in on its own, under the
+  // name and time of whoever was standing there when it landed.
+  { key: 'recv_vaults', label: 'Vaults received', repeatable: true },
 ]
 
 export function lastNameMismatch(unit, entered) {
@@ -625,9 +630,63 @@ export function parseVaultNumbers(text) {
     .filter(Boolean)
 }
 
+// Vaults booked in at the dock, one record each.
+export function receivedVaults(unit) {
+  return ((unit && unit.received) || []).filter(Boolean)
+}
+
+/* What the dock is still waiting on, and what turned up that should not have.
+ *
+ * Expected comes from what the movers actually finished logging on site, not
+ * from what anybody remembers loading. A vault that arrives without being on
+ * that list is the interesting case: either it was loaded without being
+ * recorded, or it belongs to a different apartment.
+ */
+export function receivingDiff(unit) {
+  const expected = completeVaults(unit).map((v) => normalizeVaultNumber(v.number))
+  const got = receivedVaults(unit).map((r) => normalizeVaultNumber(r.number))
+  const gotSet = new Set(got)
+  const expectedSet = new Set(expected)
+  return {
+    expected,
+    got,
+    missing: expected.filter((n) => !gotSet.has(n)),
+    unexpected: got.filter((n) => !expectedSet.has(n)),
+    ok: expected.length > 0 && expected.every((n) => gotSet.has(n)),
+  }
+}
+
+export function receivedVaultError(n, unit) {
+  const v = normalizeVaultNumber(n)
+  if (!v) return 'Enter the number on the side of the vault.'
+  if (v.length < 2) return 'That looks too short to be a vault number.'
+  if (receivedVaults(unit).some((r) => normalizeVaultNumber(r.number) === v)) {
+    return `Vault ${v} is already booked in on this unit.`
+  }
+  return null
+}
+
 export function receivingChecklist(unit) {
   const steps = (unit && unit.steps) || {}
   return RECEIVING_STEPS.map((s) => {
+    if (s.repeatable) {
+      const diff = receivingDiff(unit)
+      const got = receivedVaults(unit).slice().sort((a, b) => (a.at || 0) - (b.at || 0))
+      const first = got[0]
+      return {
+        ...s,
+        // Done when every vault the movers finished on site has landed here,
+        // or when the manager has said out loud that the rest did not come.
+        done: diff.ok || !!steps.recv_vaults_short,
+        by: first ? first.userName || null : null,
+        at: first ? first.at || null : null,
+        count: got.length,
+        expected: diff.expected.length,
+        missing: diff.missing,
+        unexpected: diff.unexpected,
+        short: !!steps.recv_vaults_short,
+      }
+    }
     const raw = steps[s.key]
     if (!raw) return { ...s, done: false }
     return {

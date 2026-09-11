@@ -5,7 +5,8 @@ import { app, auth, db } from './firebase.js'
 import { captureMedia, uploadFile } from './lib/upload.js'
 import { businessDayKey, canClockInAt, lunchMinutesFor, openSessionFor, usesClock } from './lib/timeclock.js'
 import { stepRow, pushRows } from './lib/sheetBackup.js'
-import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction, sumCartons, PACKING_STEPS, REQUIRED_STEPS, packingChecklist, wouldCompletePacking, LOADING_STEPS, loadingComplete, normalizeVaultNumber, normalizeCode, vaultsOf, completeVaults, vaultCountMismatch, RECEIVING_STEPS, receivingComplete, readyToReceive } from './lib/mutations.js'
+import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction, sumCartons, PACKING_STEPS, REQUIRED_STEPS, packingChecklist, wouldCompletePacking, LOADING_STEPS, loadingComplete, normalizeVaultNumber, normalizeCode, vaultsOf, completeVaults, vaultCountMismatch,
+  receivedVaultError, receivedVaults, receivingDiff, RECEIVING_STEPS, receivingComplete, readyToReceive } from './lib/mutations.js'
 import { DEFAULT_SCHEDULE, DEFAULT_RETURN_SCHEDULE, scheduleDocId } from './lib/schedule.js'
 import { stageOf } from './seed.js'
 import { mayPack, mayLoad } from './lib/roles.js'
@@ -819,7 +820,7 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
         // One of the warehouse manager's three checks, saved on its own with
         // its own name and time. Runs while the unit is still 'loaded' or
         // 'picked_up': it only enters the warehouse once all three are done.
-        const step = RECEIVING_STEPS.find((s) => s.key === p.key)
+        const step = RECEIVING_STEPS.find((s) => s.key === p.key && !s.repeatable)
         if (!step) throw new Error('Unknown receiving check.')
 
         const now = Date.now()
@@ -832,6 +833,51 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
           return ev('flag', `MISMATCH receiving unit ${unit.number}: ${step.label.toLowerCase()} came in as "${p.value}", the record says "${p.expected}"`, { unitId: unit.id, step: p.key })
         }
         return ev('step', `Unit ${unit.number} · ${step.label} verified ✓${p.value ? ` (${p.value})` : ''}`, { unitId: unit.id, step: p.key })
+      }
+      case 'receiveVault': {
+        /* One vault, booked in as it comes off the truck.
+         *
+         * The number is read off the side of the vault in front of the
+         * manager, never picked from a list, because a list would turn the
+         * one check that catches a vault from the wrong apartment into
+         * tapping whatever is on screen.
+         *
+         * Nothing here blocks. A number nobody expected is recorded and
+         * flagged, not refused: the vault is physically on the dock either
+         * way, and the office needs to know it arrived, not to be told it
+         * cannot exist.
+         */
+        if (!readyToReceive(unit)) throw new Error('That unit has not arrived yet.')
+        const number = normalizeVaultNumber(p.number)
+        const err = receivedVaultError(number, unit)
+        if (err) throw new Error(err)
+
+        const expected = completeVaults(unit).map((v) => normalizeVaultNumber(v.number))
+        const known = expected.includes(number)
+        const now = Date.now()
+        await updateDoc(doc(db, 'units', p.unitId), {
+          received: arrayUnion({ number, matched: known, uid: currentUser.uid, userName: currentUser.name, at: now }),
+        })
+        if (!known) {
+          return ev('flag', `UNEXPECTED vault on unit ${unit.number}: ${number} arrived but was not logged against this apartment on site`, { unitId: unit.id, step: 'recv_vaults' })
+        }
+        const after = receivingDiff({ ...unit, received: [...receivedVaults(unit), { number }] })
+        return ev('step', `Unit ${unit.number} \u00b7 vault ${number} booked in \u2713 (${after.got.length} of ${after.expected.length})`, { unitId: unit.id, step: 'recv_vaults' })
+      }
+      case 'receiveVaultsShort': {
+        // The manager saying the rest did not come. The unit can then be
+        // booked in for what is physically there, which is the honest record,
+        // with the shortfall raised rather than the unit left in limbo.
+        if (!readyToReceive(unit)) throw new Error('That unit has not arrived yet.')
+        const diff = receivingDiff(unit)
+        if (diff.missing.length === 0) throw new Error('Every vault is accounted for.')
+        await updateDoc(doc(db, 'units', p.unitId), {
+          'steps.recv_vaults_short': {
+            uid: currentUser.uid, userName: currentUser.name, at: Date.now(),
+            missing: diff.missing, note: (p.note || '').trim(),
+          },
+        })
+        return ev('flag', `SHORT on unit ${unit.number}: ${diff.missing.length} vault${diff.missing.length === 1 ? '' : 's'} did not arrive (${diff.missing.join(', ')})${p.note ? ` \u00b7 ${String(p.note).trim()}` : ''}`, { unitId: unit.id, step: 'recv_vaults' })
       }
       case 'receiveUnit': {
         // Into the warehouse. Accepts a unit at 'loaded' as well as
@@ -850,8 +896,8 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
         }
         await updateDoc(doc(db, 'units', p.unitId), patch)
 
-        const got = vaultsOf(unit)
-        await ev('stage', `Unit ${unit.number} received into the warehouse, ${got.length} vault${got.length === 1 ? '' : 's'} verified`, { unitId: unit.id, from: unit.stage, to: 'at_warehouse' })
+        const diff = receivingDiff(unit)
+        await ev('stage', `Unit ${unit.number} received into the warehouse, ${diff.got.length} of ${diff.expected.length} vault${diff.expected.length === 1 ? '' : 's'} booked in${diff.missing.length ? `, ${diff.missing.length} short` : ''}`, { unitId: unit.id, from: unit.stage, to: 'at_warehouse' })
         if (wrong.length) await ev('flag', `FLAG raised on unit ${unit.number}: ${wrong.join(' and ')} did not match on arrival`, { unitId: unit.id })
         return
       }

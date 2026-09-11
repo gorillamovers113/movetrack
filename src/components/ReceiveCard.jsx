@@ -4,7 +4,8 @@ import { Modal } from '../ui.jsx'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import {
   RECEIVING_STEPS, receivingChecklist, receivingProgress, receivingComplete,
-  lastNameMismatch, unitNumberMismatch, vaultSetDiff, parseVaultNumbers, completeVaults,
+  lastNameMismatch, unitNumberMismatch, completeVaults,
+  receivedVaults, receivingDiff, receivedVaultError, normalizeVaultNumber,
 } from '../lib/mutations.js'
 
 const SAVE_ERROR = "Couldn't save that. Check your signal and try again."
@@ -28,6 +29,7 @@ export default function ReceiveCard({ unit, toast }) {
   const progress = receivingProgress(unit)
   const ready = receivingComplete(unit)
   const expected = completeVaults(unit)
+  const diff = receivingDiff(unit)
 
   const open = (key) => { setForm({}); setModal(key) }
   const close = () => { if (!busy) setModal(null) }
@@ -68,18 +70,22 @@ export default function ReceiveCard({ unit, toast }) {
     }
 
     if (modal === 'recv_vaults') {
-      const typed = parseVaultNumbers(form.vaults)
-      if (typed.length === 0) return toast('Type the number off each vault you have received.')
-      const diff = vaultSetDiff(unit, typed)
-      const parts = []
-      if (diff.missing.length) parts.push(`missing ${diff.missing.join(', ')}`)
-      if (diff.unexpected.length) parts.push(`unexpected ${diff.unexpected.join(', ')}`)
+      const typed = String(form.vault || '').trim()
+      const err = receivedVaultError(typed, unit)
+      if (err) return toast(err)
+      const known = diff.expected.includes(normalizeVaultNumber(typed))
       return run(
-        () => dispatch({ type: 'completeReceiveStep', p: {
-          unitId: unit.id, key: 'recv_vaults', value: typed.join(', '),
-          matched: diff.ok, expected: diff.expected.join(', '),
-        } }),
-        diff.ok ? `All ${typed.length} vault${typed.length === 1 ? '' : 's'} verified ✓` : `⚑ Vault mismatch flagged: ${parts.join(', ')}`,
+        () => dispatch({ type: 'receiveVault', p: { unitId: unit.id, number: typed } }),
+        known
+          ? `Vault ${normalizeVaultNumber(typed)} booked in ✓`
+          : `⚑ Flagged: ${normalizeVaultNumber(typed)} is not on this unit's load-out`,
+      )
+    }
+
+    if (modal === 'short') {
+      return run(
+        () => dispatch({ type: 'receiveVaultsShort', p: { unitId: unit.id, note: form.note } }),
+        `⚑ ${diff.missing.length} vault${diff.missing.length === 1 ? '' : 's'} reported short`,
       )
     }
   }
@@ -90,8 +96,7 @@ export default function ReceiveCard({ unit, toast }) {
   )
 
   const step = RECEIVING_STEPS.find((s) => s.key === modal)
-  const typedVaults = parseVaultNumbers(form.vaults)
-  const liveDiff = modal === 'recv_vaults' && typedVaults.length ? vaultSetDiff(unit, typedVaults) : null
+  const booked = receivedVaults(unit).slice().sort((a, b) => (a.at || 0) - (b.at || 0))
 
   return (
     <>
@@ -102,7 +107,10 @@ export default function ReceiveCard({ unit, toast }) {
         </div>
 
         {checklist.map((row, i) => {
-          const tappable = !row.done
+          // The vaults row stays open once done: a vault that turns up an hour
+          // later still has to be bookable, and a closed row would send the
+          // manager looking for somewhere else to put it.
+          const tappable = !row.done || row.repeatable
           const Row = tappable ? 'button' : 'div'
           return (
             <Row
@@ -122,7 +130,12 @@ export default function ReceiveCard({ unit, toast }) {
                 {row.done ? (row.matched === false ? '⚑' : '✓') : i + 1}
               </span>
               <span style={{ minWidth: 0, flex: 1 }}>
-                <span style={{ color: row.done ? 'var(--ink-3, #6b7280)' : 'inherit', fontWeight: tappable ? 600 : 400 }}>{row.label}</span>
+                <span style={{ color: row.done ? 'var(--ink-3, #6b7280)' : 'inherit', fontWeight: tappable && !row.done ? 600 : 400 }}>
+                  {row.label}
+                  {row.repeatable && row.expected > 0 && (
+                    <span className="muted" style={{ marginLeft: 7 }}>· {row.count} of {row.expected}</span>
+                  )}
+                </span>
                 {row.done && (
                   <span style={{ display: 'block', fontSize: 12, color: 'var(--ink-3, #9aa1ab)' }}>
                     {row.by || 'Crew'}{row.at ? ` · ${fmtTime(row.at)}` : ''}{row.value ? ` · ${row.value}` : ''}
@@ -134,6 +147,35 @@ export default function ReceiveCard({ unit, toast }) {
             </Row>
           )
         })}
+
+        {booked.length > 0 && (
+          <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--line)' }}>
+            <div className="muted" style={{ fontSize: 12, fontWeight: 700, letterSpacing: '.04em', marginBottom: 6 }}>
+              ON THE DOCK
+            </div>
+            {booked.map((r) => (
+              <div key={r.number} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '4px 0', fontSize: 13.5 }}>
+                <span aria-hidden>{r.matched === false ? '⚑' : '📦'}</span>
+                <span className="grow">
+                  <b>{r.number}</b>
+                  {r.matched === false && <b style={{ color: '#b91c1c' }}> · not on this unit</b>}
+                </span>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  {r.userName || 'Crew'}{r.at ? ` · ${fmtTime(r.at)}` : ''}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {diff.missing.length > 0 && !checklist.find((r) => r.repeatable)?.short && (
+          <button
+            type="button" className="btn btn-ghost btn-sm" style={{ width: '100%', marginTop: 10 }}
+            onClick={() => open('short')}
+          >
+            {diff.missing.length} did not arrive
+          </button>
+        )}
 
         <button
           className="btn btn-primary btn-lg"
@@ -173,26 +215,38 @@ export default function ReceiveCard({ unit, toast }) {
 
           {modal === 'recv_vaults' && (
             <div className="field">
-              <label>Every vault number you have received</label>
-              <textarea
-                className="input" rows={3} autoFocus placeholder="BB-1007, BB-1008"
-                value={form.vaults || ''} onChange={(e) => setForm({ ...form, boxes: e.target.value })}
+              <label>Read the number off the vault in front of you</label>
+              <input
+                className="input" type="text" autoFocus placeholder="e.g. 8038"
+                value={form.vault || ''} onChange={(e) => setForm({ ...form, vault: e.target.value })}
               />
               <div className="muted" style={{ marginTop: 6, fontSize: 12.5 }}>
-                Read them off the vaults on the dock. Commas, spaces or new lines all work.
-                {expected.length > 0 && ` The movers logged ${expected.length} on this unit.`}
+                One at a time, as each comes off the truck. The movers logged {diff.expected.length} on this unit
+                and {diff.got.length} {diff.got.length === 1 ? 'is' : 'are'} booked in.
               </div>
-              {liveDiff && !liveDiff.ok && (
-                <div style={{ marginTop: 10, fontSize: 13, background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 10, padding: '9px 12px' }}>
-                  {liveDiff.missing.length > 0 && <div><b>Not here yet:</b> {liveDiff.missing.join(', ')} — still on the truck or on site.</div>}
-                  {liveDiff.unexpected.length > 0 && <div style={{ marginTop: liveDiff.missing.length ? 4 : 0 }}><b>Not on this unit:</b> {liveDiff.unexpected.join(', ')} — find out whose before it is put away.</div>}
+              {diff.missing.length > 0 && (
+                <div className="muted" style={{ marginTop: 8, fontSize: 12.5 }}>
+                  Still to come: {diff.missing.join(', ')}
                 </div>
               )}
-              {liveDiff && liveDiff.ok && (
-                <div className="muted" style={{ marginTop: 10, fontSize: 13, color: '#15803d' }}>
-                  ✓ All {liveDiff.expected.length} vault{liveDiff.expected.length === 1 ? '' : 's'} accounted for.
-                </div>
-              )}
+            </div>
+          )}
+
+          {modal === 'short' && (
+            <div className="field">
+              <label>What did not arrive</label>
+              <div style={{ fontSize: 13.5, marginBottom: 8 }}>
+                <b>{diff.missing.join(', ')}</b>
+                <span className="muted"> · {diff.missing.length} of {diff.expected.length} vault{diff.expected.length === 1 ? '' : 's'}</span>
+              </div>
+              <textarea
+                className="input" rows={2} autoFocus placeholder="Still on the truck, driver coming back tomorrow"
+                value={form.note || ''} onChange={(e) => setForm({ ...form, note: e.target.value })}
+              />
+              <div className="muted" style={{ marginTop: 8, fontSize: 12.5 }}>
+                This raises a flag for the office and lets you book in what is physically here. Say what you know:
+                whoever chases it will have nothing else to go on.
+              </div>
             </div>
           )}
 

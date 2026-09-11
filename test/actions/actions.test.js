@@ -831,3 +831,113 @@ describe('adding the same person to a day twice', () => {
     expect(await rows('timeEntries')).toHaveLength(2)
   })
 })
+
+/* The warehouse arrival check, vault by vault.
+ *
+ * A unit's vaults come off a truck one at a time, sometimes an hour apart, so
+ * one box asking for the whole set forced the manager to either wait for the
+ * last one or write down a number they had not yet seen. */
+describe('booking vaults in at the dock', () => {
+  const WAREHOUSE = { uid: 'wh-1', name: 'Jeremy Williams', role: 'warehouse', status: 'active' }
+  const shot = { url: 'u', kind: 'photo', uid: MOVER.uid, userName: MOVER.name, at: 1 }
+  const full = (n) => ({ number: n, uid: MOVER.uid, userName: MOVER.name, at: 1, open: shot, closed: shot })
+  const loaded = { ...UNIT, stage: 'loaded', vaults: [full('BB-1007'), full('BB-1008')], received: [] }
+  const unitRow = async () => (await rows('units')).find((u) => u.id === UNIT.id)
+  const state = (over = {}) => makeState({ units: [loaded], users: [WAREHOUSE, MOVER, ADMIN], ...over })
+
+  beforeEach(async () => { await setDoc(doc(db, 'units', UNIT.id), loaded) })
+
+  it('records each one under whoever was standing there', async () => {
+    await run(WAREHOUSE, { type: 'receiveVault', p: { unitId: UNIT.id, number: ' bb-1007 ' } }, state())
+    const u = await unitRow()
+    expect(u.received).toHaveLength(1)
+    expect(u.received[0]).toMatchObject({ number: 'BB-1007', matched: true, userName: WAREHOUSE.name })
+  })
+
+  // The interesting case: a vault that is on the dock but was never logged
+  // against this apartment on site.
+  it('accepts a vault nobody logged, and flags it rather than refusing it', async () => {
+    await run(WAREHOUSE, { type: 'receiveVault', p: { unitId: UNIT.id, number: 'BB-9999' } }, state())
+    const u = await unitRow()
+    expect(u.received[0]).toMatchObject({ number: 'BB-9999', matched: false })
+    expect(events.find((e) => e.type === 'flag').action).toMatch(/UNEXPECTED vault on unit 906: BB-9999/)
+  })
+
+  it('refuses the same vault twice', async () => {
+    await run(WAREHOUSE, { type: 'receiveVault', p: { unitId: UNIT.id, number: 'BB-1007' } }, state())
+    const after = await unitRow()
+    await expect(
+      run(WAREHOUSE, { type: 'receiveVault', p: { unitId: UNIT.id, number: 'bb-1007' } }, state({ units: [after] })),
+    ).rejects.toThrow(/already booked in/i)
+  })
+
+  it('will not book anything in on a unit that has not left the building', async () => {
+    const stillPacked = { ...loaded, stage: 'packed' }
+    await setDoc(doc(db, 'units', UNIT.id), stillPacked)
+    await expect(
+      run(WAREHOUSE, { type: 'receiveVault', p: { unitId: UNIT.id, number: 'BB-1007' } }, state({ units: [stillPacked] })),
+    ).rejects.toThrow(/has not arrived/i)
+  })
+
+  it('will not book the unit in until every vault is accounted for', async () => {
+    const partial = {
+      ...loaded,
+      steps: { recv_number: { at: 1, userName: WAREHOUSE.name }, recv_lastname: { at: 2, userName: WAREHOUSE.name } },
+      received: [{ number: 'BB-1007', matched: true, at: 3 }],
+    }
+    await setDoc(doc(db, 'units', UNIT.id), partial)
+    await expect(
+      run(WAREHOUSE, { type: 'receiveUnit', p: { unitId: UNIT.id } }, state({ units: [partial] })),
+    ).rejects.toThrow(/verify the unit number, last name and vault numbers/i)
+    expect((await unitRow()).stage).toBe('loaded')
+  })
+
+  /* A unit sitting half-received forever is worse than one booked in short
+   * with a flag on it, because only one of those gets chased. */
+  it('lets the manager say the rest did not come, and raises it', async () => {
+    const partial = { ...loaded, received: [{ number: 'BB-1007', matched: true, at: 3 }] }
+    await setDoc(doc(db, 'units', UNIT.id), partial)
+    await run(WAREHOUSE, { type: 'receiveVaultsShort', p: { unitId: UNIT.id, note: 'Still on the truck' } },
+      state({ units: [partial] }))
+
+    const u = await unitRow()
+    expect(u.steps.recv_vaults_short).toMatchObject({ userName: WAREHOUSE.name, missing: ['BB-1008'], note: 'Still on the truck' })
+    expect(events.find((e) => e.action?.startsWith('SHORT')).action)
+      .toMatch(/SHORT on unit 906: 1 vault did not arrive \(BB-1008\).*Still on the truck/)
+  })
+
+  it('refuses to report short when everything is here', async () => {
+    const all = { ...loaded, received: [{ number: 'BB-1007', at: 1 }, { number: 'BB-1008', at: 2 }] }
+    await setDoc(doc(db, 'units', UNIT.id), all)
+    await expect(
+      run(WAREHOUSE, { type: 'receiveVaultsShort', p: { unitId: UNIT.id } }, state({ units: [all] })),
+    ).rejects.toThrow(/every vault is accounted for/i)
+  })
+
+  it('books the unit in once all three checks are done', async () => {
+    const ready = {
+      ...loaded,
+      steps: { recv_number: { at: 1, userName: WAREHOUSE.name }, recv_lastname: { at: 2, userName: WAREHOUSE.name } },
+      received: [{ number: 'BB-1007', matched: true, at: 3 }, { number: 'BB-1008', matched: true, at: 4 }],
+    }
+    await setDoc(doc(db, 'units', UNIT.id), ready)
+    await run(WAREHOUSE, { type: 'receiveUnit', p: { unitId: UNIT.id } }, state({ units: [ready] }))
+
+    expect((await unitRow()).stage).toBe('at_warehouse')
+    expect(events.find((e) => e.type === 'stage').action).toMatch(/2 of 2 vaults booked in/)
+  })
+
+  it('says how short it was when it goes in short', async () => {
+    const short = {
+      ...loaded,
+      steps: {
+        recv_number: { at: 1, userName: WAREHOUSE.name }, recv_lastname: { at: 2, userName: WAREHOUSE.name },
+        recv_vaults_short: { at: 5, userName: WAREHOUSE.name, missing: ['BB-1008'] },
+      },
+      received: [{ number: 'BB-1007', matched: true, at: 3 }],
+    }
+    await setDoc(doc(db, 'units', UNIT.id), short)
+    await run(WAREHOUSE, { type: 'receiveUnit', p: { unitId: UNIT.id } }, state({ units: [short] }))
+    expect(events.find((e) => e.type === 'stage').action).toMatch(/1 of 2 vaults booked in, 1 short/)
+  })
+})
