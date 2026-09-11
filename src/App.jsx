@@ -13,7 +13,9 @@ import MyWork from './views/MyWork.jsx'
 import Schedule from './views/Schedule.jsx'
 import Reports from './views/Reports.jsx'
 import Timesheets from './views/Timesheets.jsx'
+import Access from './views/Access.jsx'
 import UpdateBar from './components/UpdateBar.jsx'
+import { recordSession } from './lib/telemetry.js'
 
 // Packers reach Overflow via the "＋ Report overflow item" button on a unit,
 // so it's left out of their nav to keep it lean (same reasoning as omitting
@@ -21,7 +23,7 @@ import UpdateBar from './components/UpdateBar.jsx'
 // (or just needs to see it) gets it in the nav. Schedule is for every role
 // (read-only for non-admins) since the crew needs to know today's floor.
 const NAV = {
-  admin: [['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['containers', '📦', 'Containers'], ['overflow', '🛋️', 'Overflow'], ['team', '👥', 'Team'], ['reports', '📊', 'Reports'], ['timesheets', '⏱️', 'Timesheets'], ['activity', '🕘', 'Activity']],
+  admin: [['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['containers', '📦', 'Containers'], ['overflow', '🛋️', 'Overflow'], ['team', '👥', 'Team'], ['reports', '📊', 'Reports'], ['timesheets', '⏱️', 'Timesheets'], ['activity', '🕘', 'Activity'], ['access', '🔎', 'Access log']],
   // Packers deliberately have no Dashboard or Activity: both list every
   // apartment and tenant in the building, and a packer needs the one door
   // they are standing at (reached by number from My queue). Their own recent
@@ -77,6 +79,19 @@ function Shell() {
   const first = nav[0]?.[0] || 'dashboard'
   const [view, setView] = useState({ name: first })
   const [toastMsg, setToastMsg] = useState(null)
+
+  /* Session telemetry: who has the app open, on what, and which screen.
+   *
+   * The heartbeat exists so a session that is sitting open still reads as
+   * open. Without it somebody who opened the app at 8am and left it on one
+   * screen would look like they stopped at 8am. */
+  useEffect(() => {
+    recordSession(view.name, { force: true })
+    const t = setInterval(() => recordSession(view.name), 4 * 60 * 1000)
+    const onVisible = () => { if (document.visibilityState === 'visible') recordSession(view.name, { force: true }) }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', onVisible) }
+  }, [view.name])
 
   const toast = (msg) => {
     setToastMsg(msg)
@@ -149,6 +164,7 @@ function Shell() {
       // Admin only, and Timesheets itself also returns null for anyone else,
       // so the guard holds even if this nav list is edited later.
       case 'timesheets': return <Timesheets toast={toast} />
+      case 'access': return <Access />
       case 'activity': return <Activity openUnit={openUnit} openContainer={openContainer} />
       case 'mywork': return <MyWork openUnit={openUnit} openContainer={openContainer} toast={toast} />
       default: return null

@@ -2217,3 +2217,44 @@ describe('booking vaults in at the warehouse', () => {
     }
   })
 })
+
+/* Session and sign-in telemetry.
+ *
+ * Written by Cloud Functions with the Admin SDK, which bypasses these rules
+ * entirely. That is the point: the IP and the identity on a session record are
+ * only worth reading because no client could have put them there. */
+describe('the access log', () => {
+  const session = { uid: MOVER, userName: 'Test mover-1', startedAt: 1, lastSeenAt: 2, ip: '1.2.3.4', device: 'iPhone' }
+
+  it('only an admin may read a session', async () => {
+    await seed('sessions', `${MOVER}__abc`, session)
+    await assertSucceeds(getDoc(doc(dbAs(ADMIN), 'sessions', `${MOVER}__abc`)))
+    // Not even the person it is about: a readable log is an editable-looking
+    // one, and the value here is that it is neither.
+    for (const who of [MOVER, PACKER, BOTH, WAREHOUSE, VIEWER]) {
+      await assertFails(getDoc(doc(dbAs(who), 'sessions', `${MOVER}__abc`)))
+    }
+  })
+
+  it('nobody writes one from a browser, including an admin', async () => {
+    for (const who of [ADMIN, MOVER, PACKER, BOTH, WAREHOUSE, VIEWER]) {
+      await assertFails(setDoc(doc(dbAs(who), 'sessions', `${who}__forged`), { ...session, uid: who, ip: '9.9.9.9' }))
+    }
+  })
+
+  it('nobody edits or deletes one either', async () => {
+    await seed('sessions', `${MOVER}__abc`, session)
+    await assertFails(updateDoc(doc(dbAs(ADMIN), 'sessions', `${MOVER}__abc`), { ip: '0.0.0.0' }))
+    await assertFails(updateDoc(doc(dbAs(MOVER), 'sessions', `${MOVER}__abc`), { ip: '0.0.0.0' }))
+    await assertFails(deleteDoc(doc(dbAs(ADMIN), 'sessions', `${MOVER}__abc`)))
+  })
+
+  it('the same holds for password-reset records', async () => {
+    await seed('authEvents', 'e1', { type: 'passwordReset', email: 'liv@gorillamovers.com', outcome: 'sent', at: 1, ip: '1.2.3.4' })
+    await assertSucceeds(getDoc(doc(dbAs(ADMIN), 'authEvents', 'e1')))
+    for (const who of [MOVER, PACKER, WAREHOUSE, VIEWER]) {
+      await assertFails(getDoc(doc(dbAs(who), 'authEvents', 'e1')))
+    }
+    await assertFails(setDoc(doc(dbAs(ADMIN), 'authEvents', 'e2'), { type: 'passwordReset', at: 2 }))
+  })
+})
