@@ -27,7 +27,16 @@ export default function AddTimeEntryModal({ date, onClose, toast }) {
     uid: '', start: date ? `${date}T08:00` : '', end: date ? `${date}T16:30` : '', lunch: '', notes: '',
   })
 
-  const crew = state.users.filter((u) => usesClock(u.role) && u.status === 'active')
+  /* Somebody already on this day is not in the list.
+   *
+   * Offering a name that cannot be added is how Rogelio ended up on Thursday
+   * twice: the picker was happy to take him again and nothing downstream
+   * disagreed until the totals were wrong. */
+  const taken = new Set(
+    state.timeEntries.filter((e) => e && e.day === date).map((e) => e.uid),
+  )
+  const crew = state.users.filter((u) => usesClock(u.role) && u.status === 'active' && !taken.has(u.uid || u.id))
+  const allCrew = state.users.filter((u) => usesClock(u.role) && u.status === 'active')
 
   const save = async () => {
     if (busy) return
@@ -62,9 +71,15 @@ export default function AddTimeEntryModal({ date, onClose, toast }) {
       <div className="field">
         <label>Who</label>
         <select className="input" value={form.uid} onChange={(e) => setForm({ ...form, uid: e.target.value })}>
-          <option value="">Pick a packer or mover…</option>
+          <option value="">{crew.length ? 'Pick a packer or mover…' : 'Everybody is already on this day'}</option>
           {crew.map((u) => <option key={u.id} value={u.uid || u.id}>{u.name}</option>)}
         </select>
+        {taken.size > 0 && (
+          <div className="muted" style={{ marginTop: 6, fontSize: 12.5 }}>
+            {allCrew.length - crew.length} already on this day
+            {crew.length === 0 && '. Tap a name on the day to change or remove their hours.'}
+          </div>
+        )}
       </div>
       <div className="field">
         <label>Started</label>

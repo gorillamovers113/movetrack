@@ -736,18 +736,20 @@ describe('removing a back-entered day', () => {
     expect(JSON.parse(record.oldValue)).toMatchObject({ clockIn: day.clockIn, clockOut: day.clockOut, notes: day.notes })
   })
 
-  // The line that matters: a punched shift is not the admin's to erase.
-  it('refuses a day the crew member clocked in themselves', async () => {
+  // A punched shift can go too, because the employer keeps the records and
+  // blocking it would push the fix somewhere with no trail. It still leaves
+  // one, which is what makes it safe to allow.
+  it('can remove a punched day, and records that it did', async () => {
     await run(MOVER, { type: 'clockIn' })
     const [punched] = await rows('timeEntries')
     expect(punched.source).toBe('self')
 
-    await expect(
-      run(ADMIN, { type: 'adminDeleteTimeEntry', p: { entryId: punched.id } }, makeState({ timeEntries: [punched] })),
-    ).rejects.toThrow(/clocked this day in themselves/i)
+    await run(ADMIN, { type: 'adminDeleteTimeEntry', p: { entryId: punched.id } }, makeState({ timeEntries: [punched] }))
 
-    expect(await rows('timeEntries')).toHaveLength(1)
-    expect(await rows('timeCorrections')).toHaveLength(0)
+    expect(await rows('timeEntries')).toHaveLength(0)
+    const [record] = await rows('timeCorrections')
+    expect(record).toMatchObject({ field: 'deleted', uid: MOVER.uid, byUid: ADMIN.uid })
+    expect(JSON.parse(record.oldValue).source).toBe('self')
   })
 
   it('removes only the duplicate, leaving the real one alone', async () => {
@@ -766,5 +768,66 @@ describe('removing a back-entered day', () => {
     await expect(
       run(ADMIN, { type: 'adminDeleteTimeEntry', p: { entryId: 'ghost' } }, makeState({ timeEntries: [] })),
     ).rejects.toThrow(/gone/i)
+  })
+})
+
+/* One day per person per day.
+ *
+ * The picker hides anybody already on the day, but the refusal has to live at
+ * the write too: a double-tap on a phone is two calls, and the screen that
+ * would have stopped the second one has not re-rendered yet. */
+describe('adding the same person to a day twice', () => {
+  const day = {
+    clockIn: Date.parse('2026-09-10T16:00:00Z'),
+    clockOut: Date.parse('2026-09-10T23:00:00Z'),
+  }
+
+  it('refuses the second one, and says what to do instead', async () => {
+    await run(ADMIN, { type: 'adminAddTimeEntry', p: { uid: MOVER.uid, ...day } })
+    const after = await rows('timeEntries')
+
+    await expect(
+      run(ADMIN, { type: 'adminAddTimeEntry', p: { uid: MOVER.uid, ...day } }, makeState({ timeEntries: after })),
+    ).rejects.toThrow(/already has a day/i)
+
+    expect(await rows('timeEntries')).toHaveLength(1)
+  })
+
+  it('refuses even when the times are different, because it is the same day', async () => {
+    await run(ADMIN, { type: 'adminAddTimeEntry', p: { uid: MOVER.uid, ...day } })
+    const after = await rows('timeEntries')
+    await expect(
+      run(ADMIN, { type: 'adminAddTimeEntry', p: {
+        uid: MOVER.uid, clockIn: Date.parse('2026-09-10T18:00:00Z'), clockOut: Date.parse('2026-09-10T20:00:00Z'),
+      } }, makeState({ timeEntries: after })),
+    ).rejects.toThrow(/already has a day/i)
+  })
+
+  it('refuses to double up on somebody who punched in themselves', async () => {
+    await run(MOVER, { type: 'clockIn' })
+    const punched = await rows('timeEntries')
+    await expect(
+      run(ADMIN, { type: 'adminAddTimeEntry', p: { uid: MOVER.uid, ...day } }, makeState({ timeEntries: punched })),
+    ).rejects.toThrow(/already has a day/i)
+  })
+
+  it('still lets a different person onto the same day', async () => {
+    await run(ADMIN, { type: 'adminAddTimeEntry', p: { uid: MOVER.uid, ...day } })
+    const after = await rows('timeEntries')
+    await expect(
+      run(ADMIN, { type: 'adminAddTimeEntry', p: { uid: PACKER.uid, ...day } }, makeState({ timeEntries: after })),
+    ).resolves.not.toThrow()
+    expect(await rows('timeEntries')).toHaveLength(2)
+  })
+
+  it('still lets the same person onto a different day', async () => {
+    await run(ADMIN, { type: 'adminAddTimeEntry', p: { uid: MOVER.uid, ...day } })
+    const after = await rows('timeEntries')
+    await expect(
+      run(ADMIN, { type: 'adminAddTimeEntry', p: {
+        uid: MOVER.uid, clockIn: Date.parse('2026-09-11T16:00:00Z'), clockOut: Date.parse('2026-09-11T23:00:00Z'),
+      } }, makeState({ timeEntries: after })),
+    ).resolves.not.toThrow()
+    expect(await rows('timeEntries')).toHaveLength(2)
   })
 })

@@ -937,9 +937,17 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
         if (!usesClock(target.role)) throw new Error('Only packers and movers keep time.')
         if (!p.clockIn || !p.clockOut) throw new Error('Enter a start and a finish time.')
         if (p.clockOut <= p.clockIn) throw new Error('Finish time must be after start time.')
+
+        // One day per person per day. Rogelio got added to Thursday twice,
+        // nine seconds apart, which is what a double-tap looks like on a phone.
+        const day = businessDayKey(p.clockIn)
+        const already = state.timeEntries.find((e) => e.uid === (target.uid || target.id) && e.day === day)
+        if (already) {
+          throw new Error(`${target.name} already has a day on ${day}. Adjust that one rather than adding a second.`)
+        }
         await addDoc(collection(db, 'timeEntries'), {
           uid: target.uid || target.id, userName: target.name, role: target.role,
-          day: businessDayKey(p.clockIn), clockIn: p.clockIn, clockOut: p.clockOut,
+          day, clockIn: p.clockIn, clockOut: p.clockOut,
           lunchMinutes: Number.isFinite(p.lunchMinutes) && p.lunchMinutes !== null
             ? Math.max(0, Math.floor(p.lunchMinutes))
             : lunchMinutesFor(p.clockOut - p.clockIn, false),
@@ -972,21 +980,20 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
       case 'adminDeleteTimeEntry': {
         /* Removing a day an admin entered.
          *
-         * Only ever a day an admin TYPED. A punched entry is the crew
-         * member's own record of their own shift, and the answer to a wrong
-         * one is to correct it, not to make it disappear: these are pay
-         * records, and a record that can be deleted is not a record. An
-         * admin's own back-entry is different. Casey added Rogelio twice by
-         * mistake and one of those days never happened.
+         * Casey added Rogelio to Thursday twice and one of those days never
+         * happened, so a way back is necessary. These are pay records though,
+         * and the two cases are not the same weight: a back-entry is the
+         * admin's own typing, while a punched shift is the crew member's own
+         * record of their own day. Both can go, because the employer keeps
+         * the records and blocking them would only push the fix somewhere
+         * with no trail at all, but the screen says plainly which one is
+         * being removed before it happens.
          *
          * The whole entry is kept in timeCorrections, where only admins can
          * read it, so a removal is as auditable as a change.
          */
         const entry = state.timeEntries.find((e) => e.id === p.entryId)
         if (!entry) throw new Error('That entry is gone. Refresh and try again.')
-        if (entry.source !== 'admin') {
-          throw new Error(`${entry.userName} clocked this day in themselves. Correct the times rather than removing their record.`)
-        }
         await addDoc(collection(db, 'timeCorrections'), {
           entryId: entry.id, uid: entry.uid, day: entry.day, field: 'deleted',
           oldValue: JSON.stringify({

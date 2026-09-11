@@ -67,12 +67,13 @@ export default function TimeCorrectionModal({ row, onClose, toast }) {
     }
   }
 
-  /* Removing a day, offered only for one an admin typed.
+  /* Removing somebody from a day.
    *
-   * A punched entry is the crew member's own record of their own shift and
-   * gets corrected, not deleted. A back-entry is the admin's own data, and
-   * adding the same person twice is easy enough to do that there has to be a
-   * way back. */
+   * Both kinds can go, because the employer keeps the records and blocking it
+   * would only push the fix somewhere with no trail at all. They are not the
+   * same weight though: a back-entry is the admin's own typing, while a
+   * punched shift is the crew member's own record of their own day. The
+   * confirm says which one is about to go. */
   const remove = async () => {
     if (busy) return
     setBusy(true)
@@ -111,16 +112,17 @@ export default function TimeCorrectionModal({ row, onClose, toast }) {
         {busy ? 'Saving…' : 'Save'}
       </button>
 
-      {row.adminEntered && (
-        <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line)' }}>
+      <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--line)' }}>
           {confirmRemove ? (
             <>
               <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>
-                Remove this day for {row.userName} entirely? You added it, so it is yours to take back. What it
-                said is kept where only you can read it.
+                {row.adminEntered
+                  ? <>Take {row.userName} off this day? You added it, so it is yours to take back. What it said is kept where only you can read it.</>
+                  : <><b>{row.userName} clocked this in themselves.</b> Removing it deletes their own record of the
+                    shift, so only do it if the day did not happen. What it said is kept where only you can read it.</>}
               </div>
               <button className="btn btn-danger btn-sm" style={{ width: '100%' }} disabled={busy} onClick={remove}>
-                {busy ? 'Removing…' : 'Yes, remove this day'}
+                {busy ? 'Removing…' : `Yes, remove ${row.userName.split(' ')[0]}`}
               </button>
               <button className="btn btn-ghost btn-sm" style={{ width: '100%', marginTop: 6 }} onClick={() => setConfirmRemove(false)}>
                 Keep it
@@ -128,11 +130,10 @@ export default function TimeCorrectionModal({ row, onClose, toast }) {
             </>
           ) : (
             <button className="btn btn-ghost btn-sm" style={{ width: '100%' }} onClick={() => setConfirmRemove(true)}>
-              Remove this day
+              Remove {row.userName.split(' ')[0]} from this day
             </button>
           )}
         </div>
-      )}
     </Modal>
   )
 }

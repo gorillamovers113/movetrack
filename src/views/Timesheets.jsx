@@ -99,7 +99,7 @@ export default function Timesheets({ toast }) {
         </div>
       ))}
 
-      {adding && <AddTimeEntryModal onClose={() => setAdding(false)} toast={toast} />}
+      {adding && <AddTimeEntryModal date={day} onClose={() => setAdding(false)} toast={toast} />}
 
       {editing && (
         <TimeCorrectionModal row={editing} toast={toast} onClose={() => setEditing(null)} />
