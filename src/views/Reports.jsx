@@ -5,6 +5,7 @@ import { allRows, pushRows } from '../lib/sheetBackup.js'
 import { Avatar, EventRow, Lightbox } from '../ui.jsx'
 import { computeAllReports, summarizeRoster, fmtDuration, reportsToCSV } from '../lib/reports.js'
 import JobSummaryCard from '../components/JobSummaryCard.jsx'
+import StarredName from '../components/StarredName.jsx'
 
 // Small download helper mirroring the pattern in store.jsx's
 // exportActivityCSV, kept here since Reports is pure read-only analytics
@@ -217,7 +218,9 @@ export default function Reports({ openUnit, openContainer, toast }) {
                   >
                     <Avatar name={r.name} />
                     <div style={{ minWidth: 140 }}>
-                      <b>{r.name}</b>
+                      {/* The report a person's work is judged on is the right
+                          place for the mark, not only the roster. */}
+                      <StarredName user={state.users.find((u) => (u.uid || u.id) === r.uid)} name={r.name} bold />
                       <div>
                         <span className="badge" style={{ background: (ROLES[r.role]?.color || '#8a93a2') + '22', color: ROLES[r.role]?.color || '#8a93a2' }}>
                           {ROLES[r.role]?.label || 'Unknown role'}

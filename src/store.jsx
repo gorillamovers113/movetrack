@@ -1052,6 +1052,22 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
         await deleteDoc(doc(db, 'timeEntries', p.entryId))
         return
       }
+      case 'awardStar': {
+        // Recognition for something worth more to a job than a day of moving
+        // boxes. Admin only, and never self-awarded: the rules already keep
+        // users writable by admins alone, which is what makes the mark mean
+        // anything at all.
+        if (currentUser.role !== 'admin') throw new Error('Only an admin can award a star.')
+        const target = state.users.find((u) => (u.uid || u.id) === p.userId || u.id === p.userId)
+        if (!target) throw new Error('That person is not on the roster.')
+        const reason = String(p.reason || '').trim()
+        if (!reason) throw new Error('Say what the star is for.')
+
+        await updateDoc(doc(db, 'users', target.id), {
+          award: { star: true, reason, at: Date.now(), byUid: currentUser.uid, byName: currentUser.name },
+        })
+        return ev('system', `${target.name} was awarded a star: ${reason}`)
+      }
       case 'pauseUnit': {
         /* Parking a unit that cannot be finished yet.
          *

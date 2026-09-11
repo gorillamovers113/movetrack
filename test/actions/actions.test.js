@@ -1053,3 +1053,36 @@ describe('pausing a unit', () => {
     ).resolves.not.toThrow()
   })
 })
+
+/* Awarding a star. */
+describe('recognition', () => {
+  const target = { id: 'p', uid: PACKER.uid, name: PACKER.name, role: 'packer', status: 'active' }
+
+  beforeEach(async () => { await setDoc(doc(db, 'users', 'p'), target) })
+
+  it('records the reason and who gave it', async () => {
+    await run(ADMIN, { type: 'awardStar', p: { userId: PACKER.uid, reason: 'Found two workflow bugs' } },
+      makeState({ users: [target, ADMIN] }))
+    const u = (await rows('users')).find((x) => x.id === 'p')
+    expect(u.award).toMatchObject({ star: true, reason: 'Found two workflow bugs', byName: ADMIN.name })
+  })
+
+  // A mark you can give yourself means nothing.
+  it('is for the admin to give, and nobody else', async () => {
+    for (const who of [PACKER, MOVER]) {
+      await expect(run(who, { type: 'awardStar', p: { userId: PACKER.uid, reason: 'me' } },
+        makeState({ users: [target, ADMIN] }))).rejects.toThrow(/only an admin/i)
+    }
+    expect((await rows('users')).find((x) => x.id === 'p').award).toBeUndefined()
+  })
+
+  it('insists on a reason', async () => {
+    await expect(run(ADMIN, { type: 'awardStar', p: { userId: PACKER.uid, reason: '  ' } },
+      makeState({ users: [target, ADMIN] }))).rejects.toThrow(/what the star is for/i)
+  })
+
+  it('says so when the person is not on the roster', async () => {
+    await expect(run(ADMIN, { type: 'awardStar', p: { userId: 'ghost', reason: 'x' } },
+      makeState({ users: [target, ADMIN] }))).rejects.toThrow(/not on the roster/i)
+  })
+})

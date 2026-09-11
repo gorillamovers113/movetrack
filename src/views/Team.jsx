@@ -3,6 +3,8 @@ import { ROLES } from '../seed.js'
 import { useStore, fmtTime, fmtAgo } from '../store.jsx'
 import { Avatar, Modal } from '../ui.jsx'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
+import StarredName from '../components/StarredName.jsx'
+import { hasStar, starReason } from '../lib/awards.js'
 
 export default function Team({ toast }) {
   const { state, dispatch, currentUser } = useStore()
@@ -95,7 +97,18 @@ export default function Team({ toast }) {
             <tbody>
               {active.map((u) => (
                 <tr key={u.id}>
-                  <td><div className="row"><Avatar name={u.name} size="sm" /><div><b>{u.name}</b>{u.title && <div className="muted">{u.title}</div>}</div></div></td>
+                  <td>
+                    <div className="row">
+                      <Avatar name={u.name} size="sm" />
+                      <div>
+                        <StarredName user={u} bold />
+                        {u.title && <div className="muted">{u.title}</div>}
+                        {hasStar(u) && (
+                          <div className="muted" style={{ fontSize: 12 }}>{starReason(u)}</div>
+                        )}
+                      </div>
+                    </div>
+                  </td>
                   <td>
                     {/* Admin rows used to render a badge and no select, which made
                         promoting somebody a one-way door: Aaron was made an admin so

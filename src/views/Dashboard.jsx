@@ -394,8 +394,16 @@ export default function Dashboard({ openUnit, toast }) {
                         key={u.id} className={`tile ${on ? '' : 'dim'}`}
                         style={{ background: stageOf(u.stage).color }}
                         onClick={() => openUnit(u.id)}
-                        title={`Unit ${u.number} · ${tenant || 'no tenant on file'} · ${stageOf(u.stage).label}`}
+                        title={isPaused(u)
+                          ? `Unit ${u.number} · ${tenant || 'no tenant on file'} · PAUSED: ${u.paused.reason}`
+                          : `Unit ${u.number} · ${tenant || 'no tenant on file'} · ${stageOf(u.stage).label}`}
                       >
+                        {/* A paused unit is the same stage colour, because it
+                            IS still that stage. The mark says somebody is
+                            waiting on something, which the colour cannot. */}
+                        {isPaused(u) && (
+                          <span aria-hidden style={{ position: 'absolute', top: 2, right: 3, fontSize: 9, lineHeight: 1 }}>⏸</span>
+                        )}
                         {u.number}
                         {/* Surname is the LAST word, not the second. Real
                             tenants have middle initials and multi-word

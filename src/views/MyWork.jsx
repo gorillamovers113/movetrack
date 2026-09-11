@@ -5,7 +5,7 @@ import { StagePill } from '../ui.jsx'
 import FindUnitButton from '../components/FindUnitButton.jsx'
 import ClockCard from '../components/ClockCard.jsx'
 import { canPack, canLoad, canReceive } from '../lib/roles.js'
-import { openPackingUnit, openLoadingUnit } from '../lib/focus.js'
+import { openPackingUnit, openLoadingUnit, isPaused } from '../lib/focus.js'
 
 export default function MyWork({ openUnit, openContainer, toast }) {
   const { state, currentUser } = useStore()
@@ -86,8 +86,16 @@ export default function MyWork({ openUnit, openContainer, toast }) {
     return null
   }
 
-  const inProgress = mine.filter(started)
-  const ready = mine.filter((u) => !started(u))
+  /* Paused work is not in-progress work.
+   *
+   * A parked unit sat in "In progress: finish these" looking like something
+   * somebody was actively on, which is exactly the impression pausing exists
+   * to remove. It gets its own section, carrying the reason, so the queue
+   * reads as what is live and what is waiting on somebody else. */
+  const parked = mine.filter(isPaused)
+  const live = mine.filter((u) => !isPaused(u))
+  const inProgress = live.filter(started)
+  const ready = live.filter((u) => !started(u))
   // Somebody who packs and loads has both kinds of work waiting in one list,
   // and "Ready to start" cannot describe both. Splitting by the unit's stage
   // names each pile correctly and, as a side effect, removes the per-role
@@ -119,6 +127,7 @@ export default function MyWork({ openUnit, openContainer, toast }) {
   // packing", so someone glancing at their phone between apartments knows what
   // the unit is actually waiting on without opening it.
   const queueLabel = (u) => {
+    if (isPaused(u)) return u.paused.reason || 'Paused'
     if (canReceive(role) && (u.stage === 'loaded' || u.stage === 'picked_up')) {
       const next = receivingChecklist(u).find((s) => !s.done)
       const p = receivingProgress(u)
@@ -208,6 +217,7 @@ export default function MyWork({ openUnit, openContainer, toast }) {
         </div>
       )}
       <Section title="In progress: finish these" units={inProgress} />
+      <Section title="Paused, waiting on somebody else" units={parked} />
       <Section title="Ready to start" units={readyToPack} />
       <Section title="Packed and ready to load" units={readyToLoad} />
       <Section title="Arrived, waiting to be checked in" units={readyToReceiveIn} />
