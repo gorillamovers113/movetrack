@@ -84,12 +84,24 @@ describe('worked time', () => {
 })
 
 describe('who uses the clock', () => {
-  it('is packers and movers only', () => {
-    expect(usesClock('packer')).toBe(true)
-    expect(usesClock('mover')).toBe(true)
-    for (const r of ['viewer', 'warehouse', 'driver', 'admin', '', null, undefined]) {
-      expect(usesClock(r)).toBe(false)
+  /* Everybody who works. This started as packers and movers only, which was
+   * wrong twice: the warehouse manager works a shift like anybody else, and
+   * an admin who lost their clock lost an afternoon's hours with it, because
+   * an open shift had nowhere to be closed from. */
+  it('is everybody who works a shift', () => {
+    for (const r of ['packer', 'mover', 'crew', 'warehouse', 'driver', 'admin']) {
+      expect(usesClock(r)).toBe(true)
     }
+  })
+
+  // The one exception, and deliberate: read-only by definition, held by the
+  // building's people rather than the crew.
+  it('is not the viewer', () => {
+    expect(usesClock('viewer')).toBe(false)
+  })
+
+  it('is nobody without a role', () => {
+    for (const r of ['', null, undefined, 'pending']) expect(usesClock(r)).toBe(false)
   })
 })
 

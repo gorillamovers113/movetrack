@@ -3,7 +3,7 @@ import { onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndP
 import { doc, setDoc, updateDoc, deleteDoc, addDoc, arrayUnion, onSnapshot, collection, query, where, orderBy, serverTimestamp, writeBatch, runTransaction } from 'firebase/firestore'
 import { app, auth, db } from './firebase.js'
 import { captureMedia, uploadFile } from './lib/upload.js'
-import { businessDayKey, canClockInAt, lunchMinutesFor, openSessionFor, usesClock } from './lib/timeclock.js'
+import { businessDayKey, canClockInAt, lunchMinutesFor, openSessionFor, usesClock, tracksUnitTime } from './lib/timeclock.js'
 import { stepRow, pushRows } from './lib/sheetBackup.js'
 import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction, sumCartons, PACKING_STEPS, REQUIRED_STEPS, packingChecklist, wouldCompletePacking, LOADING_STEPS, loadingComplete, normalizeVaultNumber, normalizeCode, vaultsOf, completeVaults, vaultCountMismatch,
   receivedVaultError, receivedVaults, receivingDiff, RECEIVING_STEPS, receivingComplete, readyToReceive } from './lib/mutations.js'
@@ -912,7 +912,7 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
        */
       case 'clockIn': {
         const now = Date.now()
-        if (!usesClock(currentUser.role)) throw new Error('Only packers and movers clock in.')
+        if (!usesClock(currentUser.role)) throw new Error('A viewer keeps no time, so there is nothing to clock.')
         // Enforced here rather than in the rules: the exact local minute needs
         // a timezone, which security rules do not have. See firestore.rules.
         if (!canClockInAt(now)) throw new Error('The clock opens at 8:00am.')
@@ -953,7 +953,7 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
         // overlap cannot double count, which is the only reason the per-unit
         // numbers mean anything.
         const now = Date.now()
-        if (!usesClock(currentUser.role)) return
+        if (!tracksUnitTime(currentUser.role)) return
         const open = openSessionFor(state.unitSessions, currentUser.uid)
         if (open && open.unitId === p.unitId) return
         if (open) {
@@ -980,7 +980,7 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
         // history, and history does not become false because it started early.
         const target = state.users.find((u) => (u.uid || u.id) === p.uid)
         if (!target) throw new Error('Pick a packer or mover.')
-        if (!usesClock(target.role)) throw new Error('Only packers and movers keep time.')
+        if (!usesClock(target.role)) throw new Error(`${target.name} is a viewer and keeps no time. Change their role first if they worked.`)
         if (!p.clockIn || !p.clockOut) throw new Error('Enter a start and a finish time.')
         if (p.clockOut <= p.clockIn) throw new Error('Finish time must be after start time.')
 

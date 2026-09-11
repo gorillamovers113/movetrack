@@ -432,8 +432,10 @@ service cloud.firestore {
     // ---- time clock ----
     // Only packers and movers keep time. Everyone else is either off the clock
     // or is the person reviewing it.
+    // Everybody who works keeps time. Mirrors CLOCK_ROLES in
+    // src/lib/timeclock.js; a viewer is read-only and holds no shift.
     function onTheClock() {
-      return isActive() && (canPack() || canLoad());
+      return isActive() && me().role in ['packer', 'mover', 'crew', 'warehouse', 'driver', 'admin'];
     }
 
     // A crew member may only stamp the moment they are actually in. Rules have
@@ -470,17 +472,25 @@ service cloud.firestore {
       allow read: if isAdmin()
         || (onTheClock() && resource.data.uid == request.auth.uid);
 
-      // Crew open their own day, always as 'self', always open, always stamped
-      // now, so a day cannot be fabricated whole or backdated.
-      // Admin creates back-entries for anyone, at any time, marked 'admin'.
-      allow create: if isAdmin()
-        ? (request.resource.data.source == 'admin'
-           && request.resource.data.enteredBy == request.auth.uid)
-        : (onTheClock()
-           && request.resource.data.uid == request.auth.uid
-           && request.resource.data.source == 'self'
-           && request.resource.data.clockOut == null
-           && stampedNow(request.resource.data.clockIn));
+      /* Two different writes, and an admin can make both.
+       *
+       * A punch is your own day: marked 'self', opened now and left open, so
+       * a day cannot be fabricated whole or backdated. A back-entry is
+       * somebody else's day typed after the fact, marked 'admin', and only an
+       * admin may make one.
+       *
+       * The admin branch used to be back-entry ONLY, which quietly meant an
+       * admin could not clock themselves in at all. Aaron was made an admin
+       * at lunchtime and lost the rest of his day to it.
+       */
+      allow create: if (onTheClock()
+                        && request.resource.data.uid == request.auth.uid
+                        && request.resource.data.source == 'self'
+                        && request.resource.data.clockOut == null
+                        && stampedNow(request.resource.data.clockIn))
+                 || (isAdmin()
+                     && request.resource.data.source == 'admin'
+                     && request.resource.data.enteredBy == request.auth.uid);
 
       // Crew close their own open day and touch nothing else on it. An admin
       // may edit anything, at any age, and is the only role that can.
@@ -542,8 +552,11 @@ service cloud.firestore {
       allow read: if isAdmin()
         || (onTheClock() && resource.data.uid == request.auth.uid);
 
+      // Narrower than the clock: a session means "was inside this apartment",
+      // and the warehouse works a dock. Mirrors UNIT_TIME_ROLES in
+      // src/lib/timeclock.js.
       allow create: if isAdmin()
-        || (onTheClock()
+        || (isActive() && me().role in ['packer', 'mover', 'crew']
             && request.resource.data.uid == request.auth.uid
             && request.resource.data.endedAt == null
             && stampedNow(request.resource.data.startedAt));

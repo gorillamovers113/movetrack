@@ -124,10 +124,18 @@ describe('clocking in and out', () => {
       .rejects.toThrow(/already clocked in/i)
   })
 
-  it('refuses roles that do not keep time', async () => {
-    for (const who of [ADMIN, { uid: 'w', name: 'W', role: 'warehouse' }]) {
-      await expect(run(who, { type: 'clockIn' })).rejects.toThrow(/packers and movers/i)
+  /* Everybody who works keeps time. This used to be packers and movers only,
+   * and an admin who lost their clock lost an afternoon's hours with it. */
+  it('lets everybody who works a shift clock in', async () => {
+    for (const who of [ADMIN, { uid: 'w', name: 'Jeremy Williams', role: 'warehouse' }]) {
+      await expect(run(who, { type: 'clockIn' })).resolves.not.toThrow()
     }
+    expect(await rows('timeEntries')).toHaveLength(2)
+  })
+
+  it('refuses the viewer, who holds no shift', async () => {
+    await expect(run({ uid: 'v', name: 'A Viewer', role: 'viewer' }, { type: 'clockIn' }))
+      .rejects.toThrow(/keeps no time/i)
   })
 
   it('clocking out closes the day and records the lunch decision', async () => {
@@ -217,9 +225,17 @@ describe('admin back-entry and corrections', () => {
       .rejects.toThrow(/after start time/i)
   })
 
-  it('refuses somebody who does not keep time', async () => {
+  it('refuses a back-entry for the viewer, who holds no shift', async () => {
+    const viewer = { uid: 'v', name: 'A Viewer', role: 'viewer', status: 'active' }
+    await expect(run(ADMIN, { type: 'adminAddTimeEntry', p: { uid: viewer.uid, ...day } },
+      makeState({ users: [PACKER, MOVER, ADMIN, viewer] })))
+      .rejects.toThrow(/keeps no time/i)
+  })
+
+  // An admin works a shift like anybody else, so their own day is enterable.
+  it('accepts a back-entry for an admin', async () => {
     await expect(run(ADMIN, { type: 'adminAddTimeEntry', p: { uid: ADMIN.uid, ...day } }))
-      .rejects.toThrow(/packers and movers/i)
+      .resolves.not.toThrow()
   })
 
   // Casey's requirement, end to end: the entry shows the new time and the old
@@ -806,8 +822,13 @@ describe('adding the same person to a day twice', () => {
   it('refuses to double up on somebody who punched in themselves', async () => {
     await run(MOVER, { type: 'clockIn' })
     const punched = await rows('timeEntries')
+    /* Anchored to the punch's own day rather than a fixed date. This used a
+     * hard-coded 10 Sep and passed until the clock rolled past midnight, at
+     * which point it was comparing two different days and asserting nothing. */
+    const start = Date.parse(`${punched[0].day}T16:00:00Z`)
     await expect(
-      run(ADMIN, { type: 'adminAddTimeEntry', p: { uid: MOVER.uid, ...day } }, makeState({ timeEntries: punched })),
+      run(ADMIN, { type: 'adminAddTimeEntry', p: { uid: MOVER.uid, clockIn: start, clockOut: start + 7 * 3600000 } },
+        makeState({ timeEntries: punched })),
     ).rejects.toThrow(/already has a day/i)
   })
 

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { STAGES, stageOf, ROLES } from '../seed.js'
 import { surnameOf, loadingChecklist, loadingProgress, completeVaults, LOADING_STEPS } from '../lib/mutations.js'
+import ClockCard from '../components/ClockCard.jsx'
 import { activeCrew } from '../lib/reports.js'
 import { useStore } from '../store.jsx'
 import { Avatar } from '../ui.jsx'
@@ -272,6 +273,11 @@ export default function Dashboard({ openUnit, toast }) {
 
       <TodayBanner toast={toast} />
 
+      {/* The clock lives on My queue for the crew, but an admin and the
+          warehouse have no My queue, so it has to be reachable here too.
+          Aaron lost an afternoon's hours to exactly that gap: made an admin
+          at lunchtime, his open shift had nowhere to be closed from. */}
+      <ClockCard toast={toast} />
       <OnTheFloor openUnit={openUnit} />
       <LoadingNow openUnit={openUnit} />
 

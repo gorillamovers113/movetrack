@@ -1900,8 +1900,8 @@ describe('timeEntries', () => {
       entry({ clockOut: now() + 1000 })))
   })
 
-  it('a viewer and a warehouse user may not create days at all', async () => {
-    for (const who of [VIEWER, WAREHOUSE]) {
+  it('a viewer may not create a day at all', async () => {
+    for (const who of [VIEWER]) {
       await assertFails(addDoc(collection(dbAs(who), 'timeEntries'), entry({ uid: who })))
     }
   })
@@ -2044,7 +2044,7 @@ describe('unitSessions', () => {
     }))
   })
 
-  it('a warehouse user may not open a session at all', async () => {
+  it('a warehouse user may not open a unit session, because a dock is not an apartment', async () => {
     await assertFails(addDoc(collection(dbAs(WAREHOUSE), 'unitSessions'), sess({ uid: WAREHOUSE })))
   })
 })
@@ -2256,5 +2256,44 @@ describe('the access log', () => {
       await assertFails(getDoc(doc(dbAs(who), 'authEvents', 'e1')))
     }
     await assertFails(setDoc(doc(dbAs(ADMIN), 'authEvents', 'e2'), { type: 'passwordReset', at: 2 }))
+  })
+})
+
+/* Everybody who works keeps time.
+ *
+ * This began as packers and movers only. When Aaron was made an admin for an
+ * afternoon he silently lost his clock, and his shift sat open from 10am
+ * because there was nowhere to close it from. */
+describe('who may clock in', () => {
+  const entry = (uid) => ({
+    uid, userName: `Test ${uid}`, day: '2026-09-11',
+    clockIn: Date.now(), clockOut: null, lunchMinutes: 0, source: 'self',
+  })
+
+  it('everybody who works a shift', async () => {
+    for (const who of [PACKER, MOVER, BOTH, WAREHOUSE, ADMIN]) {
+      await assertSucceeds(setDoc(doc(dbAs(who), 'timeEntries', `in-${who}`), entry(who)))
+    }
+  })
+
+  it('not the viewer, who holds no shift', async () => {
+    await assertFails(setDoc(doc(dbAs(VIEWER), 'timeEntries', 'in-viewer'), entry(VIEWER)))
+  })
+
+  it('not somebody still waiting to be approved', async () => {
+    await assertFails(setDoc(doc(dbAs(PENDING), 'timeEntries', 'in-pending'), entry(PENDING)))
+  })
+
+  it('still nobody else, and still not for somebody else', async () => {
+    await assertFails(setDoc(doc(dbAs(MOVER), 'timeEntries', 'forged'), entry(PACKER)))
+  })
+
+  it('and the warehouse can close its own day', async () => {
+    await seed('timeEntries', 'w1', { ...entry(WAREHOUSE), source: 'self' })
+    await assertSucceeds(
+      updateDoc(doc(dbAs(WAREHOUSE), 'timeEntries', 'w1'), {
+        clockOut: Date.now(), lunchMinutes: 30, workedThroughLunch: false,
+      })
+    )
   })
 })

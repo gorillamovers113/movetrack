@@ -20,12 +20,37 @@ export const EARLIEST_CLOCK_IN_HOUR = 8
 export const LUNCH_MINUTES = 30
 export const LUNCH_THRESHOLD_MS = 5 * 60 * 60 * 1000
 
-// Only these two roles keep time. Everyone else is either off the clock or is
-// the person reviewing it.
-export const CLOCK_ROLES = ['packer', 'mover', 'crew']
+/* Everybody who works keeps time.
+ *
+ * This began as packers and movers only, on the reasoning that everyone else
+ * was either off the clock or the person reviewing it. That was wrong twice
+ * over. The warehouse manager works a shift like anybody else. And when Aaron
+ * was made an admin for an afternoon he silently lost his clock: his shift sat
+ * open from 10am because there was no way for him to close it, and none of his
+ * time was recorded.
+ *
+ * A viewer is the one genuine exception. That role is read-only by
+ * definition, held by the building's own people rather than the crew, and a
+ * clock-in button in front of a client is a confusing thing that does not
+ * belong to them.
+ */
+export const CLOCK_ROLES = ['packer', 'mover', 'crew', 'warehouse', 'driver', 'admin']
 
 export function usesClock(role) {
   return CLOCK_ROLES.indexOf(role) !== -1
+}
+
+/* Who gets time attributed to an individual apartment.
+ *
+ * Narrower than the clock on purpose. Everybody who works keeps a shift, but
+ * a unit session means "was inside this apartment", and the warehouse works a
+ * dock. Letting their hours open unit sessions would land receiving time in
+ * some apartment's loading total, which is worse than not measuring it.
+ */
+export const UNIT_TIME_ROLES = ['packer', 'mover', 'crew']
+
+export function tracksUnitTime(role) {
+  return UNIT_TIME_ROLES.indexOf(role) !== -1
 }
 
 export function businessDayKey(ms) {
