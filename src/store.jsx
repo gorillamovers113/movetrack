@@ -1178,35 +1178,77 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
          * changes, and the move is logged on both units.
          */
         if (currentUser.role !== 'admin') throw new Error('Only an admin can move a photo between units.')
-        const from = state.units.find((u) => u.id === p.fromUnitId)
-        const to = state.units.find((u) => u.id === p.toUnitId)
-        if (!from || !to) throw new Error('Pick a unit to move it to.')
-        if (from.id === to.id) throw new Error('That is the same unit.')
+        const fromLocal = state.units.find((u) => u.id === p.fromUnitId)
+        const toLocal = state.units.find((u) => u.id === p.toUnitId)
+        if (!fromLocal || !toLocal) throw new Error('Pick a unit to move it to.')
+        if (fromLocal.id === toLocal.id) throw new Error('That is the same unit.')
 
-        const item = (from.media || []).find((m) => m && m.id === p.mediaId)
-        if (!item) throw new Error('That photo is no longer on this unit. Refresh and try again.')
-        if ((to.media || []).some((m) => m && m.id === p.mediaId)) throw new Error(`Already on unit ${to.number}.`)
+        /* Both unit documents are read inside the transaction rather than taken
+         * from `state`. The old version built each new media array from the
+         * local snapshot, which made moving several photos in a row a
+         * read-modify-write race: every write was composed from a copy taken
+         * before the previous one landed, so each overwrote the last.
+         *
+         * On 15 Sep Aaron moved 15 photos from 702 to 703 inside one minute and
+         * it happened to survive, but the same sequence a moment quicker loses
+         * all but the final photo, with no error shown. Firestore retries a
+         * transaction when the document changed underneath it, so the arrays
+         * can no longer clobber each other.
+         */
+        const fromRef = doc(db, 'units', fromLocal.id)
+        const toRef = doc(db, 'units', toLocal.id)
 
-        const batch = writeBatch(db)
-        batch.update(doc(db, 'units', from.id), { media: (from.media || []).filter((m) => m && m.id !== p.mediaId) })
-        batch.update(doc(db, 'units', to.id), { media: [...(to.media || []), item] })
+        // The event carrying this photo on the source unit, and the matching
+        // step on the destination if it has one. Found from local state, which
+        // is safe: these are only used to identify WHICH event docs to touch,
+        // and each one's media array is re-read inside the transaction.
+        const owner = state.events.find((e) => e.unitId === fromLocal.id && (e.media || []).some((m) => m && m.id === p.mediaId))
+        const dest = owner && state.events.find((e) => e.unitId === toLocal.id && e.step === owner.step && e.type === owner.type)
 
-        // The activity feed reads each event's own copy of the media, so it
-        // moves too. Otherwise the old unit's timeline keeps showing the other
-        // apartment's photos, which is the symptom somebody actually noticed.
-        const owner = state.events.find((e) => e.unitId === from.id && (e.media || []).some((m) => m && m.id === p.mediaId))
-        if (owner) {
-          batch.update(doc(db, 'events', owner.id), { media: (owner.media || []).filter((m) => m && m.id !== p.mediaId) })
-          const dest = state.events.find((e) => e.unitId === to.id && e.step === owner.step && e.type === owner.type)
-          if (dest) batch.update(doc(db, 'events', dest.id), { media: [...(dest.media || []), item] })
-        }
+        const what = (fromLocal.media || []).find((m) => m && m.id === p.mediaId)?.kind === 'video' ? 'video' : 'photo'
 
-        const what = item.kind === 'video' ? 'video' : 'photo'
-        batch.set(doc(collection(db, 'events')), makeEvent(actor(), 'system',
-          `Moved a ${what} taken by ${item.userName || 'crew'} from unit ${from.number} to unit ${to.number}, where it belongs`,
-          { unitId: to.id }))
+        await runTransaction(db, async (tx) => {
+          const [fromSnap, toSnap] = await Promise.all([tx.get(fromRef), tx.get(toRef)])
+          if (!fromSnap.exists() || !toSnap.exists()) throw new Error('One of those units is gone. Refresh and try again.')
+          const fromData = fromSnap.data()
+          const toData = toSnap.data()
 
-        await batch.commit()
+          const item = (fromData.media || []).find((m) => m && m.id === p.mediaId)
+          if (!item) throw new Error('That photo is no longer on this unit. Refresh and try again.')
+          if ((toData.media || []).some((m) => m && m.id === p.mediaId)) throw new Error(`Already on unit ${toData.number}.`)
+
+          const ownerSnap = owner ? await tx.get(doc(db, 'events', owner.id)) : null
+          const destSnap = dest ? await tx.get(doc(db, 'events', dest.id)) : null
+
+          tx.update(fromRef, { media: (fromData.media || []).filter((m) => m && m.id !== p.mediaId) })
+          tx.update(toRef, { media: [...(toData.media || []), item] })
+
+          if (ownerSnap && ownerSnap.exists()) {
+            tx.update(ownerSnap.ref, { media: (ownerSnap.data().media || []).filter((m) => m && m.id !== p.mediaId) })
+          }
+
+          /* The unit timeline renders photos from the step events, not from the
+           * unit document, so a photo that leaves the source timeline and never
+           * joins one on the destination is invisible everywhere except the
+           * admin filing card. That is exactly what happened to 703: it had
+           * never been worked, so it had no step event to receive anything, and
+           * 15 photos sat on its record showing nowhere and looking deleted.
+           *
+           * So when the destination has no matching step, the photo now gets
+           * its own event there instead of being dropped.
+           */
+          if (destSnap && destSnap.exists()) {
+            tx.update(destSnap.ref, { media: [...(destSnap.data().media || []), item] })
+          } else {
+            tx.set(doc(collection(db, 'events')), makeEvent(actor(), owner ? owner.type : 'step',
+              `Unit ${toData.number} · ${what} moved here from unit ${fromData.number}`,
+              { unitId: toRef.id, media: [item], ...(owner && owner.step ? { step: owner.step } : {}) }))
+          }
+
+          tx.set(doc(collection(db, 'events')), makeEvent(actor(), 'system',
+            `Moved a ${what} taken by ${item.userName || 'crew'} from unit ${fromData.number} to unit ${toData.number}, where it belongs`,
+            { unitId: toRef.id }))
+        })
         return
       }
       case 'logEmpties': {
