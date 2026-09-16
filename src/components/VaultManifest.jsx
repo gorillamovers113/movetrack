@@ -67,7 +67,7 @@ export default function VaultManifest({ rows, stats, project, statusLabel, gener
       <h2 className="manifest-h2">Every vault</h2>
       <table className="manifest-tbl">
         <thead>
-          <tr><th>Vault</th><th>Unit</th><th>Customer</th><th>Of</th><th>Status</th><th>Photos</th><th>Bay</th></tr>
+          <tr><th>Vault</th><th>Unit</th><th>Customer</th><th>Of</th><th>Status</th><th>Photos</th></tr>
         </thead>
         <tbody>
           {rows.map((r) => (
@@ -78,7 +78,6 @@ export default function VaultManifest({ rows, stats, project, statusLabel, gener
               <td>{r.on.map((x) => (x.pos ? `${x.pos.nth} of ${x.pos.of}` : '')).filter(Boolean).join(', ') || '-'}</td>
               <td>{statusLabel(r.status)}</td>
               <td className={r.on.length && !r.complete ? 'mt-gap' : ''}>{vaultPhotoLabel(r)}</td>
-              <td>{r.bay || '-'}</td>
             </tr>
           ))}
         </tbody>

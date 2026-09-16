@@ -32,7 +32,6 @@ export const VAULT_COLUMNS = [
   ['Of', positionLabel],
   ['Status', (r, statusLabel) => statusLabel(r.status)],
   ['Photos', vaultPhotoLabel],
-  ['Bay', (r) => r.bay || ''],
 ]
 
 export function vaultSheetCSV(rows, statusLabel) {

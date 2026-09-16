@@ -59,11 +59,11 @@ describe('sorting the vault sheet by its headings', () => {
   })
 
   it('keeps the empty vault at the bottom whichever way a column runs', () => {
-    // Including bay, which is blank on every vault we have. An earlier version
-    // keyed this off the sort value being blank, so a column blank everywhere
-    // silently lost the rule.
+    // An earlier version keyed this off the sort value being blank rather
+    // than off the vault being empty, so a column blank on every row silently
+    // lost the rule.
     for (const dir of ['asc', 'desc']) {
-      for (const key of ['customer', 'unit', 'bay', 'of', 'photos']) {
+      for (const key of ['customer', 'unit', 'of', 'photos']) {
         expect(numbers(sortVaultSheet(rows(), { key, dir })).at(-1)).toBe('900')
       }
     }
@@ -122,14 +122,14 @@ describe('sending the sheet to BigBox', () => {
 
   it('writes a CSV with a header and one line per vault', () => {
     const lines = vaultSheetCSV(sorted(), label).split('\n')
-    expect(lines[0]).toBe('"Vault","Unit","Customer","Of","Status","Photos","Bay"')
+    expect(lines[0]).toBe('"Vault","Unit","Customer","Of","Status","Photos"')
     expect(lines).toHaveLength(6)
-    expect(lines[1]).toBe('"8919","902","Qingbo Niu","3 of 3","at_warehouse","closed only",""')
+    expect(lines[1]).toBe('"8919","902","Qingbo Niu","3 of 3","at_warehouse","closed only"')
   })
 
   it('escapes a quote in a tenant name instead of breaking the row', () => {
     // Unit 802 really is recorded as Jerilyn E. "HEATHER" Millard.
-    const quoted = vaultSheetCSV([{ id: 'x', number: '1', status: 'full', bay: null, on: [{ unit: { number: '802', tenant: 'A "NICK" B' }, pos: null }], shots: { open: 0, closed: 0, of: 0 }, complete: false }], label)
+    const quoted = vaultSheetCSV([{ id: 'x', number: '1', status: 'full', on: [{ unit: { number: '802', tenant: 'A "NICK" B' }, pos: null }], shots: { open: 0, closed: 0, of: 0 }, complete: false }], label)
     expect(quoted).toContain('"A ""NICK"" B"')
   })
 

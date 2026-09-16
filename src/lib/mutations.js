@@ -850,7 +850,6 @@ export function vaultSheetRows(containers, units) {
         id: c.id,
         number: String(c.number || ''),
         status: c.status,
-        bay: c.bay || null,
         flagged: !!(c.flag && c.flag.open),
         on,
         shots: {
@@ -880,7 +879,7 @@ export const CONTAINER_LIFECYCLE = [
   'return_filling', 'return_full', 'return_transit', 'back_on_site', 'returned_empty',
 ]
 
-export const VAULT_SORTS = ['number', 'unit', 'customer', 'of', 'status', 'photos', 'bay']
+export const VAULT_SORTS = ['number', 'unit', 'customer', 'of', 'status', 'photos']
 export const DEFAULT_VAULT_SORT = { key: 'number', dir: 'desc' }
 
 export function nextVaultSort(current, key) {
@@ -902,7 +901,6 @@ function vaultSortValue(row, key) {
     // Ranked so that ascending puts the gaps at the top, which is the only
     // reason anybody sorts by this column.
     case 'photos': return !first ? 3 : row.shots.of === 0 ? 0 : row.complete ? 2 : 1
-    case 'bay': return String(row.bay || '')
     default: return String(row.number || '')
   }
 }
@@ -913,9 +911,10 @@ function vaultSortValue(row, key) {
  * to the bottom instead of heading a list of loaded ones.
  *
  * The first version keyed that off the sort value being blank, which is not
- * the same question: a bay column is blank for every vault we have, so it made
- * the rule vanish, and a unit with no tenant recorded would have been pushed
- * down as if it were empty. A vault is empty when nothing is in it.
+ * the same question. A column blank on every row made the rule vanish
+ * entirely, and a unit with no tenant recorded would have been pushed to the
+ * bottom as if it were empty. A vault is empty when nothing is in it, so that
+ * is what gets asked.
  */
 const SORTS_EMPTIES_INLINE = new Set(['number', 'status'])
 
