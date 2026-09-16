@@ -202,6 +202,9 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
             {stats.spread > 0 && (
               <span><strong>{stats.spread}</strong> across more than one vault</span>
             )}
+            {stats.perUnit != null && (
+              <span><strong>{stats.perUnit}</strong> vaults per unit on average</span>
+            )}
           </div>
         </div>
         <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>

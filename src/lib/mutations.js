@@ -781,6 +781,16 @@ export function readyToReceive(unit) {
  * counted three times. `spread` is how many apartments needed more than one
  * vault, which is the number that explains why vaults in use can exceed
  * units loaded.
+ *
+ * `perUnit` is the average number of vaults one apartment takes, which is what
+ * turns this board into a planning number: it is how many empties to put on
+ * the truck for tomorrow's floor. It divides the SUM of the per-apartment
+ * counts by the apartments, not vaults-in-use by apartments, because a vault
+ * shared between two apartments is genuinely one vault for each of them and
+ * dividing the raw total would quietly under-count both. Empties are excluded
+ * either way: nobody's goods are in them, so they are not part of anybody's
+ * average. It is null when nothing is loaded, because an average of no
+ * apartments is not zero, it is nothing.
  */
 export function vaultBoardStats(containers) {
   const perUnit = new Map()
@@ -789,12 +799,15 @@ export function vaultBoardStats(containers) {
   }
   const total = (containers || []).length
   const empty = (containers || []).filter((c) => (c.unitIds || []).length === 0).length
+  const counts = [...perUnit.values()]
+  const assigned = counts.reduce((n, x) => n + x, 0)
   return {
     vaults: total,
     empty,
     inUse: total - empty,
     units: perUnit.size,
-    spread: [...perUnit.values()].filter((n) => n > 1).length,
+    spread: counts.filter((n) => n > 1).length,
+    perUnit: counts.length ? Math.round((assigned / counts.length) * 10) / 10 : null,
   }
 }
 
