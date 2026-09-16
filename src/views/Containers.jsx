@@ -41,7 +41,7 @@ const STATUS_ORDER = CONTAINER_LIFECYCLE
 // Every column the sheet sorts by, in the order they are shown.
 const SHEET_COLUMNS = [
   ['number', 'Vault'], ['unit', 'Unit'], ['customer', 'Customer'], ['of', 'Of'],
-  ['status', 'Status'], ['photos', 'Photos'], ['bay', 'Bay'],
+  ['status', 'Status'], ['photos', 'Photos'],
 ]
 
 export default function Containers({ openUnit, focusId, clearFocus, toast }) {
@@ -299,7 +299,6 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
                     <td className={r.on.length && !r.complete ? 'vault-sheet-gap' : 'muted'}>
                       {r.complete && '✓ '}{vaultPhotoLabel(r)}
                     </td>
-                    <td className="muted">{r.bay || '-'}</td>
                   </tr>
                 ))}
               </tbody>
