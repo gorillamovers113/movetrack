@@ -8,6 +8,7 @@ import {
   CARTON_TYPES, sumCartons, cartonsFromForm, cartonSummary,
   SUPPLY_TYPES, sumSupplies, suppliesFromForm, supplySummary,
   PACKING_STEPS, REQUIRED_STEPS, packingChecklist, packingProgress, nextPackingStep, packingComplete, wouldCompletePacking,
+  normalizeCode, vaultNumberError,
 } from '../mutations.js'
 
 describe('boxMismatch', () => {
@@ -718,5 +719,40 @@ describe('inventory ranges starting at zero', () => {
     const units = [{ id: 'a', stickerColor: 'Green', inventoryFrom: 0, inventoryTo: 23 }]
     expect(overlappingUnits(units, { unitId: 'b', stickerColor: 'Green', from: '0', to: '5' })).toHaveLength(1)
     expect(overlappingUnits(units, { unitId: 'b', stickerColor: 'Green', from: '24', to: '40' })).toHaveLength(0)
+  })
+})
+
+describe('normalizeCode strips punctuation', () => {
+  // Unit 802, 2026-09-15: a mover typed "7175," with a trailing comma, the
+  // guard did not recognise it as the "7175" he typed minutes later, and the
+  // app created a second vault and a second container for one real vault.
+  it('treats a trailing comma as the same code', () => {
+    expect(normalizeCode('7175,')).toBe('7175')
+    expect(normalizeCode('7175,')).toBe(normalizeCode('7175'))
+  })
+
+  it('ignores stray spaces and full stops', () => {
+    expect(normalizeCode(' 71 75 ')).toBe('7175')
+    expect(normalizeCode('7175.')).toBe('7175')
+  })
+
+  // BigBox vaults really are numbered "BB-1007". The hyphen is part of the
+  // number painted on the vault, and this value is displayed as well as
+  // compared, so it has to survive.
+  it('keeps hyphens, which are part of a real vault number', () => {
+    expect(normalizeCode('bb-1007')).toBe('BB-1007')
+    expect(normalizeCode(' BB-1007, ')).toBe('BB-1007')
+  })
+
+  it('still upper-cases and survives empty input', () => {
+    expect(normalizeCode('a12')).toBe('A12')
+    expect(normalizeCode(null)).toBe('')
+    expect(normalizeCode(undefined)).toBe('')
+  })
+
+  it('refuses a vault already logged on the unit even with a typo', () => {
+    const unit = { vaults: [{ number: '7175' }] }
+    expect(vaultNumberError('7175,', unit)).toMatch(/already logged/)
+    expect(vaultNumberError('4921', unit)).toBeNull()
   })
 })

@@ -521,8 +521,24 @@ export function vaultTouchedAt(vault) {
 // A vault number is painted on the side of a physical container, so it is
 // matched the way a person reads it: case and surrounding space are not part
 // of the identity. "bb-1007 " and "BB-1007" are the same vault.
+/* Codes are compared, not parsed: a vault number, a unit number, a sticker
+ * colour. Punctuation in them is always a typo, never meaning.
+ *
+ * On 2026-09-15 a mover typed "7175," with a trailing comma on unit 802.
+ * Trimming and upper-casing left the comma in place, so it did not match the
+ * "7175" he typed three minutes later: the duplicate guard never fired and
+ * the app created a second vault AND a second container for one physical
+ * vault.
+ *
+ * Hyphens are KEPT. BigBox vaults really are numbered "BB-1007", and this
+ * value is displayed as well as compared, so stripping the hyphen would show
+ * the crew a number that is not the one painted on the vault. Stripping only
+ * the noise (spaces, commas, full stops and the like) fixes the typo without
+ * touching a real number. The first version of this dropped hyphens too and
+ * four existing tests caught it.
+ */
 export function normalizeCode(n) {
-  return String(n ?? '').trim().toUpperCase()
+  return String(n ?? '').trim().toUpperCase().replace(/[^A-Z0-9-]/g, '')
 }
 
 export const normalizeVaultNumber = normalizeCode
