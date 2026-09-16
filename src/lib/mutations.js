@@ -521,8 +521,24 @@ export function vaultTouchedAt(vault) {
 // A vault number is painted on the side of a physical container, so it is
 // matched the way a person reads it: case and surrounding space are not part
 // of the identity. "bb-1007 " and "BB-1007" are the same vault.
+/* Codes are compared, not parsed: a vault number, a unit number, a sticker
+ * colour. Punctuation in them is always a typo, never meaning.
+ *
+ * On 2026-09-15 a mover typed "7175," with a trailing comma on unit 802.
+ * Trimming and upper-casing left the comma in place, so it did not match the
+ * "7175" he typed three minutes later: the duplicate guard never fired and
+ * the app created a second vault AND a second container for one physical
+ * vault.
+ *
+ * Hyphens are KEPT. BigBox vaults really are numbered "BB-1007", and this
+ * value is displayed as well as compared, so stripping the hyphen would show
+ * the crew a number that is not the one painted on the vault. Stripping only
+ * the noise (spaces, commas, full stops and the like) fixes the typo without
+ * touching a real number. The first version of this dropped hyphens too and
+ * four existing tests caught it.
+ */
 export function normalizeCode(n) {
-  return String(n ?? '').trim().toUpperCase()
+  return String(n ?? '').trim().toUpperCase().replace(/[^A-Z0-9-]/g, '')
 }
 
 export const normalizeVaultNumber = normalizeCode
@@ -758,6 +774,83 @@ export function readyToReceive(unit) {
  * Empty vaults have no tenant to sort by and go to the end, in number order,
  * where they read as a pool of spares rather than gaps in the list.
  */
+/* What the vault board adds up to.
+ *
+ * `units` is distinct apartments with goods in a vault, NOT the sum of the
+ * per-vault counts. Unit 906 fills three vaults on its own and must not be
+ * counted three times. `spread` is how many apartments needed more than one
+ * vault, which is the number that explains why vaults in use can exceed
+ * units loaded.
+ */
+export function vaultBoardStats(containers) {
+  const perUnit = new Map()
+  for (const c of containers || []) {
+    for (const id of c.unitIds || []) perUnit.set(id, (perUnit.get(id) || 0) + 1)
+  }
+  const total = (containers || []).length
+  const empty = (containers || []).filter((c) => (c.unitIds || []).length === 0).length
+  return {
+    vaults: total,
+    empty,
+    inUse: total - empty,
+    units: perUnit.size,
+    spread: [...perUnit.values()].filter((n) => n > 1).length,
+  }
+}
+
+/* Which of a unit's vaults this one is, as "2 of 3", or null when the unit
+ * fits in a single vault. Every vault card used to read "1 unit", which was
+ * true of nearly all of them and never showed that an apartment was split.
+ */
+export function vaultPositionInUnit(unit, containerId) {
+  const ids = (unit && unit.containerIds) || []
+  if (ids.length < 2) return null
+  const nth = ids.indexOf(containerId) + 1
+  return nth > 0 ? { nth, of: ids.length } : null
+}
+
+/* The vault board as a sheet, one row per vault.
+ *
+ * BigBox bill from a warehouse list that runs one line per vault, highest
+ * number first, with the customer's surname beside it. Checking our custody
+ * record against their billing record is a line-by-line job, and it only works
+ * if the two lists run in the same direction. Theirs is the one we cannot
+ * change, so ours matches it: numeric descending, vault number first, customer
+ * second.
+ *
+ * `logged` is the vault's record on the unit, which is a different thing from
+ * the container existing. A container with no record is the gap worth seeing:
+ * goods went in and nobody wrote it down.
+ */
+export function vaultSheetRows(containers, units) {
+  const byId = new Map((units || []).filter(Boolean).map((u) => [u.id, u]))
+  return (containers || [])
+    .filter(Boolean)
+    .map((c) => {
+      const on = (c.unitIds || []).map((id) => byId.get(id)).filter(Boolean).map((u) => ({
+        unit: u,
+        pos: vaultPositionInUnit(u, c.id),
+        vault: vaultsOf(u).find((v) => normalizeVaultNumber(v.number) === normalizeVaultNumber(c.number)) || null,
+      }))
+      const logged = on.filter((r) => r.vault)
+      return {
+        id: c.id,
+        number: String(c.number || ''),
+        status: c.status,
+        bay: c.bay || null,
+        flagged: !!(c.flag && c.flag.open),
+        on,
+        shots: {
+          open: logged.filter((r) => r.vault.open && r.vault.open.url).length,
+          closed: logged.filter((r) => r.vault.closed && r.vault.closed.url).length,
+          of: logged.length,
+        },
+        complete: logged.length > 0 && logged.every((r) => vaultComplete(r.vault)),
+      }
+    })
+    .sort((a, b) => b.number.localeCompare(a.number, undefined, { numeric: true }))
+}
+
 export function containerSortKey(container, units) {
   const on = ((container && container.unitIds) || [])
     .map((id) => (units || []).find((u) => u && u.id === id))

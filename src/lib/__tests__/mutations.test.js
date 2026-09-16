@@ -8,6 +8,7 @@ import {
   CARTON_TYPES, sumCartons, cartonsFromForm, cartonSummary,
   SUPPLY_TYPES, sumSupplies, suppliesFromForm, supplySummary,
   PACKING_STEPS, REQUIRED_STEPS, packingChecklist, packingProgress, nextPackingStep, packingComplete, wouldCompletePacking,
+  normalizeCode, vaultNumberError, vaultBoardStats, vaultPositionInUnit, vaultSheetRows,
 } from '../mutations.js'
 
 describe('boxMismatch', () => {
@@ -718,5 +719,152 @@ describe('inventory ranges starting at zero', () => {
     const units = [{ id: 'a', stickerColor: 'Green', inventoryFrom: 0, inventoryTo: 23 }]
     expect(overlappingUnits(units, { unitId: 'b', stickerColor: 'Green', from: '0', to: '5' })).toHaveLength(1)
     expect(overlappingUnits(units, { unitId: 'b', stickerColor: 'Green', from: '24', to: '40' })).toHaveLength(0)
+  })
+})
+
+describe('normalizeCode strips punctuation', () => {
+  // Unit 802, 2026-09-15: a mover typed "7175," with a trailing comma, the
+  // guard did not recognise it as the "7175" he typed minutes later, and the
+  // app created a second vault and a second container for one real vault.
+  it('treats a trailing comma as the same code', () => {
+    expect(normalizeCode('7175,')).toBe('7175')
+    expect(normalizeCode('7175,')).toBe(normalizeCode('7175'))
+  })
+
+  it('ignores stray spaces and full stops', () => {
+    expect(normalizeCode(' 71 75 ')).toBe('7175')
+    expect(normalizeCode('7175.')).toBe('7175')
+  })
+
+  // BigBox vaults really are numbered "BB-1007". The hyphen is part of the
+  // number painted on the vault, and this value is displayed as well as
+  // compared, so it has to survive.
+  it('keeps hyphens, which are part of a real vault number', () => {
+    expect(normalizeCode('bb-1007')).toBe('BB-1007')
+    expect(normalizeCode(' BB-1007, ')).toBe('BB-1007')
+  })
+
+  it('still upper-cases and survives empty input', () => {
+    expect(normalizeCode('a12')).toBe('A12')
+    expect(normalizeCode(null)).toBe('')
+    expect(normalizeCode(undefined)).toBe('')
+  })
+
+  it('refuses a vault already logged on the unit even with a typo', () => {
+    const unit = { vaults: [{ number: '7175' }] }
+    expect(vaultNumberError('7175,', unit)).toMatch(/already logged/)
+    expect(vaultNumberError('4921', unit)).toBeNull()
+  })
+})
+
+describe('the vault board totals', () => {
+  // Unit 906 (Maria Ochoa) really does fill three vaults on its own. Every
+  // one of its cards read "1 unit", so the board never showed the split and
+  // the totals would have counted her apartment three times.
+  const containers = [
+    { id: 'c1', number: '7371', unitIds: ['u906'] },
+    { id: 'c2', number: '4735', unitIds: ['u906'] },
+    { id: 'c3', number: '8733', unitIds: ['u906'] },
+    { id: 'c4', number: '7175', unitIds: ['u802'] },
+    { id: 'c5', number: '9000', unitIds: [] },
+  ]
+
+  it('counts an apartment once however many vaults it fills', () => {
+    expect(vaultBoardStats(containers).units).toBe(2)
+  })
+
+  it('separates vaults in use from empties', () => {
+    const s = vaultBoardStats(containers)
+    expect(s.vaults).toBe(5)
+    expect(s.inUse).toBe(4)
+    expect(s.empty).toBe(1)
+  })
+
+  it('says how many apartments run across more than one vault', () => {
+    expect(vaultBoardStats(containers).spread).toBe(1)
+  })
+
+  it('survives an empty board and missing unitIds', () => {
+    expect(vaultBoardStats([])).toMatchObject({ vaults: 0, units: 0, inUse: 0, empty: 0, spread: 0 })
+    expect(vaultBoardStats(undefined).vaults).toBe(0)
+    expect(vaultBoardStats([{ id: 'x' }]).empty).toBe(1)
+  })
+
+  describe('as a sheet, for checking against the BigBox list', () => {
+    const shot = (url) => ({ url, kind: 'photo' })
+    const units = [
+      // 902 Qingbo Niu: three vaults, and the two the crew never logged went
+      // in afterwards with a door-closed photo only. There is no open shot and
+      // there never can be, both are sealed in the warehouse.
+      { id: 'u902', number: '902', tenant: 'Qingbo Niu', containerIds: ['c8038', 'c5960', 'c8919'],
+        vaults: [
+          { number: '8038', containerId: 'c8038', open: shot('o'), closed: shot('c') },
+          { number: '5960', containerId: 'c5960', closed: shot('c') },
+          { number: '8919', containerId: 'c8919', closed: shot('c') },
+        ] },
+      // 906 still stores its vaults the legacy way, and the sheet has to read
+      // those too or half the board looks unlogged.
+      { id: 'u906', number: '906', tenant: 'Maria Ochoa', containerIds: ['c7371'],
+        boxes: [{ number: '7371', containerId: 'c7371', openUrl: 'o', closedUrl: 'c' }] },
+    ]
+    const containers = [
+      { id: 'c8038', number: '8038', status: 'full', unitIds: ['u902'] },
+      { id: 'c5960', number: '5960', status: 'full', unitIds: ['u902'] },
+      { id: 'c8919', number: '8919', status: 'full', unitIds: ['u902'] },
+      { id: 'c7371', number: '7371', status: 'full', unitIds: ['u906'] },
+      { id: 'c900', number: '900', status: 'empty', unitIds: [] },
+    ]
+    const rows = () => vaultSheetRows(containers, units)
+
+    it('runs highest number first, the way their sheet does', () => {
+      // Plain string sort would put "900" above "8919". Both lists get read
+      // line by line against each other, so the order has to be the same one.
+      expect(rows().map((r) => r.number)).toEqual(['8919', '8038', '7371', '5960', '900'])
+    })
+
+    it('names the customer and says which of their vaults it is', () => {
+      const r = rows().find((x) => x.number === '5960')
+      expect(r.on[0].unit.tenant).toBe('Qingbo Niu')
+      expect(r.on[0].pos).toEqual({ nth: 2, of: 3 })
+    })
+
+    it('reports a vault that has only the closed shot as incomplete', () => {
+      const r = rows().find((x) => x.number === '8919')
+      expect(r.complete).toBe(false)
+      expect(r.shots).toMatchObject({ open: 0, closed: 1, of: 1 })
+    })
+
+    it('counts a legacy boxes record as a real record', () => {
+      expect(rows().find((x) => x.number === '7371').complete).toBe(true)
+    })
+
+    it('shows an empty vault as empty rather than as a missing record', () => {
+      const r = rows().find((x) => x.number === '900')
+      expect(r.on).toEqual([])
+      expect(r.complete).toBe(false)
+      expect(r.shots.of).toBe(0)
+    })
+
+    it('flags a container that is on a unit with nothing logged against it', () => {
+      const orphan = vaultSheetRows([{ id: 'c1', number: '1', status: 'full', unitIds: ['u906'] }], units)[0]
+      expect(orphan.on).toHaveLength(1)
+      expect(orphan.shots.of).toBe(0)
+      expect(orphan.complete).toBe(false)
+    })
+
+    it('survives an empty board and missing units', () => {
+      expect(vaultSheetRows([], [])).toEqual([])
+      expect(vaultSheetRows(undefined, undefined)).toEqual([])
+      expect(vaultSheetRows([{ id: 'x', number: '5', status: 'empty' }], null)[0].on).toEqual([])
+    })
+  })
+
+  it('places a vault within its unit, and stays quiet for a single-vault unit', () => {
+    const split = { containerIds: ['c1', 'c2', 'c3'] }
+    expect(vaultPositionInUnit(split, 'c2')).toEqual({ nth: 2, of: 3 })
+    expect(vaultPositionInUnit(split, 'c3')).toEqual({ nth: 3, of: 3 })
+    expect(vaultPositionInUnit({ containerIds: ['c4'] }, 'c4')).toBeNull()
+    expect(vaultPositionInUnit({}, 'c4')).toBeNull()
+    expect(vaultPositionInUnit(split, 'nope')).toBeNull()
   })
 })

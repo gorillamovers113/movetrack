@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from 'react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, cleanup } from '@testing-library/react'
+import { render, cleanup, fireEvent, within } from '@testing-library/react'
 
 /* Every page, rendered as every role.
  *
@@ -131,6 +131,57 @@ describe('every page renders for every role', () => {
       })
     }
   }
+})
+
+/* The sheet view of the vault board.
+ *
+ * It exists to be read line by line against BigBox's warehouse list, which is
+ * the check that caught three misspelled customer names on their side. The
+ * smoke test above never reaches it, because the board opens on cards.
+ */
+describe('the vault sheet', () => {
+  const openSheet = () => {
+    const r = render(<Containers openUnit={noop} toast={noop} clearFocus={noop} />)
+    fireEvent.click(r.getByRole('button', { name: 'Sheet' }))
+    return r
+  }
+
+  beforeEach(() => { currentUser = users[0]; window.localStorage.clear() })
+
+  it('renders for every role without throwing', () => {
+    for (const role of ROLES) {
+      currentUser = users.find((u) => u.role === role)
+      expect(() => openSheet()).not.toThrow()
+      cleanup()
+    }
+  })
+
+  it('lists every vault, highest number first', () => {
+    const rows = openSheet().getAllByRole('row').slice(1)
+    expect(rows.map((r) => within(r).getAllByRole('cell')[0].textContent.trim()))
+      .toEqual(['9000', '8038', '7101'])
+  })
+
+  it('names the customer beside the vault, the way their sheet does', () => {
+    const row = openSheet().getAllByRole('row').find((r) => r.textContent.startsWith('8038'))
+    expect(row.textContent).toContain('902')
+    expect(row.textContent).toContain('A Tenant')
+  })
+
+  it('remembers the choice, because nobody wants both views', () => {
+    openSheet()
+    expect(window.localStorage.getItem('movetrack.vaults.view')).toBe('sheet')
+    cleanup()
+    expect(render(<Containers openUnit={noop} toast={noop} clearFocus={noop} />)
+      .getAllByRole('row').length).toBeGreaterThan(1)
+  })
+
+  it('goes back to cards, and there is no table then', () => {
+    const r = openSheet()
+    fireEvent.click(r.getByRole('button', { name: 'Cards' }))
+    expect(r.queryAllByRole('row')).toEqual([])
+    expect(window.localStorage.getItem('movetrack.vaults.view')).toBe('cards')
+  })
 })
 
 describe('a unit opens for every role, at every stage', () => {

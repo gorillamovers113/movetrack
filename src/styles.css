@@ -331,6 +331,27 @@ textarea.input { min-height: 0; }
 .cont-card:active { transform: translateY(0) scale(0.98); box-shadow: var(--shadow-sm); }
 .cont-num { font-family: var(--display); font-weight: 700; font-size: 17px; letter-spacing: -0.2px; }
 .cont-units { font-size: 12.5px; color: var(--ink-2); margin-top: 6px; line-height: 1.6; }
+/* Vault board totals. Sits under the page title, wraps on a phone rather
+   than scrolling sideways, and leans on the same muted ink as the rest of
+   the secondary text so the numbers read as context, not as a headline. */
+.vault-stats { font-size: 12.5px; color: var(--ink-2); line-height: 1.6; }
+.vault-stats strong { color: var(--ink); font-weight: 700; }
+
+/* Cards / Sheet switch on the vault board. 44px tall so it is a real target
+   on a phone, which is where most of this app is used. */
+.seg { display: inline-flex; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 3px; gap: 3px; }
+.seg button {
+  appearance: none; border: 0; background: transparent; cursor: pointer;
+  font: inherit; font-size: 13px; font-weight: 600; color: var(--ink-3);
+  padding: 0 16px; min-height: 38px; border-radius: 7px;
+}
+.seg button.on { background: var(--panel); color: var(--ink); box-shadow: var(--shadow-sm); }
+@media (hover: hover) and (pointer: fine) { .seg button:not(.on):hover { color: var(--ink-2); } }
+
+/* The vault number is what both sheets are read by, so it leads and it is
+   tabular: BigBox's list and ours have to line up digit for digit. */
+.vault-sheet-num { font-family: var(--display); font-weight: 700; font-size: 15px; font-variant-numeric: tabular-nums; }
+.vault-sheet-gap { color: var(--brand-ink); font-weight: 600; }
 
 /* ---------- Return phase ---------- */
 .return-banner {
