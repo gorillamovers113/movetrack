@@ -31,6 +31,22 @@
         "es2024": true,
         "node": true
       }
+    },
+    // Never runs in a browser. The maintenance scripts, the Cloud Functions and
+    // the build config are Node, so `process` and friends are real there.
+    // Without this every one of them reports no-undef on `process`, lint exits 1
+    // on a clean checkout, and the release gate stops gating anything.
+    {
+      "files": [
+        "scripts/**",
+        "functions/**",
+        "*.config.js",
+        "*.config.mjs"
+      ],
+      "env": {
+        "es2024": true,
+        "node": true
+      }
     }
   ]
 }
