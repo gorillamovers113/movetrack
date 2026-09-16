@@ -214,7 +214,7 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
           </div>
           {view === 'sheet' && totalCount > 0 && (
             <div className="export-wrap">
-              <button className="btn btn-dark" aria-expanded={exporting} onClick={() => setExporting((x) => !x)}>Send to BigBox ▾</button>
+              <button className="btn btn-dark" aria-expanded={exporting} onClick={() => setExporting((x) => !x)}>Export ▾</button>
               {exporting && (
                 <>
                   {/* Catches the next click anywhere so the menu closes the way

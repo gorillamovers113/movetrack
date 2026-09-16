@@ -50,7 +50,7 @@ describe('submitAction', () => {
     // offline budget, since a macrotask timer only fires after the
     // microtask queue (where this rejection's handler lives) drains.
     vi.stubGlobal('navigator', { onLine: false })
-    const err = new Error('That BigBox is no longer accepting items. Refresh and pick another container.')
+    const err = new Error('That vault is no longer accepting items. Refresh and pick another one.')
     // Chained in one expression on purpose: the already-rejected promise
     // resolves through microtasks alone (no fake-timer advance needed,
     // since it wins the race before the 0ms budget timer ever fires), so

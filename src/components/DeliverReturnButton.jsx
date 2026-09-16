@@ -67,7 +67,7 @@ export default function DeliverReturnButton({ toast }) {
       const media = photoUrl ? [{ id: `deliver-${Date.now()}`, kind: 'photo', url: photoUrl, label: `Container ${match.number} back on site` }] : []
       const status = await submitWrite(dispatch({ type: 'deliverReturn', p: { containerId: match.id, media } }))
       setOpen(false)
-      toast?.(status === 'queued' ? QUEUED_MESSAGE : `Verified, BigBox ${match.number} is back on site ✓`)
+      toast?.(status === 'queued' ? QUEUED_MESSAGE : `Verified, vault ${match.number} is back on site ✓`)
     } catch (err) {
       toast?.(err.message || "Couldn't save that. Check your signal and try again.")
     } finally {
@@ -96,9 +96,9 @@ export default function DeliverReturnButton({ toast }) {
 
   return (
     <>
-      <button className="btn btn-primary btn-lg" onClick={openModal}>📥 Receive returning BigBox</button>
+      <button className="btn btn-primary btn-lg" onClick={openModal}>📥 Receive returning vault</button>
       {open && (
-        <Modal title="Receive returning BigBox" sub="Type the number off the physical container, cold. Numbers are never shown here on purpose." onClose={close}>
+        <Modal title="Receive returning vault" sub="Type the number off the physical container, cold. Numbers are never shown here on purpose." onClose={close}>
           <div className="field">
             <label>Container number</label>
             <input
@@ -110,7 +110,7 @@ export default function DeliverReturnButton({ toast }) {
 
           {mismatch && (
             <div className="flagbox" style={{ marginBottom: 14 }}>
-              <b>No match.</b> No returning BigBox with that number is expected. Double-check the number on the container.
+              <b>No match.</b> No returning vault with that number is expected. Double-check the number on the container.
               <div className="row" style={{ marginTop: 10, gap: 8 }}>
                 <button className="btn btn-ghost btn-sm" onClick={() => setMismatch(false)}>Re-type</button>
                 <button className="btn btn-danger btn-sm" disabled={busy} onClick={reportDiscrepancy}>{busy ? 'Reporting…' : 'Report discrepancy'}</button>

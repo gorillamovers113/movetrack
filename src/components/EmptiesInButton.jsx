@@ -42,7 +42,7 @@ export default function EmptiesInButton({ toast }) {
     <>
       <button className="btn btn-dark btn-lg" onClick={openModal}>＋ Empties in</button>
       {open && (
-        <Modal title="Log empties delivered" sub="BigBox dropped these off on site, enter each container number, one per row." onClose={close}>
+        <Modal title="Log empties delivered" sub="The driver dropped these off on site, enter each container number, one per row." onClose={close}>
           <div className="field">
             <label>Container numbers</label>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
