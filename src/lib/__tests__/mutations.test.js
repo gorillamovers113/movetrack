@@ -8,7 +8,7 @@ import {
   CARTON_TYPES, sumCartons, cartonsFromForm, cartonSummary,
   SUPPLY_TYPES, sumSupplies, suppliesFromForm, supplySummary,
   PACKING_STEPS, REQUIRED_STEPS, packingChecklist, packingProgress, nextPackingStep, packingComplete, wouldCompletePacking,
-  normalizeCode, vaultNumberError, vaultBoardStats, vaultPositionInUnit,
+  normalizeCode, vaultNumberError, vaultBoardStats, vaultPositionInUnit, vaultSheetRows,
 } from '../mutations.js'
 
 describe('boxMismatch', () => {
@@ -788,6 +788,75 @@ describe('the vault board totals', () => {
     expect(vaultBoardStats([])).toMatchObject({ vaults: 0, units: 0, inUse: 0, empty: 0, spread: 0 })
     expect(vaultBoardStats(undefined).vaults).toBe(0)
     expect(vaultBoardStats([{ id: 'x' }]).empty).toBe(1)
+  })
+
+  describe('as a sheet, for checking against the BigBox list', () => {
+    const shot = (url) => ({ url, kind: 'photo' })
+    const units = [
+      // 902 Qingbo Niu: three vaults, and the two the crew never logged went
+      // in afterwards with a door-closed photo only. There is no open shot and
+      // there never can be, both are sealed in the warehouse.
+      { id: 'u902', number: '902', tenant: 'Qingbo Niu', containerIds: ['c8038', 'c5960', 'c8919'],
+        vaults: [
+          { number: '8038', containerId: 'c8038', open: shot('o'), closed: shot('c') },
+          { number: '5960', containerId: 'c5960', closed: shot('c') },
+          { number: '8919', containerId: 'c8919', closed: shot('c') },
+        ] },
+      // 906 still stores its vaults the legacy way, and the sheet has to read
+      // those too or half the board looks unlogged.
+      { id: 'u906', number: '906', tenant: 'Maria Ochoa', containerIds: ['c7371'],
+        boxes: [{ number: '7371', containerId: 'c7371', openUrl: 'o', closedUrl: 'c' }] },
+    ]
+    const containers = [
+      { id: 'c8038', number: '8038', status: 'full', unitIds: ['u902'] },
+      { id: 'c5960', number: '5960', status: 'full', unitIds: ['u902'] },
+      { id: 'c8919', number: '8919', status: 'full', unitIds: ['u902'] },
+      { id: 'c7371', number: '7371', status: 'full', unitIds: ['u906'] },
+      { id: 'c900', number: '900', status: 'empty', unitIds: [] },
+    ]
+    const rows = () => vaultSheetRows(containers, units)
+
+    it('runs highest number first, the way their sheet does', () => {
+      // Plain string sort would put "900" above "8919". Both lists get read
+      // line by line against each other, so the order has to be the same one.
+      expect(rows().map((r) => r.number)).toEqual(['8919', '8038', '7371', '5960', '900'])
+    })
+
+    it('names the customer and says which of their vaults it is', () => {
+      const r = rows().find((x) => x.number === '5960')
+      expect(r.on[0].unit.tenant).toBe('Qingbo Niu')
+      expect(r.on[0].pos).toEqual({ nth: 2, of: 3 })
+    })
+
+    it('reports a vault that has only the closed shot as incomplete', () => {
+      const r = rows().find((x) => x.number === '8919')
+      expect(r.complete).toBe(false)
+      expect(r.shots).toMatchObject({ open: 0, closed: 1, of: 1 })
+    })
+
+    it('counts a legacy boxes record as a real record', () => {
+      expect(rows().find((x) => x.number === '7371').complete).toBe(true)
+    })
+
+    it('shows an empty vault as empty rather than as a missing record', () => {
+      const r = rows().find((x) => x.number === '900')
+      expect(r.on).toEqual([])
+      expect(r.complete).toBe(false)
+      expect(r.shots.of).toBe(0)
+    })
+
+    it('flags a container that is on a unit with nothing logged against it', () => {
+      const orphan = vaultSheetRows([{ id: 'c1', number: '1', status: 'full', unitIds: ['u906'] }], units)[0]
+      expect(orphan.on).toHaveLength(1)
+      expect(orphan.shots.of).toBe(0)
+      expect(orphan.complete).toBe(false)
+    })
+
+    it('survives an empty board and missing units', () => {
+      expect(vaultSheetRows([], [])).toEqual([])
+      expect(vaultSheetRows(undefined, undefined)).toEqual([])
+      expect(vaultSheetRows([{ id: 'x', number: '5', status: 'empty' }], null)[0].on).toEqual([])
+    })
   })
 
   it('places a vault within its unit, and stays quiet for a single-vault unit', () => {

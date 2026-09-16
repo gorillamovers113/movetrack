@@ -8,7 +8,22 @@ import BigBoxSwapButton from '../components/BigBoxSwapButton.jsx'
 import DeliverReturnButton from '../components/DeliverReturnButton.jsx'
 import ReceiveContainerButton from '../components/ReceiveContainerButton.jsx'
 import { mayLoad } from '../lib/roles.js'
-import { sortContainers, vaultBoardStats, vaultPositionInUnit } from '../lib/mutations.js'
+import { sortContainers, vaultBoardStats, vaultPositionInUnit, vaultSheetRows } from '../lib/mutations.js'
+
+// Two ways to read the same board. Cards are for the dock, where you are
+// holding a phone and looking for one vault. The sheet is for checking our
+// custody record line by line against BigBox's billing sheet, which is the
+// job that found three misspelled customer names on their side. The choice
+// sticks, because whoever wants one view almost never wants the other.
+const VIEW_KEY = 'movetrack.vaults.view'
+
+function storedView() {
+  try {
+    return window.localStorage.getItem(VIEW_KEY) === 'sheet' ? 'sheet' : 'cards'
+  } catch {
+    return 'cards'
+  }
+}
 
 // Lifecycle order the pool view groups by, matches CONT_STATUS in store.jsx:
 // empty (on site) → filling → full/ready → picked_up (in transit) → at_warehouse,
@@ -123,6 +138,15 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
   const totalCount = state.containers.length
 
   const stats = useMemo(() => vaultBoardStats(state.containers), [state.containers])
+  const [view, setView] = useState(storedView)
+  const rows = useMemo(
+    () => (view === 'sheet' ? vaultSheetRows(state.containers, state.units) : []),
+    [view, state.containers, state.units],
+  )
+  const chooseView = (next) => {
+    setView(next)
+    try { window.localStorage.setItem(VIEW_KEY, next) } catch { /* private mode, the view just won't stick */ }
+  }
 
   return (
     <>
@@ -138,6 +162,12 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
             {stats.spread > 0 && (
               <span><strong>{stats.spread}</strong> across more than one vault</span>
             )}
+          </div>
+        </div>
+        <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
+          <div className="seg" role="group" aria-label="How to show the vaults">
+            <button className={view === 'cards' ? 'on' : ''} aria-pressed={view === 'cards'} onClick={() => chooseView('cards')}>Cards</button>
+            <button className={view === 'sheet' ? 'on' : ''} aria-pressed={view === 'sheet'} onClick={() => chooseView('sheet')}>Sheet</button>
           </div>
         </div>
         {(isMover || isWarehouse) && (
@@ -161,7 +191,51 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
         </div>
       )}
 
-      {STATUS_ORDER.filter((s) => groups[s]?.length).map((status) => (
+      {view === 'sheet' && totalCount > 0 && (
+        <div className="card" style={{ padding: 0, marginBottom: 18 }}>
+          <div className="table-scroll">
+            <table className="tbl vault-sheet">
+              <thead>
+                <tr>
+                  <th>Vault</th><th>Unit</th><th>Customer</th><th>Of</th>
+                  <th>Status</th><th>Photos</th><th>Bay</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.id} className="click" onClick={() => setOpenId(r.id)}>
+                    <td className="vault-sheet-num">
+                      {r.number}
+                      {r.flagged && <span style={{ color: 'var(--red)', marginLeft: 6 }}>⚑</span>}
+                    </td>
+                    <td>{r.on.length ? r.on.map((x) => x.unit.number).join(', ') : <span className="muted">-</span>}</td>
+                    <td>{r.on.length ? r.on.map((x) => x.unit.tenant || '-').join(', ') : <span className="muted">Empty</span>}</td>
+                    <td className="muted">{r.on.map((x) => (x.pos ? `${x.pos.nth} of ${x.pos.of}` : '')).filter(Boolean).join(', ') || '-'}</td>
+                    <td>
+                      <span className="badge" style={{ background: CONT_STATUS[r.status].color + '22', color: CONT_STATUS[r.status].color }}>
+                        {CONT_STATUS[r.status].label}
+                      </span>
+                    </td>
+                    {/* Says what is missing, not just that something is. A vault
+                      * sealed in the warehouse can never have its door-open shot
+                      * taken, so "closed only" is a fact to read off the sheet,
+                      * not a task anyone can still do. */}
+                    <td className={r.on.length && !r.complete ? 'vault-sheet-gap' : 'muted'}>
+                      {!r.on.length ? '-'
+                        : r.complete ? '✓ open + closed'
+                          : r.shots.of === 0 ? 'not logged'
+                            : r.shots.open ? 'open only' : r.shots.closed ? 'closed only' : 'no photos'}
+                    </td>
+                    <td className="muted">{r.bay || '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {view === 'cards' && STATUS_ORDER.filter((s) => groups[s]?.length).map((status) => (
         <div key={status}>
           <div className="section-title">{CONT_STATUS[status].label} · {groups[status].length}</div>
           <div className="cont-grid" style={{ marginBottom: 18 }}>

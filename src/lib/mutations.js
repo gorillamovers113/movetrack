@@ -809,6 +809,48 @@ export function vaultPositionInUnit(unit, containerId) {
   return nth > 0 ? { nth, of: ids.length } : null
 }
 
+/* The vault board as a sheet, one row per vault.
+ *
+ * BigBox bill from a warehouse list that runs one line per vault, highest
+ * number first, with the customer's surname beside it. Checking our custody
+ * record against their billing record is a line-by-line job, and it only works
+ * if the two lists run in the same direction. Theirs is the one we cannot
+ * change, so ours matches it: numeric descending, vault number first, customer
+ * second.
+ *
+ * `logged` is the vault's record on the unit, which is a different thing from
+ * the container existing. A container with no record is the gap worth seeing:
+ * goods went in and nobody wrote it down.
+ */
+export function vaultSheetRows(containers, units) {
+  const byId = new Map((units || []).filter(Boolean).map((u) => [u.id, u]))
+  return (containers || [])
+    .filter(Boolean)
+    .map((c) => {
+      const on = (c.unitIds || []).map((id) => byId.get(id)).filter(Boolean).map((u) => ({
+        unit: u,
+        pos: vaultPositionInUnit(u, c.id),
+        vault: vaultsOf(u).find((v) => normalizeVaultNumber(v.number) === normalizeVaultNumber(c.number)) || null,
+      }))
+      const logged = on.filter((r) => r.vault)
+      return {
+        id: c.id,
+        number: String(c.number || ''),
+        status: c.status,
+        bay: c.bay || null,
+        flagged: !!(c.flag && c.flag.open),
+        on,
+        shots: {
+          open: logged.filter((r) => r.vault.open && r.vault.open.url).length,
+          closed: logged.filter((r) => r.vault.closed && r.vault.closed.url).length,
+          of: logged.length,
+        },
+        complete: logged.length > 0 && logged.every((r) => vaultComplete(r.vault)),
+      }
+    })
+    .sort((a, b) => b.number.localeCompare(a.number, undefined, { numeric: true }))
+}
+
 export function containerSortKey(container, units) {
   const on = ((container && container.unitIds) || [])
     .map((id) => (units || []).find((u) => u && u.id === id))
