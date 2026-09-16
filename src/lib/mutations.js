@@ -774,6 +774,41 @@ export function readyToReceive(unit) {
  * Empty vaults have no tenant to sort by and go to the end, in number order,
  * where they read as a pool of spares rather than gaps in the list.
  */
+/* What the vault board adds up to.
+ *
+ * `units` is distinct apartments with goods in a vault, NOT the sum of the
+ * per-vault counts. Unit 906 fills three vaults on its own and must not be
+ * counted three times. `spread` is how many apartments needed more than one
+ * vault, which is the number that explains why vaults in use can exceed
+ * units loaded.
+ */
+export function vaultBoardStats(containers) {
+  const perUnit = new Map()
+  for (const c of containers || []) {
+    for (const id of c.unitIds || []) perUnit.set(id, (perUnit.get(id) || 0) + 1)
+  }
+  const total = (containers || []).length
+  const empty = (containers || []).filter((c) => (c.unitIds || []).length === 0).length
+  return {
+    vaults: total,
+    empty,
+    inUse: total - empty,
+    units: perUnit.size,
+    spread: [...perUnit.values()].filter((n) => n > 1).length,
+  }
+}
+
+/* Which of a unit's vaults this one is, as "2 of 3", or null when the unit
+ * fits in a single vault. Every vault card used to read "1 unit", which was
+ * true of nearly all of them and never showed that an apartment was split.
+ */
+export function vaultPositionInUnit(unit, containerId) {
+  const ids = (unit && unit.containerIds) || []
+  if (ids.length < 2) return null
+  const nth = ids.indexOf(containerId) + 1
+  return nth > 0 ? { nth, of: ids.length } : null
+}
+
 export function containerSortKey(container, units) {
   const on = ((container && container.unitIds) || [])
     .map((id) => (units || []).find((u) => u && u.id === id))

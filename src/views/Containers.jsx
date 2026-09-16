@@ -8,7 +8,7 @@ import BigBoxSwapButton from '../components/BigBoxSwapButton.jsx'
 import DeliverReturnButton from '../components/DeliverReturnButton.jsx'
 import ReceiveContainerButton from '../components/ReceiveContainerButton.jsx'
 import { mayLoad } from '../lib/roles.js'
-import { sortContainers } from '../lib/mutations.js'
+import { sortContainers, vaultBoardStats, vaultPositionInUnit } from '../lib/mutations.js'
 
 // Lifecycle order the pool view groups by, matches CONT_STATUS in store.jsx:
 // empty (on site) → filling → full/ready → picked_up (in transit) → at_warehouse,
@@ -122,12 +122,23 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
 
   const totalCount = state.containers.length
 
+  const stats = useMemo(() => vaultBoardStats(state.containers), [state.containers])
+
   return (
     <>
       <div className="page-head">
         <div>
           <h1>Vaults</h1>
-          <p>{totalCount} on the board, chain of custody for every vault</p>
+          <p>Chain of custody for every vault</p>
+          <div className="row vault-stats" style={{ gap: 14, flexWrap: 'wrap', marginTop: 6 }}>
+            <span><strong>{stats.vaults}</strong> vault{stats.vaults === 1 ? '' : 's'} on the board</span>
+            <span><strong>{stats.inUse}</strong> in use</span>
+            <span><strong>{stats.empty}</strong> empty</span>
+            <span><strong>{stats.units}</strong> unit{stats.units === 1 ? '' : 's'} loaded</span>
+            {stats.spread > 0 && (
+              <span><strong>{stats.spread}</strong> across more than one vault</span>
+            )}
+          </div>
         </div>
         {(isMover || isWarehouse) && (
           <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
@@ -165,12 +176,21 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
                   <div className="row">
                     <span className="cont-num grow">{c.number}{c.flag?.open && <span style={{ color: 'var(--red)', marginLeft: 7 }}>⚑</span>}</span>
                     <span className="badge" style={{ background: CONT_STATUS[status].color + '22', color: CONT_STATUS[status].color }}>
-                      ● {units.length} unit{units.length === 1 ? '' : 's'}{c.bay ? ` · ${c.bay}` : ''}
+                      ● {CONT_STATUS[status].label}{c.bay ? ` · ${c.bay}` : ''}
                     </span>
                   </div>
                   <div className="cont-units">
                     {units.length > 0
-                      ? units.map((u) => `Unit ${u.number} · ${u.tenant || '-'}`).join(' · ')
+                      /* "1 unit" was true of nearly every vault and told
+                       * nobody anything: unit 906 fills three vaults and each
+                       * one read "1 unit", so the board never showed that the
+                       * apartment was split. Name the unit, and when its goods
+                       * run across several vaults say which one this is. */
+                      ? units.map((u) => {
+                        const pos = vaultPositionInUnit(u, c.id)
+                        const part = pos ? ` · vault ${pos.nth} of ${pos.of}` : ''
+                        return `Unit ${u.number} · ${u.tenant || '-'}${part}`
+                      }).join(' · ')
                       : (status === 'empty' ? 'Empty, nothing loaded yet' : '-')}
                   </div>
                   {quickAction && (

@@ -8,7 +8,7 @@ import {
   CARTON_TYPES, sumCartons, cartonsFromForm, cartonSummary,
   SUPPLY_TYPES, sumSupplies, suppliesFromForm, supplySummary,
   PACKING_STEPS, REQUIRED_STEPS, packingChecklist, packingProgress, nextPackingStep, packingComplete, wouldCompletePacking,
-  normalizeCode, vaultNumberError,
+  normalizeCode, vaultNumberError, vaultBoardStats, vaultPositionInUnit,
 } from '../mutations.js'
 
 describe('boxMismatch', () => {
@@ -754,5 +754,48 @@ describe('normalizeCode strips punctuation', () => {
     const unit = { vaults: [{ number: '7175' }] }
     expect(vaultNumberError('7175,', unit)).toMatch(/already logged/)
     expect(vaultNumberError('4921', unit)).toBeNull()
+  })
+})
+
+describe('the vault board totals', () => {
+  // Unit 906 (Maria Ochoa) really does fill three vaults on its own. Every
+  // one of its cards read "1 unit", so the board never showed the split and
+  // the totals would have counted her apartment three times.
+  const containers = [
+    { id: 'c1', number: '7371', unitIds: ['u906'] },
+    { id: 'c2', number: '4735', unitIds: ['u906'] },
+    { id: 'c3', number: '8733', unitIds: ['u906'] },
+    { id: 'c4', number: '7175', unitIds: ['u802'] },
+    { id: 'c5', number: '9000', unitIds: [] },
+  ]
+
+  it('counts an apartment once however many vaults it fills', () => {
+    expect(vaultBoardStats(containers).units).toBe(2)
+  })
+
+  it('separates vaults in use from empties', () => {
+    const s = vaultBoardStats(containers)
+    expect(s.vaults).toBe(5)
+    expect(s.inUse).toBe(4)
+    expect(s.empty).toBe(1)
+  })
+
+  it('says how many apartments run across more than one vault', () => {
+    expect(vaultBoardStats(containers).spread).toBe(1)
+  })
+
+  it('survives an empty board and missing unitIds', () => {
+    expect(vaultBoardStats([])).toMatchObject({ vaults: 0, units: 0, inUse: 0, empty: 0, spread: 0 })
+    expect(vaultBoardStats(undefined).vaults).toBe(0)
+    expect(vaultBoardStats([{ id: 'x' }]).empty).toBe(1)
+  })
+
+  it('places a vault within its unit, and stays quiet for a single-vault unit', () => {
+    const split = { containerIds: ['c1', 'c2', 'c3'] }
+    expect(vaultPositionInUnit(split, 'c2')).toEqual({ nth: 2, of: 3 })
+    expect(vaultPositionInUnit(split, 'c3')).toEqual({ nth: 3, of: 3 })
+    expect(vaultPositionInUnit({ containerIds: ['c4'] }, 'c4')).toBeNull()
+    expect(vaultPositionInUnit({}, 'c4')).toBeNull()
+    expect(vaultPositionInUnit(split, 'nope')).toBeNull()
   })
 })

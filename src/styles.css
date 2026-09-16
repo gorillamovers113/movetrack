@@ -331,6 +331,11 @@ textarea.input { min-height: 0; }
 .cont-card:active { transform: translateY(0) scale(0.98); box-shadow: var(--shadow-sm); }
 .cont-num { font-family: var(--display); font-weight: 700; font-size: 17px; letter-spacing: -0.2px; }
 .cont-units { font-size: 12.5px; color: var(--ink-2); margin-top: 6px; line-height: 1.6; }
+/* Vault board totals. Sits under the page title, wraps on a phone rather
+   than scrolling sideways, and leans on the same muted ink as the rest of
+   the secondary text so the numbers read as context, not as a headline. */
+.vault-stats { font-size: 12.5px; color: var(--ink-2); line-height: 1.6; }
+.vault-stats strong { color: var(--ink); font-weight: 700; }
 
 /* ---------- Return phase ---------- */
 .return-banner {
