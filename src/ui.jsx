@@ -28,7 +28,10 @@ export function StagePill({ stage, short = false }) {
   return <span className="stage-pill" style={{ background: s.color }}>{short ? s.short : s.label}</span>
 }
 
-export function Modal({ title, sub, onClose, children }) {
+// `wide` is for content that is a document rather than a form: the vault
+// manifest needs the width to lay its apartments out in a grid, and at 460px
+// it collapses into one long column that prints nothing like the page.
+export function Modal({ title, sub, onClose, wide = false, children }) {
   useEffect(() => {
     const fn = (e) => e.key === 'Escape' && onClose()
     window.addEventListener('keydown', fn)
@@ -36,7 +39,7 @@ export function Modal({ title, sub, onClose, children }) {
   }, [onClose])
   return (
     <div className="modal-wrap" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal">
+      <div className={wide ? 'modal modal-wide' : 'modal'}>
         <div className="row" style={{ marginBottom: 4 }}>
           <h3 className="grow">{title}</h3>
           <button className="btn btn-ghost btn-sm btn-icon-sm" onClick={onClose} aria-label="Close">✕</button>

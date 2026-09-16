@@ -176,6 +176,38 @@ describe('the vault sheet', () => {
       .getAllByRole('row').length).toBeGreaterThan(1)
   })
 
+  it('re-sorts when a heading is clicked, and flips on a second click', () => {
+    const r = openSheet()
+    const vaultNumbers = () => r.getAllByRole('row').slice(1)
+      .map((row) => within(row).getAllByRole('cell')[0].textContent.trim())
+
+    expect(vaultNumbers()).toEqual(['9000', '8038', '7101'])
+    fireEvent.click(r.getByRole('button', { name: /^Vault/ }))
+    expect(vaultNumbers()).toEqual(['7101', '8038', '9000'])
+    fireEvent.click(r.getByRole('button', { name: /^Customer/ }))
+    // The empty vault has no customer, so it drops off the bottom.
+    expect(vaultNumbers().at(-1)).toBe('9000')
+  })
+
+  it('offers a way to send it to BigBox', () => {
+    const r = openSheet()
+    fireEvent.click(r.getByRole('button', { name: /Send to BigBox/ }))
+    expect(r.getByRole('menu')).toBeTruthy()
+    expect(r.getByRole('menuitem', { name: /CSV/ })).toBeTruthy()
+    expect(r.getByRole('menuitem', { name: /Printable manifest/ })).toBeTruthy()
+  })
+
+  it('builds the printable manifest without throwing', () => {
+    const r = openSheet()
+    fireEvent.click(r.getByRole('button', { name: /Send to BigBox/ }))
+    fireEvent.click(r.getByRole('menuitem', { name: /Printable manifest/ }))
+    // The signature of the document: every vault number set as the plate that
+    // is stuck on its door, grouped under the apartment that filled it.
+    expect(r.getByRole('heading', { level: 1, name: 'Vault manifest' })).toBeTruthy()
+    expect(r.container.querySelectorAll('.plate')).toHaveLength(2)
+    expect(r.container.querySelectorAll('.plate-gap')).toHaveLength(0)
+  })
+
   it('goes back to cards, and there is no table then', () => {
     const r = openSheet()
     fireEvent.click(r.getByRole('button', { name: 'Cards' }))

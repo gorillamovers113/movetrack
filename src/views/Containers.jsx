@@ -8,7 +8,12 @@ import BigBoxSwapButton from '../components/BigBoxSwapButton.jsx'
 import DeliverReturnButton from '../components/DeliverReturnButton.jsx'
 import ReceiveContainerButton from '../components/ReceiveContainerButton.jsx'
 import { mayLoad } from '../lib/roles.js'
-import { sortContainers, vaultBoardStats, vaultPositionInUnit, vaultSheetRows } from '../lib/mutations.js'
+import {
+  sortContainers, vaultBoardStats, vaultPositionInUnit, vaultSheetRows,
+  sortVaultSheet, nextVaultSort, DEFAULT_VAULT_SORT, CONTAINER_LIFECYCLE,
+} from '../lib/mutations.js'
+import { vaultSheetCSV, vaultSheetText, vaultExportName, downloadText, vaultPhotoLabel } from '../lib/vaultExport.js'
+import VaultManifest from '../components/VaultManifest.jsx'
 
 // Two ways to read the same board. Cards are for the dock, where you are
 // holding a phone and looking for one vault. The sheet is for checking our
@@ -31,7 +36,13 @@ function storedView() {
 // → back_on_site → returned_empty. The return statuses only ever have
 // containers in them once the return phase has actually been used, so
 // including them here up front is a no-op (nothing to render) until then.
-const STATUS_ORDER = ['empty', 'filling', 'full', 'picked_up', 'at_warehouse', 'return_filling', 'return_full', 'return_transit', 'back_on_site', 'returned_empty']
+const STATUS_ORDER = CONTAINER_LIFECYCLE
+
+// Every column the sheet sorts by, in the order they are shown.
+const SHEET_COLUMNS = [
+  ['number', 'Vault'], ['unit', 'Unit'], ['customer', 'Customer'], ['of', 'Of'],
+  ['status', 'Status'], ['photos', 'Photos'], ['bay', 'Bay'],
+]
 
 export default function Containers({ openUnit, focusId, clearFocus, toast }) {
   const { state, dispatch, currentUser } = useStore()
@@ -139,13 +150,42 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
 
   const stats = useMemo(() => vaultBoardStats(state.containers), [state.containers])
   const [view, setView] = useState(storedView)
+  const [sort, setSort] = useState(DEFAULT_VAULT_SORT)
+  const [exporting, setExporting] = useState(false)
+  const [manifest, setManifest] = useState(false)
   const rows = useMemo(
-    () => (view === 'sheet' ? vaultSheetRows(state.containers, state.units) : []),
-    [view, state.containers, state.units],
+    () => (view === 'sheet' ? sortVaultSheet(vaultSheetRows(state.containers, state.units), sort) : []),
+    [view, sort, state.containers, state.units],
   )
   const chooseView = (next) => {
     setView(next)
     try { window.localStorage.setItem(VIEW_KEY, next) } catch { /* private mode, the view just won't stick */ }
+  }
+
+  const statusLabel = (s) => (CONT_STATUS[s] ? CONT_STATUS[s].label : s)
+  const heading = `Gorilla Movers · vault manifest · ${state.project?.name || 'Trinity Manor'} · ${new Date().toLocaleDateString('en-US')}`
+
+  // Paste-into-a-message is the fastest of the three and the one most likely
+  // to be reached for, so it reports success rather than failing silently on
+  // a browser that refuses the clipboard.
+  const copySheet = async () => {
+    try {
+      await navigator.clipboard.writeText(vaultSheetText(rows, statusLabel, heading))
+      toast(`Copied ${rows.length} vaults. Paste it into an email or a text.`)
+    } catch {
+      toast('This browser would not let me use the clipboard. Try the CSV instead.')
+    }
+    setExporting(false)
+  }
+
+  const shareSheet = async () => {
+    const text = vaultSheetText(rows, statusLabel, heading)
+    // Only on a phone, and only when the OS actually offers a share sheet.
+    if (!navigator.share) return copySheet()
+    try {
+      await navigator.share({ title: 'Gorilla Movers vault manifest', text })
+    } catch { /* the user backing out of the OS share sheet is not an error */ }
+    setExporting(false)
   }
 
   return (
@@ -169,6 +209,30 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
             <button className={view === 'cards' ? 'on' : ''} aria-pressed={view === 'cards'} onClick={() => chooseView('cards')}>Cards</button>
             <button className={view === 'sheet' ? 'on' : ''} aria-pressed={view === 'sheet'} onClick={() => chooseView('sheet')}>Sheet</button>
           </div>
+          {view === 'sheet' && totalCount > 0 && (
+            <div className="export-wrap">
+              <button className="btn btn-dark" aria-expanded={exporting} onClick={() => setExporting((x) => !x)}>Send to BigBox ▾</button>
+              {exporting && (
+                <>
+                  {/* Catches the next click anywhere so the menu closes the way
+                    * every other menu on a phone does, without a document
+                    * listener that has to be torn down. */}
+                  <div className="export-catch" onClick={() => setExporting(false)} />
+                  <div className="export-menu" role="menu">
+                    {navigator.share
+                      ? <button role="menuitem" onClick={shareSheet}><b>Share</b><span>Text, email, AirDrop</span></button>
+                      : <button role="menuitem" onClick={copySheet}><b>Copy</b><span>Paste into an email or text</span></button>}
+                    <button role="menuitem" onClick={() => { downloadText(vaultSheetCSV(rows, statusLabel), vaultExportName('csv')); setExporting(false) }}>
+                      <b>CSV</b><span>Opens in Excel</span>
+                    </button>
+                    <button role="menuitem" onClick={() => { setManifest(true); setExporting(false) }}>
+                      <b>Printable manifest</b><span>Branded sheet, print or save as PDF</span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
         </div>
         {(isMover || isWarehouse) && (
           <div className="row" style={{ gap: 10, flexWrap: 'wrap' }}>
@@ -197,8 +261,17 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
             <table className="tbl vault-sheet">
               <thead>
                 <tr>
-                  <th>Vault</th><th>Unit</th><th>Customer</th><th>Of</th>
-                  <th>Status</th><th>Photos</th><th>Bay</th>
+                  {SHEET_COLUMNS.map(([key, label]) => (
+                    <th
+                      key={key}
+                      aria-sort={sort.key === key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+                    >
+                      <button className="th-sort" onClick={() => setSort((s) => nextVaultSort(s, key))}>
+                        {label}
+                        <span className="th-arrow">{sort.key === key ? (sort.dir === 'asc' ? '▲' : '▼') : ''}</span>
+                      </button>
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
@@ -221,10 +294,7 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
                       * taken, so "closed only" is a fact to read off the sheet,
                       * not a task anyone can still do. */}
                     <td className={r.on.length && !r.complete ? 'vault-sheet-gap' : 'muted'}>
-                      {!r.on.length ? '-'
-                        : r.complete ? '✓ open + closed'
-                          : r.shots.of === 0 ? 'not logged'
-                            : r.shots.open ? 'open only' : r.shots.closed ? 'closed only' : 'no photos'}
+                      {r.complete && '✓ '}{vaultPhotoLabel(r)}
                     </td>
                     <td className="muted">{r.bay || '-'}</td>
                   </tr>
@@ -389,6 +459,26 @@ export default function Containers({ openUnit, focusId, clearFocus, toast }) {
               <div className="muted" style={{ padding: '10px 0' }}>No activity logged against this container yet.</div>
             )}
           </div>
+        </Modal>
+      )}
+      {manifest && (
+        <Modal
+          title="Vault manifest"
+          sub={`${rows.length} vaults · ${state.project?.name || 'Trinity Manor'}`}
+          onClose={() => setManifest(false)}
+          wide
+        >
+          <div className="manifest-actions no-print">
+            <button className="btn btn-primary" onClick={() => window.print()}>Print or save as PDF</button>
+            <button className="btn btn-ghost" onClick={copySheet}>Copy as text</button>
+          </div>
+          <VaultManifest
+            rows={rows}
+            stats={stats}
+            project={state.project}
+            statusLabel={statusLabel}
+            generatedBy={currentUser?.name}
+          />
         </Modal>
       )}
       <Lightbox media={lightbox} onClose={() => setLightbox(null)} />
