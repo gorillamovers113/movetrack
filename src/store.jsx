@@ -1255,7 +1255,7 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
         // BigBox drops off empty containers before any loading happens.
         const numbers = p.numbers.map((n) => n.toUpperCase())
         await Promise.all(numbers.map((number) => addDoc(collection(db, 'containers'), { number, status: 'empty', unitIds: [], deliveredAt: Date.now() })))
-        return ev('system', `${numbers.length} empty BigBox container${numbers.length === 1 ? '' : 's'} delivered: ${numbers.join(', ')}`)
+        return ev('system', `${numbers.length} empty vault${numbers.length === 1 ? '' : 's'} delivered: ${numbers.join(', ')}`)
       }
       case 'loadUnit': {
         const cont = state.containers.find((c) => c.id === p.containerId)
@@ -1267,7 +1267,7 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
         // update then self-loops and the rules reject it as a no-op
         // transition, leaving the unit orphaned.
         if (!cont || (cont.status !== 'empty' && cont.status !== 'filling')) {
-          throw new Error('That BigBox is no longer accepting items. Refresh and pick another container.')
+          throw new Error('That vault is no longer accepting items. Refresh and pick another one.')
         }
         p.media = attributeMedia(p.media)
         const mismatch = boxMismatch(unit.pieces, p.pieces)
@@ -1286,7 +1286,7 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
       }
       case 'markContainerFull': {
         await updateDoc(doc(db, 'containers', p.containerId), { status: 'full' })
-        return ev('stage', `Container ${cont0.number} marked full, ready for BigBox pickup`, { containerId: cont0.id })
+        return ev('stage', `Vault ${cont0.number} marked full, ready for pickup`, { containerId: cont0.id })
       }
       case 'bigboxSwap': {
         // Mover logs the hand-off to the BigBox driver: selected full containers
@@ -1316,7 +1316,7 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
         const newNumbers = p.newEmptyNumbers.map((n) => n.toUpperCase())
         for (const number of newNumbers) batch.set(doc(collection(db, 'containers')), { number, status: 'empty', unitIds: [], deliveredAt: Date.now() })
         const fullNums = fulls.map((c) => c.number).join(', ')
-        batch.set(doc(collection(db, 'events')), makeEvent(actor(), 'system', `BigBox swap with ${p.driverName}: ${fulls.length} full container${fulls.length === 1 ? '' : 's'} out (${fullNums}), ${newNumbers.length} empty${newNumbers.length === 1 ? '' : 's'} in (${newNumbers.join(', ')})`, media.length ? { media } : {}))
+        batch.set(doc(collection(db, 'events')), makeEvent(actor(), 'system', `Vault swap with ${p.driverName}: ${fulls.length} full container${fulls.length === 1 ? '' : 's'} out (${fullNums}), ${newNumbers.length} empty${newNumbers.length === 1 ? '' : 's'} in (${newNumbers.join(', ')})`, media.length ? { media } : {}))
         await batch.commit()
         return
       }
@@ -1379,7 +1379,7 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
         // then self-loops (e.g. return_full -> return_full) and the return
         // rules reject it as a no-op transition, leaving the unit orphaned.
         if (!cont || (cont.status !== 'at_warehouse' && cont.status !== 'return_filling')) {
-          throw new Error('That BigBox is no longer accepting items for return. Refresh and pick another container.')
+          throw new Error('That vault is no longer accepting items for return. Refresh and pick another one.')
         }
         p.media = attributeMedia(p.media)
         const mismatch = boxMismatch(unit.pieces, p.pieces)

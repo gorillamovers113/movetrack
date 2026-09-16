@@ -191,7 +191,7 @@ describe('the vault sheet', () => {
 
   it('offers a way to send it to BigBox', () => {
     const r = openSheet()
-    fireEvent.click(r.getByRole('button', { name: /Send to BigBox/ }))
+    fireEvent.click(r.getByRole('button', { name: /Export/ }))
     expect(r.getByRole('menu')).toBeTruthy()
     expect(r.getByRole('menuitem', { name: /CSV/ })).toBeTruthy()
     expect(r.getByRole('menuitem', { name: /Printable manifest/ })).toBeTruthy()
@@ -199,7 +199,7 @@ describe('the vault sheet', () => {
 
   it('builds the printable manifest without throwing', () => {
     const r = openSheet()
-    fireEvent.click(r.getByRole('button', { name: /Send to BigBox/ }))
+    fireEvent.click(r.getByRole('button', { name: /Export/ }))
     fireEvent.click(r.getByRole('menuitem', { name: /Printable manifest/ }))
     // The signature of the document: every vault number set as the plate that
     // is stuck on its door, grouped under the apartment that filled it.

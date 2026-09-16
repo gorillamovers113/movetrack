@@ -82,7 +82,7 @@ export default function ReceiveContainerButton({ toast }) {
       if (status === 'queued') {
         toast?.(QUEUED_MESSAGE)
       } else {
-        toast?.(expected && n !== expected ? `Mismatch flagged (${n} vs ${expected}) ⚑` : `Verified, BigBox ${matched.number} received at ${bay.trim()} ✓`)
+        toast?.(expected && n !== expected ? `Mismatch flagged (${n} vs ${expected}) ⚑` : `Verified, vault ${matched.number} received at ${bay.trim()} ✓`)
       }
     } catch (err) {
       toast?.(err.message || "Couldn't save that. Check your signal and try again.")
@@ -100,7 +100,7 @@ export default function ReceiveContainerButton({ toast }) {
     try {
       const status = await submitWrite(dispatch({
         type: 'addNote',
-        p: { containerId: '', text: `Warehouse receive check: typed container number "${typed.trim()}" did not match any incoming BigBox expected at warehouse. Flagged for admin review.` },
+        p: { containerId: '', text: `Warehouse receive check: typed container number "${typed.trim()}" did not match any incoming vault expected at warehouse. Flagged for admin review.` },
       }))
       setOpen(false)
       toast?.(status === 'queued' ? QUEUED_MESSAGE : 'Discrepancy reported to admin ✓')
@@ -113,9 +113,9 @@ export default function ReceiveContainerButton({ toast }) {
 
   return (
     <>
-      <button className="btn btn-primary btn-lg" onClick={openModal}>📥 Receive incoming BigBox</button>
+      <button className="btn btn-primary btn-lg" onClick={openModal}>📥 Receive incoming vault</button>
       {open && (
-        <Modal title="Receive incoming BigBox" sub="Type the number off the physical container, cold. Numbers are never shown here on purpose." onClose={close}>
+        <Modal title="Receive incoming vault" sub="Type the number off the physical container, cold. Numbers are never shown here on purpose." onClose={close}>
           {!matched && (
             <>
               <div className="field">
@@ -129,7 +129,7 @@ export default function ReceiveContainerButton({ toast }) {
 
               {mismatch && (
                 <div className="flagbox" style={{ marginBottom: 14 }}>
-                  <b>No match.</b> No incoming BigBox with that number is expected. Double-check the number on the container.
+                  <b>No match.</b> No incoming vault with that number is expected. Double-check the number on the container.
                   <div className="row" style={{ marginTop: 10, gap: 8 }}>
                     <button className="btn btn-ghost btn-sm" onClick={() => setMismatch(false)}>Re-type</button>
                     <button className="btn btn-danger btn-sm" disabled={busy} onClick={reportDiscrepancy}>{busy ? 'Reporting…' : 'Report discrepancy'}</button>
@@ -147,7 +147,7 @@ export default function ReceiveContainerButton({ toast }) {
 
           {matched && (
             <>
-              <div className="muted" style={{ marginBottom: 12 }}>Matched: BigBox {matched.number}, in transit.</div>
+              <div className="muted" style={{ marginBottom: 12 }}>Matched: vault {matched.number}, in transit.</div>
               <div className="field">
                 <label>Pieces counted{(() => {
                   const expected = matched.unitIds.reduce((sum, id) => sum + (state.units.find((u) => u.id === id)?.pieces || 0), 0)

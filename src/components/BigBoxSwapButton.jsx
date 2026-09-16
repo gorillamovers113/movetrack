@@ -59,7 +59,7 @@ export default function BigBoxSwapButton({ toast }) {
     if (!ready) return
     setBusy(true)
     try {
-      const media = photoUrl ? [{ id: `swap-${Date.now()}`, kind: 'photo', url: photoUrl, label: 'BigBox handoff' }] : []
+      const media = photoUrl ? [{ id: `swap-${Date.now()}`, kind: 'photo', url: photoUrl, label: 'Vault handoff' }] : []
       const status = await submitWrite(dispatch({ type: 'bigboxSwap', p: { fullIds: selected, driverName: driverName.trim(), newEmptyNumbers: newNumbers, media } }))
       setOpen(false)
       toast?.(status === 'queued' ? QUEUED_MESSAGE : `Swap logged with ${driverName.trim()}, ${selected.length} out${newNumbers.length ? `, ${newNumbers.length} new empt${newNumbers.length === 1 ? 'y' : 'ies'} in` : ''} ✓`)
@@ -72,9 +72,9 @@ export default function BigBoxSwapButton({ toast }) {
 
   return (
     <>
-      <button className="btn btn-primary btn-lg" onClick={openModal}>🔄 BigBox swap</button>
+      <button className="btn btn-primary btn-lg" onClick={openModal}>🔄 Vault swap</button>
       {open && (
-        <Modal title="BigBox swap" sub="The driver never opens the app, you're the custody witness for this hand-off." onClose={close}>
+        <Modal title="Vault swap" sub="The driver never opens the app, you're the custody witness for this hand-off." onClose={close}>
           <div className="field">
             <label>Full containers going out</label>
             {fulls.length === 0 ? (
@@ -132,7 +132,7 @@ export default function BigBoxSwapButton({ toast }) {
           </div>
 
           <button className="btn btn-primary btn-lg" style={{ width: '100%' }} disabled={!ready || busy} onClick={submit}>
-            {busy ? 'Logging swap…' : 'Confirm BigBox swap'}
+            {busy ? 'Logging swap…' : 'Confirm vault swap'}
           </button>
         </Modal>
       )}
