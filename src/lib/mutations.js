@@ -851,6 +851,82 @@ export function vaultSheetRows(containers, units) {
     .sort((a, b) => b.number.localeCompare(a.number, undefined, { numeric: true }))
 }
 
+/* Sorting the sheet by its column headings.
+ *
+ * The board already sorts one way, by tenant surname, which is right for the
+ * dock. A sheet is read for a different reason every time: against BigBox's
+ * billing list (vault number), chasing a missing photo (photos), finding one
+ * apartment's vaults (customer). So the headings sort.
+ *
+ * Vault number is the one column whose first click sorts DESCENDING. Their
+ * warehouse list runs highest first and lining the two up is the job this view
+ * exists for, so the obvious click has to produce the order you came for.
+ */
+export const CONTAINER_LIFECYCLE = [
+  'empty', 'filling', 'full', 'picked_up', 'at_warehouse',
+  'return_filling', 'return_full', 'return_transit', 'back_on_site', 'returned_empty',
+]
+
+export const VAULT_SORTS = ['number', 'unit', 'customer', 'of', 'status', 'photos', 'bay']
+export const DEFAULT_VAULT_SORT = { key: 'number', dir: 'desc' }
+
+export function nextVaultSort(current, key) {
+  if (!VAULT_SORTS.includes(key)) return current
+  if (current && current.key === key) return { key, dir: current.dir === 'asc' ? 'desc' : 'asc' }
+  return { key, dir: key === 'number' ? 'desc' : 'asc' }
+}
+
+function vaultSortValue(row, key) {
+  const first = row.on[0]
+  switch (key) {
+    case 'unit': return first ? String(first.unit.number || '') : ''
+    case 'customer': return first ? surnameOf(first.unit.tenant).toLowerCase() : ''
+    case 'of': return first && first.pos ? first.pos.of : (first ? 1 : 0)
+    case 'status': {
+      const i = CONTAINER_LIFECYCLE.indexOf(row.status)
+      return i === -1 ? CONTAINER_LIFECYCLE.length : i
+    }
+    // Ranked so that ascending puts the gaps at the top, which is the only
+    // reason anybody sorts by this column.
+    case 'photos': return !first ? 3 : row.shots.of === 0 ? 0 : row.complete ? 2 : 1
+    case 'bay': return String(row.bay || '')
+    default: return String(row.number || '')
+  }
+}
+
+/* Columns that describe the vault itself rather than what is inside it. An
+ * empty vault has a real number and a real place in the lifecycle, so it sorts
+ * inline on these. On every other column it has nothing to sort by and drops
+ * to the bottom instead of heading a list of loaded ones.
+ *
+ * The first version keyed that off the sort value being blank, which is not
+ * the same question: a bay column is blank for every vault we have, so it made
+ * the rule vanish, and a unit with no tenant recorded would have been pushed
+ * down as if it were empty. A vault is empty when nothing is in it.
+ */
+const SORTS_EMPTIES_INLINE = new Set(['number', 'status'])
+
+export function sortVaultSheet(rows, sort) {
+  const { key, dir } = sort || DEFAULT_VAULT_SORT
+  const sign = dir === 'desc' ? -1 : 1
+  return (rows || []).slice().sort((a, b) => {
+    if (!SORTS_EMPTIES_INLINE.has(key)) {
+      const ae = a.on.length === 0
+      const be = b.on.length === 0
+      if (ae !== be) return ae ? 1 : -1
+    }
+    const av = vaultSortValue(a, key)
+    const bv = vaultSortValue(b, key)
+    const cmp = typeof av === 'number'
+      ? av - bv
+      : String(av).localeCompare(String(bv), undefined, { numeric: true })
+    // Vault number breaks every tie: two rows that compare equal must still
+    // come out in the same order every render, or the sheet reshuffles under
+    // whoever is reading it.
+    return cmp * sign || String(a.number).localeCompare(String(b.number), undefined, { numeric: true })
+  })
+}
+
 export function containerSortKey(container, units) {
   const on = ((container && container.unitIds) || [])
     .map((id) => (units || []).find((u) => u && u.id === id))

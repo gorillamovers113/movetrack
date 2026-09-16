@@ -250,6 +250,7 @@ textarea.input { min-height: 0; }
   background: #fff; border-radius: var(--radius-lg); padding: 24px; width: 100%; max-width: 460px;
   max-height: 90vh; overflow: auto; box-shadow: var(--shadow-lg);
 }
+.modal-wide { max-width: 880px; }
 .modal h3 { font-family: var(--display); font-size: 19px; letter-spacing: -0.2px; margin-bottom: 4px; }
 .modal .sub { color: var(--ink-2); font-size: 13.5px; line-height: 1.45; margin-bottom: 16px; }
 .lightbox { position: fixed; inset: 0; background: rgba(10, 11, 14, 0.92); z-index: 60; display: grid; place-items: center; padding: 30px; cursor: zoom-out; }
@@ -352,6 +353,109 @@ textarea.input { min-height: 0; }
    tabular: BigBox's list and ours have to line up digit for digit. */
 .vault-sheet-num { font-family: var(--display); font-weight: 700; font-size: 15px; font-variant-numeric: tabular-nums; }
 .vault-sheet-gap { color: var(--brand-ink); font-weight: 600; }
+
+/* Sortable headings. The whole heading is the target, not just the label. */
+.th-sort {
+  appearance: none; border: 0; background: none; padding: 0; cursor: pointer;
+  font: inherit; color: inherit; letter-spacing: inherit; text-transform: inherit;
+  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+}
+.th-arrow { color: var(--brand); font-size: 9px; width: 9px; }
+@media (hover: hover) and (pointer: fine) { .th-sort:hover { color: var(--ink); } }
+
+/* ---------- Send to BigBox ---------- */
+.export-wrap { position: relative; }
+.export-catch { position: fixed; inset: 0; z-index: 40; }
+.export-menu {
+  position: absolute; z-index: 41; top: calc(100% + 6px); right: 0; min-width: 246px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow-lg); padding: 6px; overflow: hidden;
+}
+.export-menu button {
+  display: block; width: 100%; text-align: left; appearance: none; border: 0; background: none;
+  font: inherit; cursor: pointer; padding: 9px 11px; border-radius: 9px; color: var(--ink);
+}
+.export-menu button b { display: block; font-size: 13.5px; font-weight: 700; }
+.export-menu button span { display: block; font-size: 11.5px; color: var(--ink-3); margin-top: 1px; }
+@media (hover: hover) and (pointer: fine) { .export-menu button:hover { background: var(--bg); } }
+.export-menu button:active { background: var(--bg); }
+
+/* ---------- The vault manifest, a document meant for paper ----------
+   Browsers print with background colours OFF by default, so nothing here
+   carries meaning in a fill. Rules, borders and ink colour only. */
+.manifest-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
+.manifest { background: #fff; color: #171a20; font-size: 12px; line-height: 1.45; }
+.manifest-head {
+  display: flex; align-items: flex-end; gap: 18px; flex-wrap: wrap;
+  padding-bottom: 13px; border-bottom: 3px solid var(--brand);
+}
+.manifest-logo { height: 46px; width: auto; display: block; }
+.manifest-title { flex: 1; min-width: 180px; }
+.manifest-title h1 { font-family: var(--display); font-size: 23px; font-weight: 700; letter-spacing: -0.2px; margin: 0; }
+.manifest-title p { margin: 2px 0 0; font-size: 12px; color: #4b5260; }
+.manifest-meta { text-align: right; font-size: 11px; color: #4b5260; }
+.manifest-meta span { display: block; }
+.manifest-stats {
+  display: flex; flex-wrap: wrap; gap: 4px 20px; padding: 11px 0;
+  border-bottom: 1px solid #d8dce2; font-size: 12px; color: #4b5260;
+}
+.manifest-stats b { font-family: var(--display); font-size: 14px; color: #171a20; }
+.manifest-h2 {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 1.3px; font-weight: 700;
+  color: #6b7688; margin: 20px 0 10px;
+}
+.manifest-units { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 10px; }
+.manifest-unit { border: 1px solid #d8dce2; border-radius: 6px; padding: 9px 11px 11px; }
+.mu-who b { font-family: var(--display); font-size: 13px; }
+.mu-who span { display: block; font-size: 11.5px; color: #4b5260; }
+.mu-plates { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+/* The label on the door: white card, heavy black digits. Read a plate here,
+   read the same plate off the vault, no translation in between. */
+.plate {
+  border: 1.5px solid #171a20; border-radius: 2px; padding: 2px 8px; background: #fff;
+  font-family: var(--display); font-weight: 700; font-size: 13px;
+  font-variant-numeric: tabular-nums; letter-spacing: 0.6px;
+}
+.plate-gap { border-style: dashed; border-color: var(--brand-ink); color: var(--brand-ink); }
+.manifest-legend { font-size: 11px; color: #4b5260; margin: 9px 0 0; font-style: italic; }
+.manifest-tbl { width: 100%; border-collapse: collapse; font-size: 11px; }
+.manifest-tbl th {
+  text-align: left; font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.8px;
+  color: #6b7688; padding: 0 8px 6px 0; border-bottom: 1.5px solid #171a20;
+}
+.manifest-tbl td { padding: 5px 8px 5px 0; border-bottom: 1px solid #e6e9ee; vertical-align: top; }
+.mt-num { font-family: var(--display); font-weight: 700; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.mt-gap { color: var(--brand-ink); font-weight: 700; }
+.manifest-foot {
+  display: flex; align-items: center; gap: 8px; margin-top: 18px; padding-top: 10px;
+  border-top: 1px solid #d8dce2; font-size: 10px; color: #6b7688;
+}
+.manifest-mark { height: 15px; width: auto; }
+
+@page { size: letter; margin: 14mm; }
+@media print {
+  /* The manifest sits inside a modal, and a modal is built to sit still on a
+     screen: fixed position, capped height, its own scrollbar. All three fight
+     paper, and a fixed ancestor can pin the whole document to page one no
+     matter how many vaults are on it. So printing takes the modal apart and
+     lets the manifest flow down the page as ordinary content.
+
+     Hiding by `visibility` would leave the app's layout still occupying its
+     space and push the manifest onto a second page behind a blank first one,
+     so the chrome is removed outright instead. */
+  .sidebar, .topbar-mobile, .bottom-nav, .brandfoot, .return-banner, .no-print { display: none !important; }
+  .shell { display: block; }
+  .main { padding: 0; max-width: none; }
+  .main > *:not(.modal-wrap) { display: none !important; }
+  .modal-wrap { position: static; display: block; background: none; padding: 0; z-index: auto; }
+  .modal {
+    max-width: none; max-height: none; overflow: visible;
+    box-shadow: none; padding: 0; border-radius: 0;
+  }
+  .modal > .row, .modal > .sub { display: none !important; }
+  .manifest-tbl tr, .manifest-unit { page-break-inside: avoid; }
+  .manifest-tbl thead { display: table-header-group; }
+}
 
 /* ---------- Return phase ---------- */
 .return-banner {
