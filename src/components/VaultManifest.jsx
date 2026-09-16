@@ -41,6 +41,7 @@ export default function VaultManifest({ rows, stats, project, statusLabel, gener
         <span><b>{stats.empty}</b> empty</span>
         <span><b>{stats.units}</b> apartments</span>
         {stats.spread > 0 && <span><b>{stats.spread}</b> across more than one vault</span>}
+        {stats.perUnit != null && <span><b>{stats.perUnit}</b> vaults per apartment</span>}
       </div>
 
       <h2 className="manifest-h2">By apartment</h2>

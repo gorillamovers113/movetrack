@@ -790,6 +790,41 @@ describe('the vault board totals', () => {
     expect(vaultBoardStats([{ id: 'x' }]).empty).toBe(1)
   })
 
+  describe('vaults per apartment', () => {
+    it('averages over apartments, not over vaults', () => {
+      // 906 fills three, 802 fills one. Four vaults in use, two apartments.
+      expect(vaultBoardStats(containers).perUnit).toBe(2)
+    })
+
+    it('leaves the empty vault out of the average', () => {
+      // The board has five vaults and one of them is spare. Counting it would
+      // give 2.5 and say every apartment needs half a vault it does not.
+      const noSpare = containers.filter((c) => c.unitIds.length)
+      expect(vaultBoardStats(noSpare).perUnit).toBe(vaultBoardStats(containers).perUnit)
+    })
+
+    it('counts a shared vault once for each apartment in it', () => {
+      // One vault holding two apartments is a whole vault to each of them.
+      // Dividing vaults-in-use by apartments would report 0.5 each.
+      expect(vaultBoardStats([{ id: 'c', number: '1', unitIds: ['uA', 'uB'] }]).perUnit).toBe(1)
+    })
+
+    it('rounds to one decimal', () => {
+      const uneven = [
+        { id: 'a', number: '1', unitIds: ['u1'] },
+        { id: 'b', number: '2', unitIds: ['u1'] },
+        { id: 'c', number: '3', unitIds: ['u2'] },
+      ]
+      expect(vaultBoardStats(uneven).perUnit).toBe(1.5)
+    })
+
+    it('is nothing rather than zero when no apartment is loaded', () => {
+      // An average of no apartments is not "zero vaults each".
+      expect(vaultBoardStats([]).perUnit).toBeNull()
+      expect(vaultBoardStats([{ id: 'x', number: '9', unitIds: [] }]).perUnit).toBeNull()
+    })
+  })
+
   describe('as a sheet, for checking against the BigBox list', () => {
     const shot = (url) => ({ url, kind: 'photo' })
     const units = [
