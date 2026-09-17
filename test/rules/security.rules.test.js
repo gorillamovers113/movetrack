@@ -151,6 +151,53 @@ describe('units — packer', () => {
     await assertFails(updateDoc(doc(dbAs(PACKER), 'units', 'u1'), { tenant: 'New Name' }))
   })
 
+  /* Unit 702, 2026-09-17. One unit out of fifty reached move-out day with
+   * `crew: { packers: [...] }` and no `movers` key, and every mover who opened
+   * it got "Missing or insufficient permissions".
+   *
+   * Reading an absent map key raises in this language rather than returning
+   * null, and a rule that raises denies, so moverCrewChangeOK failed on
+   * `resource.data.crew.movers`. The write it refused was the arrayUnion that
+   * would have created the key, so the apartment could not recover on its own.
+   */
+  describe('a unit whose crew map is missing an array', () => {
+    it('a mover can still claim a unit that has no movers array', async () => {
+      await seed('units', 'u1', baseUnit({ stage: 'packed', crew: { packers: ['somebody'] } }))
+      await assertSucceeds(
+        updateDoc(doc(dbAs(MOVER), 'units', 'u1'), {
+          'steps.load_unit_photo': { uid: MOVER, userName: 'M', at: 1 },
+          'crew.movers': arrayUnion(MOVER),
+        })
+      )
+    })
+
+    it('a packer can still claim a unit that has no packers array', async () => {
+      await seed('units', 'u1', baseUnit({ stage: 'packing', crew: { movers: [] } }))
+      await assertSucceeds(
+        updateDoc(doc(dbAs(PACKER), 'units', 'u1'), {
+          'steps.door': { uid: PACKER, userName: 'P', at: 1 },
+          'crew.packers': arrayUnion(PACKER),
+        })
+      )
+    })
+
+    it('still refuses to let a mover add somebody else', async () => {
+      // The guarantee has to survive the fix: reading an absent array as empty
+      // must not become a way in for a write that would otherwise be refused.
+      await seed('units', 'u1', baseUnit({ stage: 'packed', crew: { packers: [] } }))
+      await assertFails(
+        updateDoc(doc(dbAs(MOVER), 'units', 'u1'), { 'crew.movers': arrayUnion('someone-else') })
+      )
+    })
+
+    it('still refuses to let a mover drop a colleague', async () => {
+      await seed('units', 'u1', baseUnit({ stage: 'packed', crew: { movers: ['colleague'] } }))
+      await assertFails(
+        updateDoc(doc(dbAs(MOVER), 'units', 'u1'), { crew: { movers: [MOVER] } })
+      )
+    })
+  })
+
   // Per-item checklist ticks (completeStep). Each of the seven items is its own
   // write carrying its own name and timestamp, so the five that neither open
   // nor close the unit change no stage at all and need unitStepWriteOK.
