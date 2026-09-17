@@ -585,10 +585,11 @@ a.linkish, .linkish { color: #b45309; font-weight: 600; cursor: pointer; text-de
    held a fraction too long, which otherwise swallows the tap entirely. It is
    scoped to controls only, never to content anyone might want to copy. */
 button, .tile, .chip, .pick-row, .cont-card, .demo-user, .linkish, .dropzone,
-.media-thumb, .floor-hit, a, input, select, textarea, [role="button"] {
+.media-thumb, .media-video, .tbl tr.click, .floor-hit, a, input, select, textarea, [role="button"] {
   touch-action: manipulation;
 }
-button, .tile, .chip, .pick-row, .cont-card, .demo-user, .linkish, .dropzone, [role="button"] {
+button, .tile, .chip, .pick-row, .cont-card, .demo-user, .linkish, .dropzone,
+.media-thumb, .media-video, [role="button"] {
   -webkit-tap-highlight-color: rgba(245, 158, 11, 0.22);
 }
 button, .tile, .chip, .pick-row, .bottom-nav button, .nav button, [role="button"] {

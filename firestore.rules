@@ -130,11 +130,31 @@ service cloud.firestore {
     // removed, and no other uid can be added. So a packer cannot quietly
     // credit themselves as a mover, drop a colleague off a unit they worked,
     // or put someone else's name on their own work.
+    // WHY .get('packers', []) AND NOT .packers
+    //
+    // Reading a key that is not on the map does not evaluate to null in this
+    // language, it raises, and a rule that raises denies. Unit 702 reached
+    // 2026-09-17 with `crew: { packers: [...] }` and no `movers` key at all,
+    // one unit out of fifty, and every mover who touched it got "Missing or
+    // insufficient permissions" with nothing in the app to explain why.
+    //
+    // The cruel part is that the write being refused was `crew.movers:
+    // arrayUnion(uid)`, which would have created the missing key. The rule
+    // could only be satisfied by a state it was itself preventing, so the unit
+    // could never recover on its own and the whole apartment was unworkable
+    // until the document was repaired by hand.
+    //
+    // Units are created with both arrays (store.jsx) and every crew write is a
+    // dot-path arrayUnion, which cannot drop a sibling key, so nothing in the
+    // app explains how 702 got that way. That is exactly why these read
+    // defensively: the guarantee this rule enforces (you may add yourself and
+    // remove nobody) is just as true when the array starts out absent, so an
+    // absent array should read as empty rather than take the apartment down.
     function crewChangeOK() {
       return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['crew'])
           || (request.resource.data.crew.diff(resource.data.crew).affectedKeys().hasOnly(['packers'])
-              && request.resource.data.crew.packers.hasAll(resource.data.crew.packers)
-              && request.resource.data.crew.packers.hasOnly(resource.data.crew.packers.concat([request.auth.uid])));
+              && request.resource.data.crew.packers.hasAll(resource.data.crew.get('packers', []))
+              && request.resource.data.crew.packers.hasOnly(resource.data.crew.get('packers', []).concat([request.auth.uid])));
     }
     // The mover's load-out mirrors the packer's checklist: a photo of the
     // packed apartment, the sticker colour and unit number confirmed by hand,
@@ -164,11 +184,13 @@ service cloud.firestore {
     // Mirrors crewChangeOK for the mover side: a mover may add THEMSELVES to
     // crew.movers and nothing else. Packers and unpackers are untouchable,
     // nobody already credited can be removed, and no other uid can be added.
+    // Reads defensively for the reason written out in full on crewChangeOK
+    // above: this is the pair of it that unit 702 actually tripped over.
     function moverCrewChangeOK() {
       return !request.resource.data.diff(resource.data).affectedKeys().hasAny(['crew'])
           || (request.resource.data.crew.diff(resource.data.crew).affectedKeys().hasOnly(['movers'])
-              && request.resource.data.crew.movers.hasAll(resource.data.crew.movers)
-              && request.resource.data.crew.movers.hasOnly(resource.data.crew.movers.concat([request.auth.uid])));
+              && request.resource.data.crew.movers.hasAll(resource.data.crew.get('movers', []))
+              && request.resource.data.crew.movers.hasOnly(resource.data.crew.get('movers', []).concat([request.auth.uid])));
     }
     // The warehouse manager's three arrival checks (unit number, tenant's last
     // name, and each vault) are each saved on their own while the unit is
