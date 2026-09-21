@@ -543,10 +543,30 @@ export function normalizeCode(n) {
 
 export const normalizeVaultNumber = normalizeCode
 
-export function vaultNumberError(n, unit) {
-  const v = normalizeVaultNumber(n)
+/* A vault number always carries digits.
+ *
+ * Unit 601 was loaded with two vaults logged as "TD" and "NO" (2026-09-21).
+ * They read like answers to a yes/no question rather than attempts at a
+ * number, and the length check waved them through because both are exactly
+ * two characters. The real numbers, 6993 and 6788, were only recoverable
+ * because the door-closed photos happened to show the labels.
+ *
+ * So the test is "contains a digit", NOT "is all digits". BigBox vaults are
+ * genuinely numbered BB-1007, and a mover standing at a sealed vault being
+ * told the number painted on its side is invalid is a far worse failure than
+ * the one this prevents. Anything with a digit in it gets through.
+ */
+export function vaultNumberShapeError(v) {
   if (!v) return 'Enter the number on the side of the vault.'
   if (v.length < 2) return 'That looks too short to be a vault number.'
+  if (!/[0-9]/.test(v)) return 'A vault number has digits in it. Read it off the label on the door.'
+  return null
+}
+
+export function vaultNumberError(n, unit) {
+  const v = normalizeVaultNumber(n)
+  const shape = vaultNumberShapeError(v)
+  if (shape) return shape
   if (vaultsOf(unit).some((b) => normalizeVaultNumber(b.number) === v)) {
     return `Vault ${v} is already logged on this unit.`
   }
@@ -698,8 +718,11 @@ export function receivingDiff(unit) {
 
 export function receivedVaultError(n, unit) {
   const v = normalizeVaultNumber(n)
-  if (!v) return 'Enter the number on the side of the vault.'
-  if (v.length < 2) return 'That looks too short to be a vault number.'
+  // Same shape test as the load-out side. The warehouse is reading off the
+  // same label on the same door, so it cannot have a looser idea of what a
+  // vault number looks like than the crew who loaded it.
+  const shape = vaultNumberShapeError(v)
+  if (shape) return shape
   if (receivedVaults(unit).some((r) => normalizeVaultNumber(r.number) === v)) {
     return `Vault ${v} is already booked in on this unit.`
   }

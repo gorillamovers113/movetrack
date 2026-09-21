@@ -8,7 +8,7 @@ import {
   CARTON_TYPES, sumCartons, cartonsFromForm, cartonSummary,
   SUPPLY_TYPES, sumSupplies, suppliesFromForm, supplySummary,
   PACKING_STEPS, REQUIRED_STEPS, packingChecklist, packingProgress, nextPackingStep, packingComplete, wouldCompletePacking,
-  normalizeCode, vaultNumberError, vaultBoardStats, vaultPositionInUnit, vaultSheetRows,
+  normalizeCode, vaultNumberError, receivedVaultError, vaultBoardStats, vaultPositionInUnit, vaultSheetRows,
 } from '../mutations.js'
 
 describe('boxMismatch', () => {
@@ -754,6 +754,39 @@ describe('normalizeCode strips punctuation', () => {
     const unit = { vaults: [{ number: '7175' }] }
     expect(vaultNumberError('7175,', unit)).toMatch(/already logged/)
     expect(vaultNumberError('4921', unit)).toBeNull()
+  })
+
+  /* Unit 601, 2026-09-21: two vaults logged as "TD" and "NO". They look like
+   * answers to a yes/no question, and the length check passed them because
+   * both are exactly two characters. The real numbers survived only because
+   * the door-closed photos happened to show the labels.
+   */
+  describe('a vault number has digits in it', () => {
+    const none = {}
+
+    it('refuses letters with no digit at all', () => {
+      for (const junk of ['TD', 'NO', 'YES', 'n/a', 'none', 'XX']) {
+        expect(vaultNumberError(junk, none)).toMatch(/digits/)
+      }
+    })
+
+    it('still accepts a BigBox number, which is letters AND digits', () => {
+      // "Is all digits" would have been the obvious rule and it would tell a
+      // mover that the number painted on the vault in front of him is invalid.
+      for (const real of ['BB-1007', 'bb-9999', '6993', '6788', '4735']) {
+        expect(vaultNumberError(real, none)).toBeNull()
+      }
+    })
+
+    it('keeps the too-short and empty messages ahead of the digit one', () => {
+      expect(vaultNumberError('', none)).toMatch(/Enter the number/)
+      expect(vaultNumberError('X', none)).toMatch(/too short/)
+    })
+
+    it('holds the warehouse to the same standard as the crew', () => {
+      expect(receivedVaultError('TD', none)).toMatch(/digits/)
+      expect(receivedVaultError('BB-1007', none)).toBeNull()
+    })
   })
 })
 
