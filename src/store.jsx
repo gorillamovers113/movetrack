@@ -5,8 +5,9 @@ import { app, auth, db } from './firebase.js'
 import { captureMedia, uploadFile } from './lib/upload.js'
 import { businessDayKey, canClockInAt, lunchMinutesFor, openSessionFor, usesClock, tracksUnitTime } from './lib/timeclock.js'
 import { stepRow, pushRows } from './lib/sheetBackup.js'
-import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction, sumCartons, PACKING_STEPS, REQUIRED_STEPS, packingChecklist, wouldCompletePacking, LOADING_STEPS, loadingComplete, normalizeVaultNumber, normalizeCode, vaultsOf, completeVaults, vaultCountMismatch,
-  receivedVaultError, receivedVaults, receivingDiff, RECEIVING_STEPS, receivingComplete, readyToReceive } from './lib/mutations.js'
+import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction, sumCartons, PACKING_STEPS, REQUIRED_STEPS, packingChecklist, wouldCompletePacking, LOADING_STEPS, loadingComplete, normalizeVaultNumber, normalizeCode, vaultNumberShapeError, vaultsOf, completeVaults, vaultCountMismatch,
+  receivedVaultError, receivedVaults, receivingDiff, RECEIVING_STEPS, receivingComplete, readyToReceive,
+  isSupervisor, hasFullReach, describeChange } from './lib/mutations.js'
 import { DEFAULT_SCHEDULE, DEFAULT_RETURN_SCHEDULE, scheduleDocId } from './lib/schedule.js'
 import { stageOf } from './seed.js'
 import { mayPack, mayLoad } from './lib/roles.js'
@@ -1596,15 +1597,75 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
         })
         return ev('system', `Created unit ${p.number} for ${p.tenant} (floor ${p.floor})`, { unitId: ref.id })
       }
+      case 'fixVaultNumber': {
+        /* The correction Casey asked for by name: "username changed vault
+         * 4760 to 4766". A vault number lives in two places, the unit's own
+         * vaults array and the container doc that represents the physical
+         * vault, and a repair that touches only one leaves the board and the
+         * apartment disagreeing. Both move together or neither does.
+         *
+         * Guards, in order: the new number has to look like a vault number at
+         * all (shares vaultNumberShapeError with load-out and receiving, so a
+         * "TD" or a "NO" is refused here too), and no other vault may already
+         * carry it, because silently merging two vaults is worse than
+         * refusing. */
+        if (!hasFullReach(currentUser)) throw new Error('Only an admin or supervisor can correct a vault number.')
+        const wasNum = normalizeVaultNumber(p.was)
+        const nowNum = normalizeVaultNumber(p.number)
+        if (wasNum === nowNum) throw new Error('That is the same number.')
+        const shapeErr = vaultNumberShapeError(nowNum)
+        if (shapeErr) throw new Error(shapeErr)
+        const taken = state.containers.find((c) => normalizeVaultNumber(c.number) === nowNum)
+        if (taken) throw new Error(`Vault ${nowNum} already exists. Check the number.`)
+
+        const vault = vaultsOf(unit).find((v) => normalizeVaultNumber(v.number) === wasNum)
+        if (!vault) throw new Error(`Unit ${unit.number} has no vault ${wasNum}.`)
+
+        const unitRef = doc(db, 'units', p.unitId)
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(unitRef)
+          if (!snap.exists()) throw new Error('That unit is gone.')
+          const data = snap.data()
+          // vaultsOf merges the legacy `boxes` array with `vaults`; write back
+          // to whichever one this unit actually stores, so a pre-August unit
+          // does not silently grow a second copy of its vault list.
+          const key = (data.vaults || []).some((v) => normalizeVaultNumber(v.number) === wasNum) ? 'vaults' : 'boxes'
+          const next = (data[key] || []).map((v) => (normalizeVaultNumber(v.number) === wasNum ? { ...v, number: nowNum } : v))
+          tx.update(unitRef, { [key]: next })
+          if (vault.containerId) tx.update(doc(db, 'containers', vault.containerId), { number: nowNum })
+        })
+        return ev('system', `Unit ${unit.number}: ${describeChange('vault', wasNum, nowNum)}`, {
+          unitId: unit.id, containerId: vault.containerId || null, numberWas: wasNum, numberNow: nowNum,
+        })
+      }
       case 'editUnit': {
+        /* Names the old and new VALUE of every field touched, not just which
+         * fields moved. "edited unit 305 details (tenant)" cannot be checked
+         * by anyone later; "tenant Yolana Garcia to Yolanda Garcia" can. That
+         * is the whole point of letting supervisors correct things: the record
+         * has to stay auditable once more than one person can edit it.
+         * Who and when are already on the event (uid, userName, role, ts). */
         const changed = Object.keys(p.patch).filter((k) => p.patch[k] !== unit[k])
+        if (!changed.length) throw new Error('Nothing changed.')
         await updateDoc(doc(db, 'units', p.unitId), p.patch)
-        return ev('system', `Admin edited unit ${unit.number} details (${changed.join(', ') || 'no changes'})`, { unitId: unit.id })
+        const detail = changed.map((k) => describeChange(k, unit[k], p.patch[k])).join(', ')
+        return ev('system', `Changed unit ${unit.number}: ${detail}`, {
+          unitId: unit.id,
+          changes: changed.map((k) => ({ field: k, was: unit[k] ?? null, now: p.patch[k] ?? null })),
+        })
       }
       case 'addMedia': {
+        /* This used to write the event and nothing else, so a photo added
+         * through "Add to the record" uploaded to Storage, appeared in the
+         * Activity feed, and was then missing from the unit itself: not in its
+         * gallery, not in its photo count, and invisible to the admin
+         * media-filing repair tool, which reads unit.media. Every other media
+         * action on this switch does the arrayUnion; this one was simply
+         * forgotten. Found 4 Oct while attaching photos to unit 305 by hand. */
         p.media = attributeMedia(p.media)
         const n = p.media.length
         const kinds = p.media.some((m) => m.kind === 'video') ? (p.media.every((m) => m.kind === 'video') ? 'video' + (n > 1 ? 's' : '') : 'photos & video') : 'photo' + (n > 1 ? 's' : '')
+        await updateDoc(doc(db, 'units', p.unitId), { media: arrayUnion(...p.media) })
         return ev('media', `Added ${n} ${kinds}${p.note ? ', ' + p.note : ''} (unit ${unit.number})`, { unitId: unit.id, media: p.media })
       }
       case 'setNoteDate': {
@@ -1644,6 +1705,16 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
       case 'changeRole': {
         await updateDoc(doc(db, 'users', p.userId), { role: p.role })
         return ev('system', `Changed ${name}'s role to ${p.role}`)
+      }
+      case 'setSupervisor': {
+        /* Supervisor is a flag, not a role, so it rides on top of whatever
+         * someone already is: a packer who supervises still packs. Granting it
+         * is admin-only (Firestore rules gate users/* to admin) and is logged
+         * both ways, because this is the one switch that widens what another
+         * person can change about the record. */
+        if (currentUser.role !== 'admin') throw new Error('Only an admin can make someone a supervisor.')
+        await updateDoc(doc(db, 'users', p.userId), { supervisor: !!p.on })
+        return ev('system', `${p.on ? 'Made' : 'Removed'} ${name} ${p.on ? 'a supervisor' : 'as a supervisor'}`)
       }
       case 'removeUser': {
         await updateDoc(doc(db, 'users', p.userId), { status: 'removed', role: null })

@@ -18,6 +18,37 @@ service cloud.firestore {
     function isAdmin() {
       return hasRole('admin');
     }
+
+    /* A supervisor is a flag on top of a role, not a role of its own, so a
+     * packer who supervises keeps packing and gains reach over every
+     * apartment: photos, notes, corrections, at any stage, without being held
+     * to one unit at a time.
+     *
+     * me().get('supervisor', false), NEVER me().supervisor. Reading an absent
+     * key RAISES in this language rather than returning null, and not one
+     * user doc on this project has the field yet.
+     *
+     * Measured, not assumed: swapping in the bare form and running the suite
+     * leaves all 259 tests passing. `||` rescues it, because this is only
+     * ever reached as hasFullReach() || (isCrew() && ...), and an erroring
+     * operand beside a true one still yields true. So the bare form is not
+     * breaking anything TODAY.
+     *
+     * It is kept because the day somebody puts isSupervisor() inside an &&,
+     * or uses it where no other branch can be true, the error stops being
+     * absorbed and starts denying, with nothing in the diff to explain why.
+     * That is how unit 702 went down in September: there the raising read sat
+     * in a required conjunction with no second branch, and every mover was
+     * locked out of the apartment until it was repaired by hand.
+     */
+    function isSupervisor() {
+      return isActive() && me().get('supervisor', false) == true;
+    }
+    // Admin and supervisor have the same reach over the operational docs; they
+    // differ only in how the access was granted and in who can grant it.
+    function hasFullReach() {
+      return isAdmin() || isSupervisor();
+    }
     // packer/mover/driver/warehouse may write units/containers/overflow/events,
     // scoped to the specific stage transition their role owns (see the
     // transition helpers below). Admin is exempt from all of these checks.
@@ -205,6 +236,29 @@ service cloud.firestore {
     // Narrow in the same way as the packer and mover paths, and again `flag`
     // is deliberately absent: a mismatch is recorded on the step and raised as
     // a flag during the transition, so this can never clear an existing one.
+    /* "Add to the record" works on any unit, at any stage, for any active
+     * crew member, and appends media and nothing else.
+     *
+     * This exists because addMedia was fixed on 4 Oct to actually put the
+     * photo on the unit instead of only on the event. Before that it wrote no
+     * unit doc at all, so it could not be denied; afterwards it would have
+     * been, for anyone outside their own stage window. The warehouse was the
+     * clearest casualty: unitReceiveWriteOK permits only ['steps','received'],
+     * so a receiver adding a photo of a damaged vault would have been told
+     * "insufficient permissions" at the exact moment the photo mattered most.
+     *
+     * Narrow on purpose. `media` is the only key allowed to move and the
+     * stage must be identical, so this cannot skip a stage, claim a unit,
+     * clear a flag or touch identity. Photos are append-only evidence: crew
+     * cannot delete them (write covers delete in storage.rules), and a photo
+     * filed against the wrong apartment is repaired with adminMoveMedia
+     * rather than prevented by locking the camera.
+     */
+    function unitMediaWriteOK() {
+      return isCrew()
+          && resource.data.stage == request.resource.data.stage
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['media']);
+    }
     function unitReceiveWriteOK() {
       return hasRole('warehouse')
           && resource.data.stage == request.resource.data.stage
@@ -380,12 +434,13 @@ service cloud.firestore {
       // the doc through the one transition their role owns, or tick off one
       // packing checklist item mid-packing, and may not touch the unit's
       // identity fields while doing either.
-      allow update: if isAdmin()
+      allow update: if hasFullReach()
         || (isCrew()
             && (unitTransitionOK(me().role, resource.data.stage, request.resource.data.stage)
                 || unitStepWriteOK()
                 || unitLoadWriteOK()
-                || unitReceiveWriteOK())
+                || unitReceiveWriteOK()
+                || unitMediaWriteOK())
             && unitIdentityUnchanged()
             && custodyFieldsOK());
 
@@ -401,7 +456,7 @@ service cloud.firestore {
         && request.resource.data.status == 'empty'
         && request.resource.data.unitIds == [];
 
-      allow update: if isAdmin()
+      allow update: if hasFullReach()
         || (isCrew()
             && containerTransitionOK(me().role, resource.data.status, request.resource.data.status)
             && containerIdentityUnchanged()

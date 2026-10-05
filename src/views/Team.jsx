@@ -93,7 +93,7 @@ export default function Team({ toast }) {
       <div className="card">
         <div className="table-scroll">
           <table className="tbl">
-            <thead><tr><th>Member</th><th>Role</th><th>Actions logged</th><th>Email</th>{isAdmin && <th></th>}</tr></thead>
+            <thead><tr><th>Member</th><th>Role</th><th>Supervisor</th><th>Actions logged</th><th>Email</th>{isAdmin && <th></th>}</tr></thead>
             <tbody>
               {active.map((u) => (
                 <tr key={u.id}>
@@ -150,6 +150,36 @@ export default function Team({ toast }) {
                       </select>
                     ) : (
                       <span className="badge" style={{ background: (ROLES[u.role]?.color || '#8a93a2') + '22', color: ROLES[u.role]?.color || '#8a93a2' }}>{ROLES[u.role]?.label || u.role}</span>
+                    )}
+                  </td>
+                  {/* Supervisor is a flag on top of the role, so it is its own
+                      column rather than another option in the role select: a
+                      packer who supervises is still a packer. Admins already
+                      have this reach, so the box reads as ticked and locked on
+                      an admin row instead of offering a switch that would do
+                      nothing. */}
+                  <td>
+                    {u.role === 'admin' ? (
+                      <span className="muted" title="Admins already have full reach" style={{ fontSize: 12.5 }}>✓ admin</span>
+                    ) : isAdmin ? (
+                      <label style={{ display: 'inline-flex', alignItems: 'center', gap: 7, cursor: 'pointer' }}>
+                        <input
+                          type="checkbox"
+                          checked={!!u.supervisor}
+                          disabled={busyIds.has(u.id)}
+                          style={{ width: 18, height: 18 }}
+                          onChange={(e) => {
+                            const on = e.target.checked
+                            if (on && !confirm(`Make ${u.name} a supervisor? They will be able to add photos and notes to any apartment, and correct details and vault numbers anywhere in the building. Everything they change is logged under their name.`)) return
+                            withUserBusy(u.id, async () => {
+                              const status = await submitWrite(dispatch({ type: 'setSupervisor', p: { userId: u.id, on, byId: currentUser.uid } }))
+                              toast(status === 'queued' ? QUEUED_MESSAGE : `${u.name} ${on ? 'is now a supervisor' : 'is no longer a supervisor'}`)
+                            })
+                          }}
+                        />
+                      </label>
+                    ) : (
+                      u.supervisor ? <span className="badge" style={{ background: '#22c55e22', color: '#22c55e' }}>Supervisor</span> : <span className="muted">—</span>
                     )}
                   </td>
                   <td><b>{actionCount(u.id)}</b></td>

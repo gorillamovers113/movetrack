@@ -988,3 +988,40 @@ export function sortContainers(containers, units) {
     })
     .map((x) => x.c)
 }
+
+/* ---- Supervisor ----------------------------------------------------------
+ *
+ * A supervisor is NOT a role. It is a flag sitting on top of whatever role
+ * someone already has, so a packer who supervises stays a packer on the
+ * packing screens and simply gains reach across the whole building. That is
+ * why it is a boolean on the user doc and not another entry in ROLES: roles
+ * are mutually exclusive and this is additive.
+ *
+ * Always read it with a default. Every user doc created before this feature
+ * has no `supervisor` key at all, so `=== true` rather than a truthy check
+ * keeps an absent field, a stray string and a 1 all reading as false.
+ *
+ * The Firestore rules mirror this with me().get('supervisor', false). Over
+ * there the stakes are different and worth reading the comment for: an
+ * absent key RAISES rather than returning null, which is harmless inside the
+ * `||` it currently sits in and is not harmless anywhere else.
+ */
+export const isSupervisor = (user) => !!user && user.supervisor === true
+
+// Admin and supervisor differ in how they are granted, not in their reach
+// over a unit, so the app asks this question rather than checking the role
+// string in a dozen places and missing one.
+export const hasFullReach = (user) => !!user && (user.role === 'admin' || isSupervisor(user))
+
+/* Audit line for a field a supervisor corrected. Casey's requirement is that
+ * every supervisor edit says who, what, from, to and when, so the before
+ * value is spelled out rather than only naming which field moved: "changed
+ * vault 4760 to 4766" is checkable later, "edited vault details" is not.
+ * Worded "X to Y" to match how Casey asked for it to read. The timestamp is
+ * not in here because every event already carries `ts` and the Activity feed
+ * formats it in the reader's own timezone.
+ */
+export function describeChange(field, was, now) {
+  const show = (v) => (v === undefined || v === null || v === '' ? '(blank)' : String(v))
+  return `${field} ${show(was)} to ${show(now)}`
+}

@@ -22,7 +22,7 @@
  * constraint, and the crew are not the adversary. Putting it in rules would
  * also mean an admin could not sort out a tangle without a rules deploy.
  */
-import { loadingProgress } from './mutations.js'
+import { loadingProgress, isSupervisor } from './mutations.js'
 import { canPack, canLoad } from './roles.js'
 
 const uidOf = (user) => user && (user.uid || user.id)
@@ -87,7 +87,11 @@ export function openLoadingUnit(units, user) {
  * admin correcting a value on unit A does not mean they are packing it.
  */
 export function blockingUnit(units, user, targetUnitId, kind) {
-  if (!user || user.role === 'admin') return null
+  // One-apartment-at-a-time exists to stop a photo landing on the wrong unit
+  // when somebody has two open. It does not apply to whoever is checking the
+  // work: a supervisor's whole job is moving between apartments, and they are
+  // not the one standing in a room photographing it.
+  if (!user || user.role === 'admin' || isSupervisor(user)) return null
   const open = kind === 'loading' ? openLoadingUnit(units, user) : openPackingUnit(units, user)
   if (!open || open.id === targetUnitId) return null
   return open
