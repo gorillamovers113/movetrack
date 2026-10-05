@@ -450,9 +450,19 @@ service cloud.firestore {
     match /containers/{containerId} {
       allow read: if isActive();
 
-      // logEmpties / bigboxSwap new-empties: admin, or mover dropping a
-      // fresh empty container.
-      allow create: if (isAdmin() || canLoad())
+      // logEmpties / bigboxSwap new-empties: a mover dropping a fresh empty
+      // container, or anyone with full reach.
+      //
+      // Supervisors are here because startVault creates the container when the
+      // number typed is one nobody has logged, which is the normal case for a
+      // vault found after the unit closed. Without it a supervisor whose
+      // underlying role cannot load gets as far as typing the number and is
+      // then refused, with the vault half-recorded. Liv happens to be `crew`
+      // and would have scraped through; a supervising packer would not have.
+      //
+      // The shape constraints stay for everyone: a container is born empty
+      // and belonging to nobody, whoever creates it.
+      allow create: if (hasFullReach() || canLoad())
         && request.resource.data.status == 'empty'
         && request.resource.data.unitIds == [];
 
@@ -604,8 +614,18 @@ service cloud.firestore {
     // value and nothing about who changed it.
     // An award is the admin's to give. Deliberately not writable by the person
     // receiving it: a mark you can award yourself means nothing.
+    /* The old value of a blind-checked item, kept off the unit doc on purpose:
+     * the whole crew can read units, and seeing the number somebody first
+     * typed would defeat a check that only works when it is answered cold.
+     *
+     * Supervisors as well as admins, because correcting a typo IS the
+     * supervisor's job and adminCorrectStep writes this row as part of the
+     * same action. Gated to isAdmin() it would deny the audit write and take
+     * the correction down with it, leaving the wrong value on the unit and no
+     * record of the attempt.
+     */
     match /stepCorrections/{correctionId} {
-      allow read, write: if isAdmin();
+      allow read, write: if hasFullReach();
     }
 
     /* Session and sign-in telemetry.

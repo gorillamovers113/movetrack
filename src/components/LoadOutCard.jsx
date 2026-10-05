@@ -1,12 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { useStore, fmtTime } from '../store.jsx'
 import { Modal, CaptureButtons } from '../ui.jsx'
+import { stageOf } from '../seed.js'
 import { captureMedia, uploadFile } from '../lib/upload.js'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import {
   LOADING_STEPS, loadingChecklist, loadingProgress, loadingComplete,
   VAULT_PARTS, vaultsOf, completeVaults, vaultComplete, vaultProgress, vaultTouchedAt,
-  vaultNumberError, normalizeVaultNumber, vaultCountMismatch,
+  vaultNumberError, normalizeVaultNumber, vaultCountMismatch, hasFullReach,
   stickerMismatch, unitNumberMismatch, STICKER_COLORS,
 } from '../lib/mutations.js'
 
@@ -125,7 +126,16 @@ export default function LoadOutCard({ unit, toast }) {
   const [afterShots, setAfterShots] = useState([])
   const [vaultShots, setVaultShots] = useState([])
 
-  const isAdmin = currentUser.role === 'admin'
+  // Correcting a recorded value is the supervisor's job as much as the
+  // admin's: the sticker, the unit number and the vault count are asked blind
+  // and the crew deliberately cannot retype them, so somebody with reach has
+  // to be able to put a typo right.
+  const canCorrect = hasFullReach(currentUser)
+  // Once a unit has left `packed` its loading is closed. The card is still
+  // reachable, for a vault found after the fact, but the button that closes
+  // the unit must not be: re-running that transition on an already-loaded
+  // unit is meaningless and the stage has nowhere to go.
+  const loadingClosed = unit.stage !== 'packed'
   const checklist = loadingChecklist(unit)
   const progress = loadingProgress(unit)
   const vaults = vaultsOf(unit).slice().sort((a, b) => vaultTouchedAt(a) - vaultTouchedAt(b))
@@ -312,7 +322,7 @@ export default function LoadOutCard({ unit, toast }) {
               {/* The crew cannot retype a blind check, on purpose: one you can
                   retry until it passes is not a check. An admin can, because a
                   genuine typo otherwise leaves the unit flagged forever. */}
-              {isAdmin && step.done && step.value != null && step.value !== '' && (
+              {canCorrect && step.done && step.value != null && step.value !== '' && (
                 <span
                   role="button" tabIndex={0}
                   onClick={(e) => { e.stopPropagation(); setFixValue(String(step.value)); setFixing(step) }}
@@ -366,16 +376,20 @@ export default function LoadOutCard({ unit, toast }) {
           </div>
         )}
 
-        <button
-          className="btn btn-primary btn-lg"
-          style={{ width: '100%', marginTop: 12 }}
-          disabled={!ready || busy}
-          onClick={finish}
-        >
-          {busy ? 'Saving…' : ready ? `Mark unit ${unit.number} fully loaded` : 'Finish the checklist to close this unit'}
-        </button>
+        {!loadingClosed && (
+          <button
+            className="btn btn-primary btn-lg"
+            style={{ width: '100%', marginTop: 12 }}
+            disabled={!ready || busy}
+            onClick={finish}
+          >
+            {busy ? 'Saving…' : ready ? `Mark unit ${unit.number} fully loaded` : 'Finish the checklist to close this unit'}
+          </button>
+        )}
         <div className="muted" style={{ fontSize: 12.5, marginTop: 8 }}>
-          {countOff
+          {loadingClosed
+            ? `Unit ${unit.number} is already ${stageOf(unit.stage).label.toLowerCase()}. Anything added here goes onto its record under your name, and the vault count will need correcting to match.`
+            : countOff
             ? `You counted ${countOff.said} vault${countOff.said === 1 ? '' : 's'} off the truck, but ${countOff.logged} ${countOff.logged === 1 ? 'is' : 'are'} fully logged. Finish the missing one, or tap "How many vaults" to correct the count.`
             : ready
               ? `${completeVaults(unit).length} vault${completeVaults(unit).length === 1 ? '' : 's'} logged. Only tap this once nothing else is going in.`

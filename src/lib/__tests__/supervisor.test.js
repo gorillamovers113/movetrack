@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isSupervisor, hasFullReach, describeChange } from '../mutations.js'
+import { isSupervisor, hasFullReach, describeChange, mayAddLateVault } from '../mutations.js'
 import { blockingUnit } from '../focus.js'
 
 const user = (over = {}) => ({ uid: 'u1', name: 'Sam', role: 'packer', ...over })
@@ -65,5 +65,40 @@ describe('an edit says what it changed, not just that it changed', () => {
     expect(describeChange('phone', '', '619-555-0134')).toBe('phone (blank) to 619-555-0134')
     expect(describeChange('note', null, 'back after 2')).toBe('note (blank) to back after 2')
     expect(describeChange('note', undefined, 'x')).toBe('note (blank) to x')
+  })
+})
+
+describe('a vault found after the unit closed', () => {
+  // Liv's case on unit 305: three vaults logged, counted and closed the day
+  // before, then forgotten items turn up and go to the warehouse in a fourth.
+  const sup = { uid: 'liv', name: 'Liv Post', role: 'crew', supervisor: true }
+  const mover = { uid: 'm', name: 'Mover', role: 'mover' }
+
+  it('opens the load-out card from packed onward for a supervisor', () => {
+    expect(mayAddLateVault(sup, 'packed')).toBe(true)
+    expect(mayAddLateVault(sup, 'loaded')).toBe(true)
+    expect(mayAddLateVault(sup, 'picked_up')).toBe(true)
+    expect(mayAddLateVault(sup, 'at_warehouse')).toBe(true)
+  })
+
+  it('does not open it before the unit is packed', () => {
+    // A unit still being packed needs the normal flow, not a retrospective
+    // vault, and showing both checklists at once would contradict itself.
+    expect(mayAddLateVault(sup, 'not_started')).toBe(false)
+    expect(mayAddLateVault(sup, 'packing')).toBe(false)
+  })
+
+  it('stays shut for an ordinary mover once the unit has moved on', () => {
+    expect(mayAddLateVault(mover, 'loaded')).toBe(false)
+    expect(mayAddLateVault(mover, 'packed')).toBe(false)
+  })
+
+  it('is open to an admin, who always had this reach', () => {
+    expect(mayAddLateVault({ uid: 'a', role: 'admin' }, 'loaded')).toBe(true)
+  })
+
+  it('refuses an unknown stage rather than guessing', () => {
+    expect(mayAddLateVault(sup, 'nonsense')).toBe(false)
+    expect(mayAddLateVault(null, 'loaded')).toBe(false)
   })
 })

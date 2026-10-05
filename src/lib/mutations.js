@@ -1025,3 +1025,29 @@ export function describeChange(field, was, now) {
   const show = (v) => (v === undefined || v === null || v === '' ? '(blank)' : String(v))
   return `${field} ${show(was)} to ${show(now)}`
 }
+
+
+/* A vault found the day after the unit closed.
+ *
+ * Liv (a supervisor) realised items had been missed on unit 305, sent movers
+ * to collect them, and they went to the warehouse in a fourth vault. The
+ * apartment's three vaults were already logged, counted and closed, and the
+ * load-out card disappears the moment a unit leaves `packed`, so there was
+ * nowhere in the app to say so.
+ *
+ * The machinery for this already existed and was simply unreachable:
+ * load_vaults is a repeatable step, load_vault_count stays tappable after it
+ * is answered, and adminCorrectStep writes the old value to stepCorrections.
+ * What was missing was a door into it after the unit had moved on. This says
+ * who may open that door: from `packed` onward, somebody with full reach.
+ *
+ * Deliberately not `not_started` or `packing`. A unit nobody has finished
+ * packing does not need a retrospective vault, it needs the normal flow, and
+ * opening the load-out card there would offer two contradictory checklists at
+ * once.
+ */
+export function mayAddLateVault(user, stage) {
+  if (!hasFullReach(user)) return false
+  const i = STAGES.indexOf(stage)
+  return i >= STAGES.indexOf('packed')
+}
