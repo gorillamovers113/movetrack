@@ -10,6 +10,7 @@ import { todayKey, findScheduleDay, nextScheduleDay, fmtScheduleDate, progressFo
 import BuildingView from './BuildingView.jsx'
 import NewUnitButton from '../components/NewUnitModal.jsx'
 import ReturnPhaseToggle from '../components/ReturnPhaseToggle.jsx'
+import ClosePhaseButton from '../components/ClosePhaseButton.jsx'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 
 // Compact "today" banner: floor + work type + progress vs plan, or a
@@ -313,6 +314,7 @@ export default function Dashboard({ openUnit, toast }) {
         <div className="row">
           <input className="search" placeholder="Search unit, tenant, container…" value={q} onChange={(e) => setQ(e.target.value)} />
           <NewUnitButton toast={toast} />
+          <ClosePhaseButton toast={toast} />
           <ReturnPhaseToggle toast={toast} />
         </div>
       </div>
