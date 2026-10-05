@@ -3,7 +3,7 @@ import { STAGES, stageOf } from '../seed.js'
 import { useStore, canAct, filesToMedia, fmtTime, CONT_STATUS } from '../store.jsx'
 import { Modal, Lightbox, Uploader, EventRow, Avatar, StagePill, CaptureButtons } from '../ui.jsx'
 import { captureMedia, uploadFile } from '../lib/upload.js'
-import { hasFullReach, surnameOf, STICKER_COLORS, inventoryRangeError, overlappingUnits, inventoryRangeLabel, inventoryDigitsFrom, stickerHex, CARTON_TYPES, cartonsFromForm, sumCartons, cartonSummary, SUPPLY_TYPES, suppliesFromForm, sumSupplies, supplySummary, packingChecklist, packingProgress, packingComplete, nextPackingStep, PACKING_STEPS, readyToReceive } from '../lib/mutations.js'
+import { hasFullReach, mayAddLateVault, surnameOf, STICKER_COLORS, inventoryRangeError, overlappingUnits, inventoryRangeLabel, inventoryDigitsFrom, stickerHex, CARTON_TYPES, cartonsFromForm, sumCartons, cartonSummary, SUPPLY_TYPES, suppliesFromForm, sumSupplies, supplySummary, packingChecklist, packingProgress, packingComplete, nextPackingStep, PACKING_STEPS, readyToReceive } from '../lib/mutations.js'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import { unitLabour, fmtDuration } from '../lib/reports.js'
 import ReportOverflowButton from '../components/ReportOverflowButton.jsx'
@@ -166,8 +166,12 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
     && (unit.stage === 'not_started' || unit.stage === 'packing')
   // The mover's equivalent, on a unit the packers have finished. Same one
   // item, one save, one name-and-time shape as the packing checklist.
-  const onLoadOut = mayLoad(currentUser.role)
-    && unit.stage === 'packed'
+  // The mover's own window is still exactly `packed`. The second clause is
+  // the late-vault door: a supervisor keeps this card after the unit has
+  // closed, because a vault discovered the next day is still that unit's
+  // vault and has to land on its record rather than nowhere.
+  const onLoadOut = (mayLoad(currentUser.role) && unit.stage === 'packed')
+    || mayAddLateVault(currentUser, unit.stage)
   // The warehouse manager's arrival check. readyToReceive accepts 'loaded' as
   // well as 'picked_up' because the drivers do not use the app.
   const onReceiving = (currentUser.role === 'warehouse' || currentUser.role === 'admin')

@@ -2459,3 +2459,55 @@ describe('units — adding a photo at any stage', () => {
     await assertFails(updateDoc(doc(dbAs(VIEWER), 'units', 'u-m4'), { media: arrayUnion(shot) }))
   })
 })
+
+// =====================================================================
+// A vault found after the unit closed (Liv, unit 305, 5 Oct).
+//
+// Three vaults logged, counted and closed the day before; forgotten items
+// turn up and go to the warehouse in a fourth. The server side has to let a
+// supervisor record it, and has to let them correct the vault count that the
+// new vault now contradicts, which means writing the stepCorrections audit
+// row as well as the unit.
+// =====================================================================
+describe('units — a late vault and the count it contradicts', () => {
+  it('a supervisor adds a vault to a unit that is already loaded', async () => {
+    await seed('units', 'u-late', baseUnit({ stage: 'loaded', vaults: [{ number: '4766' }], containerIds: ['c-late-a'] }))
+    await assertSucceeds(updateDoc(doc(dbAs(SUPER), 'units', 'u-late'), {
+      vaults: arrayUnion({ number: '8123', containerId: 'c-late-b', uid: SUPER, at: 2000 }),
+      containerIds: arrayUnion('c-late-b'),
+    }))
+  })
+
+  it('and creates the container for it', async () => {
+    await assertSucceeds(setDoc(doc(dbAs(SUPER), 'containers', 'c-late-b'), baseContainer({ number: '8123' })))
+  })
+
+  it('a mover cannot, once the unit has left packed', async () => {
+    await seed('units', 'u-late2', baseUnit({ stage: 'loaded' }))
+    await assertFails(updateDoc(doc(dbAs(MOVER), 'units', 'u-late2'), {
+      vaults: arrayUnion({ number: '8124', uid: MOVER, at: 2000 }),
+    }))
+  })
+
+  it('a supervisor can write the stepCorrections row the count fix depends on', async () => {
+    // adminCorrectStep writes this row and the unit patch in one action. Gated
+    // to admin it would deny here and take the whole correction down with it,
+    // leaving the wrong count on the unit and no record of the attempt.
+    await assertSucceeds(addDoc(collection(dbAs(SUPER), 'stepCorrections'), {
+      unitId: 'u-late', key: 'load_vault_count', oldValue: 3, newValue: 4, byUid: SUPER, at: 3000,
+    }))
+  })
+
+  it('and then correct the count on the unit itself', async () => {
+    await seed('units', 'u-late3', baseUnit({ stage: 'loaded', steps: { load_vault_count: { value: 3, matched: true } } }))
+    await assertSucceeds(updateDoc(doc(dbAs(SUPER), 'units', 'u-late3'), {
+      'steps.load_vault_count.value': 4, 'steps.load_vault_count.matched': true,
+    }))
+  })
+
+  it('a plain crew member still cannot write a correction row', async () => {
+    await assertFails(addDoc(collection(dbAs(MOVER), 'stepCorrections'), {
+      unitId: 'u-late', key: 'load_vault_count', oldValue: 3, newValue: 4, byUid: MOVER, at: 3000,
+    }))
+  })
+})
