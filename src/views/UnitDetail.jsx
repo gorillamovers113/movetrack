@@ -3,7 +3,7 @@ import { STAGES, stageOf } from '../seed.js'
 import { useStore, canAct, filesToMedia, fmtTime, CONT_STATUS } from '../store.jsx'
 import { Modal, Lightbox, Uploader, EventRow, Avatar, StagePill, CaptureButtons } from '../ui.jsx'
 import { captureMedia, uploadFile } from '../lib/upload.js'
-import { surnameOf, STICKER_COLORS, inventoryRangeError, overlappingUnits, inventoryRangeLabel, inventoryDigitsFrom, stickerHex, CARTON_TYPES, cartonsFromForm, sumCartons, cartonSummary, SUPPLY_TYPES, suppliesFromForm, sumSupplies, supplySummary, packingChecklist, packingProgress, packingComplete, nextPackingStep, PACKING_STEPS, readyToReceive } from '../lib/mutations.js'
+import { hasFullReach, surnameOf, STICKER_COLORS, inventoryRangeError, overlappingUnits, inventoryRangeLabel, inventoryDigitsFrom, stickerHex, CARTON_TYPES, cartonsFromForm, sumCartons, cartonSummary, SUPPLY_TYPES, suppliesFromForm, sumSupplies, supplySummary, packingChecklist, packingProgress, packingComplete, nextPackingStep, PACKING_STEPS, readyToReceive } from '../lib/mutations.js'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import { unitLabour, fmtDuration } from '../lib/reports.js'
 import ReportOverflowButton from '../components/ReportOverflowButton.jsx'
@@ -183,7 +183,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
   // already what the security rules enforce, so offering an upload button here
   // only produced a permission error after the photo had been taken. An admin
   // is never view-only; they can correct anything at any stage.
-  const viewOnly = currentUser.role !== 'admin' && !onChecklist && !onLoadOut && !onReceiving && !action
+  const viewOnly = !hasFullReach(currentUser) && !onChecklist && !onLoadOut && !onReceiving && !action
   const canContribute = currentUser.role !== 'viewer' && !viewOnly
   // A viewer is view-only on every unit by design and knows it, so the lock
   // banner would be noise. It is for crew, who could edit this unit until
@@ -540,7 +540,7 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
           <div className="card" style={{ padding: '16px 20px', marginBottom: 14 }}>
             <div className="row" style={{ marginBottom: 2 }}>
               <div className="section-title grow" style={{ margin: 0 }}>Details</div>
-              {currentUser.role === 'admin' && (
+              {hasFullReach(currentUser) && (
                 <button className="btn btn-ghost btn-sm" onClick={() => { setForm({ tenant: unit.tenant, phone: unit.phone, note: unit.note }); setModal('edit') }}>✎ Edit</button>
               )}
             </div>

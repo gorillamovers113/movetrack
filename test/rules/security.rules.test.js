@@ -25,6 +25,7 @@ const VIEWER = 'viewer-1'
 const PENDING = 'pending-1'
 const OTHER_PACKER = 'packer-2' // for the "forged event uid" test
 const BOTH = 'crew-1' // packer + mover in one person
+const SUPER = 'super-1' // a packer who also supervises: role unchanged, reach widened
 
 let testEnv
 
@@ -56,6 +57,9 @@ beforeEach(async () => {
       [PENDING]: { role: null, status: 'pending' },
       [OTHER_PACKER]: { role: 'packer', status: 'active' },
       [BOTH]: { role: 'crew', status: 'active' },
+      // Deliberately the LOWEST-reach crew role plus the flag, so a pass
+      // proves the flag did the work and not the role underneath it.
+      [SUPER]: { role: 'packer', status: 'active', supervisor: true },
     }
     await Promise.all(
       Object.entries(users).map(([uid, u]) =>
@@ -2342,5 +2346,116 @@ describe('who may clock in', () => {
         clockOut: Date.now(), lunchMinutes: 30, workedThroughLunch: false,
       })
     )
+  })
+})
+
+// =====================================================================
+// Supervisor: a flag on top of a role, not a role of its own.
+//
+// The fixture user is a PACKER with supervisor: true, chosen deliberately.
+// A packer cannot touch a unit once it is packed, cannot load, and cannot
+// change a unit's identity, so every "allow" below is the flag doing the
+// work rather than the role underneath it.
+//
+// Note what is NOT written in this file: a user doc carrying
+// supervisor: false. Every other fixture here has no `supervisor` key at
+// all, which is the real shape of all 20-odd accounts on this project.
+//
+// That makes the suite a live check on the absent-key read, and the result
+// is worth recording honestly: swapping isSupervisor() to the bare
+// me().supervisor leaves all 259 tests GREEN. The raise is absorbed by the
+// `||` it sits beside. The safe form is kept for the day it is moved
+// somewhere an `&&` cannot absorb it, which is the shape that took unit 702
+// out of service in September, not because it is load-bearing right now.
+// =====================================================================
+describe('units/containers — supervisor', () => {
+  it('writes to a unit at a stage its own role could never touch', async () => {
+    await seed('units', 'u-sup', baseUnit({ stage: 'loaded' }))
+    const db = dbAs(SUPER)
+    await assertSucceeds(updateDoc(doc(db, 'units', 'u-sup'), { media: arrayUnion({ id: 'm1', url: 'x', kind: 'photo' }) }))
+  })
+
+  it('and a plain packer is still denied anything beyond a photo there', async () => {
+    // Deliberately NOT a media write: adding a photo at any stage is allowed
+    // for all crew by unitMediaWriteOK. A step is the right contrast, because
+    // a packer may only write steps while the unit is mid-packing.
+    await seed('units', 'u-sup2', baseUnit({ stage: 'loaded' }))
+    const db = dbAs(PACKER)
+    await assertFails(updateDoc(doc(db, 'units', 'u-sup2'), { 'steps.door': { at: 1, by: PACKER } }))
+  })
+
+  it('while the supervisor can write that same step', async () => {
+    await seed('units', 'u-sup2b', baseUnit({ stage: 'loaded' }))
+    await assertSucceeds(updateDoc(doc(dbAs(SUPER), 'units', 'u-sup2b'), { 'steps.door': { at: 1, by: SUPER } }))
+  })
+
+  it('corrects a unit identity field, which no crew role may do', async () => {
+    await seed('units', 'u-sup3', baseUnit({ stage: 'packed', tenant: 'Yolana Garcia' }))
+    await assertSucceeds(updateDoc(doc(dbAs(SUPER), 'units', 'u-sup3'), { tenant: 'Yolanda Garcia' }))
+    await assertFails(updateDoc(doc(dbAs(PACKER), 'units', 'u-sup3'), { tenant: 'Someone Else' }))
+  })
+
+  it('corrects a vault number on the container', async () => {
+    await seed('containers', 'c-sup', baseContainer({ number: '4760', status: 'filling', unitIds: ['u-sup'] }))
+    await assertSucceeds(updateDoc(doc(dbAs(SUPER), 'containers', 'c-sup'), { number: '4766' }))
+  })
+
+  it('cannot delete a unit or a container; that stays admin only', async () => {
+    await seed('units', 'u-sup4', baseUnit())
+    await seed('containers', 'c-sup2', baseContainer())
+    await assertFails(deleteDoc(doc(dbAs(SUPER), 'units', 'u-sup4')))
+    await assertFails(deleteDoc(doc(dbAs(SUPER), 'containers', 'c-sup2')))
+  })
+
+  it('cannot hand the flag to anybody, including itself', async () => {
+    // Granting is admin-only, so supervisor cannot become self-propagating.
+    await assertFails(updateDoc(doc(dbAs(SUPER), 'users', PACKER), { supervisor: true }))
+    await assertFails(updateDoc(doc(dbAs(SUPER), 'users', SUPER), { supervisor: true }))
+    await assertSucceeds(updateDoc(doc(dbAs(ADMIN), 'users', PACKER), { supervisor: true }))
+  })
+
+  it('a user whose doc has no supervisor key is unaffected', async () => {
+    // The raise-and-deny guard, stated once explicitly rather than only
+    // implied by the rest of the suite.
+    await seed('units', 'u-sup5', baseUnit({ stage: 'not_started' }))
+    await assertSucceeds(updateDoc(doc(dbAs(PACKER), 'units', 'u-sup5'), { stage: 'packing', 'crew.packers': arrayUnion(PACKER) }))
+  })
+})
+
+// =====================================================================
+// "Add to the record": appending a photo is never blocked by stage.
+//
+// addMedia was fixed on 4 Oct to write the photo onto the unit as well as
+// the event. Before that it touched no unit doc, so rules could not refuse
+// it; afterwards they would have, for everyone outside their own stage
+// window. These pin the behaviour so the fix cannot be undone by tightening
+// a neighbouring helper.
+// =====================================================================
+describe('units — adding a photo at any stage', () => {
+  const shot = { id: 'm-x', url: 'https://example.test/a.jpg', kind: 'photo' }
+
+  it('warehouse can add a photo while receiving, which its own helper forbids', async () => {
+    // unitReceiveWriteOK permits only ['steps','received'], so this passes
+    // only because unitMediaWriteOK exists.
+    await seed('units', 'u-m1', baseUnit({ stage: 'loaded' }))
+    await assertSucceeds(updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u-m1'), { media: arrayUnion(shot) }))
+  })
+
+  it('a packer can add a photo to a unit that has already been loaded', async () => {
+    await seed('units', 'u-m2', baseUnit({ stage: 'loaded' }))
+    await assertSucceeds(updateDoc(doc(dbAs(PACKER), 'units', 'u-m2'), { media: arrayUnion(shot) }))
+  })
+
+  it('but media is the only key it will carry', async () => {
+    await seed('units', 'u-m3', baseUnit({ stage: 'loaded' }))
+    const db = dbAs(PACKER)
+    await assertFails(updateDoc(doc(db, 'units', 'u-m3'), { media: arrayUnion(shot), tenant: 'Someone Else' }))
+    await assertFails(updateDoc(doc(db, 'units', 'u-m3'), { media: arrayUnion(shot), stage: 'at_warehouse' }))
+    await assertFails(updateDoc(doc(db, 'units', 'u-m3'), { media: arrayUnion(shot), 'flag.open': false }))
+  })
+
+  it('and a viewer still cannot', async () => {
+    await seed('units', 'u-m4', baseUnit({ stage: 'loaded' }))
+    await assertFails(updateDoc(doc(dbAs(VIEWER), 'units', 'u-m4'), { media: arrayUnion(shot) }))
   })
 })
