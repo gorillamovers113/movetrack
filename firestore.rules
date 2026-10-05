@@ -254,6 +254,19 @@ service cloud.firestore {
      * filed against the wrong apartment is repaired with adminMoveMedia
      * rather than prevented by locking the camera.
      */
+    /* A unit from a finished phase. Read-only for everyone but an admin, who
+     * is also the only one who can lift it when the move back starts.
+     *
+     * resource.data.get('locked', false), and HERE the default is genuinely
+     * load-bearing, unlike the supervisor read. This one sits inside an `&&`:
+     * no sibling operand can come back true and absorb a raise, so a bare
+     * resource.data.locked would deny every write on all 50 unlocked units
+     * the moment it shipped. That is the exact shape that took unit 702 out
+     * of service in September.
+     */
+    function unitLocked() {
+      return resource.data.get('locked', false) == true;
+    }
     function unitMediaWriteOK() {
       return isCrew()
           && resource.data.stage == request.resource.data.stage
@@ -434,15 +447,19 @@ service cloud.firestore {
       // the doc through the one transition their role owns, or tick off one
       // packing checklist item mid-packing, and may not touch the unit's
       // identity fields while doing either.
-      allow update: if hasFullReach()
-        || (isCrew()
-            && (unitTransitionOK(me().role, resource.data.stage, request.resource.data.stage)
-                || unitStepWriteOK()
-                || unitLoadWriteOK()
-                || unitReceiveWriteOK()
-                || unitMediaWriteOK())
-            && unitIdentityUnchanged()
-            && custodyFieldsOK());
+      // Admin first and alone on a locked unit: everything else, supervisors
+      // included, is gated behind the lock.
+      allow update: if isAdmin()
+        || (!unitLocked()
+            && (isSupervisor()
+                || (isCrew()
+                    && (unitTransitionOK(me().role, resource.data.stage, request.resource.data.stage)
+                        || unitStepWriteOK()
+                        || unitLoadWriteOK()
+                        || unitReceiveWriteOK()
+                        || unitMediaWriteOK())
+                    && unitIdentityUnchanged()
+                    && custodyFieldsOK())));
 
       allow delete: if isAdmin();
     }

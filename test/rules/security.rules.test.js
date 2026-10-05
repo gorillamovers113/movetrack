@@ -2511,3 +2511,59 @@ describe('units — a late vault and the count it contradicts', () => {
     }))
   })
 })
+
+// =====================================================================
+// A closed phase.
+//
+// Phase 1's fifty apartments sit in storage for five to seven months while
+// phase 2 runs on the other half of the building with fresh crew in the same
+// app. Closed units go read-only for everybody but an admin, who is the only
+// one who can reopen them for the move back.
+//
+// The absent-key read matters here in a way it did not for the supervisor
+// flag: unitLocked() sits inside an `&&`, so no sibling operand can come back
+// true and absorb a raise. A bare resource.data.locked would deny every write
+// on all 50 units at once. These tests fail loudly if it is ever written that
+// way, which is the behaviour the supervisor tests could not give us.
+// =====================================================================
+describe('units — a closed phase', () => {
+  const shot = { id: 'm-lock', url: 'https://example.test/a.jpg', kind: 'photo' }
+
+  it('a crew member cannot write to a closed unit', async () => {
+    await seed('units', 'u-lock', baseUnit({ stage: 'packing', locked: true, crew: { packers: [PACKER], movers: [] } }))
+    await assertFails(updateDoc(doc(dbAs(PACKER), 'units', 'u-lock'), { 'steps.door': { at: 1 } }))
+    await assertFails(updateDoc(doc(dbAs(PACKER), 'units', 'u-lock'), { media: arrayUnion(shot) }))
+  })
+
+  it('nor can a supervisor; that is the point of closing it', async () => {
+    await seed('units', 'u-lock2', baseUnit({ stage: 'loaded', locked: true }))
+    await assertFails(updateDoc(doc(dbAs(SUPER), 'units', 'u-lock2'), { media: arrayUnion(shot) }))
+    await assertFails(updateDoc(doc(dbAs(SUPER), 'units', 'u-lock2'), { tenant: 'Changed' }))
+  })
+
+  it('an admin can, which is how it gets reopened', async () => {
+    await seed('units', 'u-lock3', baseUnit({ stage: 'loaded', locked: true }))
+    await assertSucceeds(updateDoc(doc(dbAs(ADMIN), 'units', 'u-lock3'), { locked: false }))
+  })
+
+  it('a unit with no locked field at all behaves exactly as before', async () => {
+    // The guard against the raise. Every real unit on the project is this shape.
+    await seed('units', 'u-lock4', baseUnit({ stage: 'not_started' }))
+    await assertSucceeds(updateDoc(doc(dbAs(PACKER), 'units', 'u-lock4'), {
+      stage: 'packing', 'crew.packers': arrayUnion(PACKER),
+    }))
+    await seed('units', 'u-lock5', baseUnit({ stage: 'loaded' }))
+    await assertSucceeds(updateDoc(doc(dbAs(WAREHOUSE), 'units', 'u-lock5'), { media: arrayUnion(shot) }))
+  })
+
+  it('and locked: false is open, same as absent', async () => {
+    await seed('units', 'u-lock6', baseUnit({ stage: 'loaded', locked: false }))
+    await assertSucceeds(updateDoc(doc(dbAs(SUPER), 'units', 'u-lock6'), { media: arrayUnion(shot) }))
+  })
+
+  it('a crew member cannot unlock a unit to get at it', async () => {
+    await seed('units', 'u-lock7', baseUnit({ stage: 'loaded', locked: true }))
+    await assertFails(updateDoc(doc(dbAs(SUPER), 'units', 'u-lock7'), { locked: false }))
+    await assertFails(updateDoc(doc(dbAs(MOVER), 'units', 'u-lock7'), { locked: false }))
+  })
+})

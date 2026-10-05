@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { isSupervisor, hasFullReach, describeChange, mayAddLateVault } from '../mutations.js'
+import { isSupervisor, hasFullReach, describeChange, mayAddLateVault, isUnitLocked } from '../mutations.js'
 import { blockingUnit } from '../focus.js'
 
 const user = (over = {}) => ({ uid: 'u1', name: 'Sam', role: 'packer', ...over })
@@ -100,5 +100,19 @@ describe('a vault found after the unit closed', () => {
   it('refuses an unknown stage rather than guessing', () => {
     expect(mayAddLateVault(sup, 'nonsense')).toBe(false)
     expect(mayAddLateVault(null, 'loaded')).toBe(false)
+  })
+})
+
+describe('a closed phase is read-only, supervisors included', () => {
+  it('reads an absent flag as open, which every one of the 50 units is', () => {
+    expect(isUnitLocked({ number: '305' })).toBe(false)
+    expect(isUnitLocked({ number: '305', locked: false })).toBe(false)
+    expect(isUnitLocked(null)).toBe(false)
+  })
+
+  it('only an explicit true locks, never a truthy value', () => {
+    expect(isUnitLocked({ locked: true })).toBe(true)
+    expect(isUnitLocked({ locked: 'yes' })).toBe(false)
+    expect(isUnitLocked({ locked: 1 })).toBe(false)
   })
 })

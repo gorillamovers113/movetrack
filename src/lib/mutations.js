@@ -1051,3 +1051,24 @@ export function mayAddLateVault(user, stage) {
   const i = STAGES.indexOf(stage)
   return i >= STAGES.indexOf('packed')
 }
+
+/* ---- Locking a finished phase ------------------------------------------
+ *
+ * Phase 1 is the left half of Trinity Manor, x01 to x06 on every floor. When
+ * the last floor goes out, those apartments sit in storage for five to seven
+ * months before anybody moves back, and phase 2 starts on the other half with
+ * fresh crew in the same app. A badge saying "complete" would not survive
+ * that: somebody will open 305 looking for 307 and tick something.
+ *
+ * So a finished unit is locked rather than labelled. Read-only for everyone
+ * including supervisors, fully readable by all, and only an admin can lift it
+ * for the move back.
+ *
+ * The lock is also what "done" MEANS on this job, deliberately. The app's own
+ * terminal stage is at_warehouse and not one of the 50 units has reached it,
+ * because the warehouse team count the vaults and tell Casey out loud instead
+ * of using the app. Marking 50 units received to make the board look finished
+ * would be inventing a check nobody performed. A locked unit at `loaded` says
+ * the true thing: packed, loaded, in storage, not to be touched.
+ */
+export const isUnitLocked = (unit) => !!unit && unit.locked === true

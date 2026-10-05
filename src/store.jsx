@@ -7,7 +7,7 @@ import { businessDayKey, canClockInAt, lunchMinutesFor, openSessionFor, usesCloc
 import { stepRow, pushRows } from './lib/sheetBackup.js'
 import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction, sumCartons, PACKING_STEPS, REQUIRED_STEPS, packingChecklist, wouldCompletePacking, LOADING_STEPS, loadingComplete, normalizeVaultNumber, normalizeCode, vaultNumberShapeError, vaultsOf, completeVaults, vaultCountMismatch,
   receivedVaultError, receivedVaults, receivingDiff, RECEIVING_STEPS, receivingComplete, readyToReceive,
-  isSupervisor, hasFullReach, describeChange } from './lib/mutations.js'
+  isSupervisor, hasFullReach, describeChange, isUnitLocked } from './lib/mutations.js'
 import { DEFAULT_SCHEDULE, DEFAULT_RETURN_SCHEDULE, scheduleDocId } from './lib/schedule.js'
 import { stageOf } from './seed.js'
 import { mayPack, mayLoad } from './lib/roles.js'
@@ -1705,6 +1705,36 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
       case 'changeRole': {
         await updateDoc(doc(db, 'users', p.userId), { role: p.role })
         return ev('system', `Changed ${name}'s role to ${p.role}`)
+      }
+      case 'setUnitsLocked': {
+        /* Closing a phase, or reopening it for the move back.
+         *
+         * Admin only, in bulk, because this is a project milestone and not a
+         * per-apartment decision: fifty units going quiet on the same day. The
+         * lock is what "finished" means on this job, see isUnitLocked.
+         *
+         * Writes one event per unit rather than a single summary, so an
+         * apartment's own timeline says when it was closed and by whom. The
+         * summary event goes out as well, for the activity feed.
+         */
+        if (currentUser.role !== 'admin') throw new Error('Only an admin can close or reopen a phase.')
+        const on = !!p.on
+        const ids = (p.unitIds || []).filter((id) => {
+          const u = state.units.find((x) => x.id === id)
+          return u && isUnitLocked(u) !== on
+        })
+        if (!ids.length) throw new Error(on ? 'Those units are already closed.' : 'Those units are already open.')
+        const now = Date.now()
+        const patch = on
+          ? { locked: true, lockedAt: now, lockedBy: currentUser.name, lockedByUid: currentUser.uid }
+          : { locked: false, unlockedAt: now, unlockedBy: currentUser.name }
+        for (const id of ids) {
+          const u = state.units.find((x) => x.id === id)
+          await updateDoc(doc(db, 'units', id), patch)
+          await addDoc(collection(db, 'events'), makeEvent(actor(), 'system',
+            on ? `Unit ${u.number} closed, phase finished` : `Unit ${u.number} reopened`, { unitId: id }))
+        }
+        return ev('system', `${on ? 'Closed' : 'Reopened'} ${ids.length} unit${ids.length === 1 ? '' : 's'}`)
       }
       case 'setSupervisor': {
         /* Supervisor is a flag, not a role, so it rides on top of whatever

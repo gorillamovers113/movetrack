@@ -3,7 +3,7 @@ import { STAGES, stageOf } from '../seed.js'
 import { useStore, canAct, filesToMedia, fmtTime, CONT_STATUS } from '../store.jsx'
 import { Modal, Lightbox, Uploader, EventRow, Avatar, StagePill, CaptureButtons } from '../ui.jsx'
 import { captureMedia, uploadFile } from '../lib/upload.js'
-import { hasFullReach, mayAddLateVault, surnameOf, STICKER_COLORS, inventoryRangeError, overlappingUnits, inventoryRangeLabel, inventoryDigitsFrom, stickerHex, CARTON_TYPES, cartonsFromForm, sumCartons, cartonSummary, SUPPLY_TYPES, suppliesFromForm, sumSupplies, supplySummary, packingChecklist, packingProgress, packingComplete, nextPackingStep, PACKING_STEPS, readyToReceive } from '../lib/mutations.js'
+import { hasFullReach, mayAddLateVault, isUnitLocked, surnameOf, STICKER_COLORS, inventoryRangeError, overlappingUnits, inventoryRangeLabel, inventoryDigitsFrom, stickerHex, CARTON_TYPES, cartonsFromForm, sumCartons, cartonSummary, SUPPLY_TYPES, suppliesFromForm, sumSupplies, supplySummary, packingChecklist, packingProgress, packingComplete, nextPackingStep, PACKING_STEPS, readyToReceive } from '../lib/mutations.js'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import { unitLabour, fmtDuration } from '../lib/reports.js'
 import ReportOverflowButton from '../components/ReportOverflowButton.jsx'
@@ -187,12 +187,20 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
   // already what the security rules enforce, so offering an upload button here
   // only produced a permission error after the photo had been taken. An admin
   // is never view-only; they can correct anything at any stage.
-  const viewOnly = !hasFullReach(currentUser) && !onChecklist && !onLoadOut && !onReceiving && !action
+  /* A closed phase outranks every other reason somebody might be allowed to
+     write here, supervisors included. Only an admin can touch a locked unit,
+     and that is mostly so they can reopen it for the move back. */
+  const locked = isUnitLocked(unit)
+  const viewOnly = locked
+    ? currentUser.role !== 'admin'
+    : !hasFullReach(currentUser) && !onChecklist && !onLoadOut && !onReceiving && !action
   const canContribute = currentUser.role !== 'viewer' && !viewOnly
   // A viewer is view-only on every unit by design and knows it, so the lock
   // banner would be noise. It is for crew, who could edit this unit until
   // moments ago and need to know why they no longer can.
-  const showLockBanner = viewOnly && currentUser.role !== 'viewer'
+  // A closed unit says so to everybody, admin included: an admin CAN write
+  // here, and should be told that doing so is reopening sealed history.
+  const showLockBanner = locked || (viewOnly && currentUser.role !== 'viewer')
 
   const openStep = (key) => { setForm({}); setPending([]); resetInventoryCapture(); setStepKey(key) }
   const closeStep = () => { setStepKey(null); resetInventoryCapture() }
@@ -413,10 +421,12 @@ export default function UnitDetail({ unitId, goBack, openContainer, toast }) {
         >
           <span aria-hidden style={{ fontSize: 16 }}>🔒</span>
           <span style={{ fontSize: 13.5 }}>
-            <b>View only.</b>{' '}
-            {(unit.crew?.packers || []).includes(currentUser.uid)
-              ? 'You finished this unit. Everything you recorded is below, and it can no longer be changed.'
-              : 'This unit has moved past your part of the job, so it is a record now rather than a task.'}
+            <b>{locked ? 'Closed.' : 'View only.'}</b>{' '}
+            {locked
+              ? `This unit finished its phase${unit.lockedBy ? `, closed by ${unit.lockedBy}` : ''}. Its belongings are in storage and the record is sealed until the move back. An admin can reopen it.`
+              : (unit.crew?.packers || []).includes(currentUser.uid)
+                ? 'You finished this unit. Everything you recorded is below, and it can no longer be changed.'
+                : 'This unit has moved past your part of the job, so it is a record now rather than a task.'}
           </span>
         </div>
       )}
