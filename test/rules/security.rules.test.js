@@ -2912,3 +2912,81 @@ describe('who may add a Studio 15 unit', () => {
     }))
   })
 })
+
+/* ── The property manager's login ───────────────────────────────────
+ *
+ * Casey, 2026-10-22: "this would be for the management and property
+ * managers to use to track what we are doning ... they cant make any
+ * changes, maybe add notes."
+ *
+ * A viewer watches the job. Until this, "any active user" in the s15Units
+ * update rule included them, so a property manager could have marked a unit
+ * complete or stripped a photograph off it. Nothing in the UI offered that,
+ * but a hidden button is not a lock.
+ */
+describe('Studio 15: a viewer watches, and may only leave a note', () => {
+  async function seedUnit(extra = {}) {
+    await seed('s15Units', 'u-view', {
+      number: '601', service: 'tenant', done: false, notes: [], shots: {}, ...extra,
+    })
+  }
+
+  it('can read the board', async () => {
+    await seedUnit()
+    const db = dbAs(VIEWER)
+    await assertSucceeds(getDoc(doc(db, 's15Units', 'u-view')))
+  })
+
+  it('can append a note', async () => {
+    await seedUnit()
+    const db = dbAs(VIEWER)
+    await assertSucceeds(updateDoc(doc(db, 's15Units', 'u-view'), {
+      notes: [{ text: 'Lift booked for Friday', by: 'PM', ts: 1 }],
+      updatedAt: new Date(),
+    }))
+  })
+
+  it('cannot mark a unit complete', async () => {
+    await seedUnit()
+    const db = dbAs(VIEWER)
+    await assertFails(updateDoc(doc(db, 's15Units', 'u-view'), { done: true, updatedAt: new Date() }))
+  })
+
+  it('cannot remove a photograph', async () => {
+    await seedUnit({ shots: { door: [{ url: 'x', by: 'crew', ts: 1 }] } })
+    const db = dbAs(VIEWER)
+    await assertFails(updateDoc(doc(db, 's15Units', 'u-view'), { shots: {}, updatedAt: new Date() }))
+  })
+
+  it('cannot answer the packing question on the crew\'s behalf', async () => {
+    await seedUnit()
+    const db = dbAs(VIEWER)
+    await assertFails(updateDoc(doc(db, 's15Units', 'u-view'), {
+      service: 'gorilla', packedConfirmedAt: 1, updatedAt: new Date(),
+    }))
+  })
+
+  it('cannot delete a note somebody else left', async () => {
+    await seedUnit({ notes: [{ text: 'crew note', by: 'Rogelio', ts: 1 }] })
+    const db = dbAs(VIEWER)
+    await assertFails(updateDoc(doc(db, 's15Units', 'u-view'), { notes: [], updatedAt: new Date() }))
+  })
+
+  it('cannot add a unit to the board', async () => {
+    const db = dbAs(VIEWER)
+    await assertFails(setDoc(doc(db, 's15Units', 'u-new'), { number: '602', done: false }))
+  })
+
+  it('cannot delete a unit', async () => {
+    await seedUnit()
+    const db = dbAs(VIEWER)
+    await assertFails(deleteDoc(doc(db, 's15Units', 'u-view')))
+  })
+
+  it('and the crew are not caught by the viewer clause', async () => {
+    /* The tightening must not cost a packer the ability to do their job. */
+    await seedUnit()
+    const db = dbAs(PACKER)
+    await assertSucceeds(updateDoc(doc(db, 's15Units', 'u-view'), { done: true, updatedAt: new Date() }))
+  })
+})

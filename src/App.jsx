@@ -16,6 +16,7 @@ import Timesheets from './views/Timesheets.jsx'
 import Access from './views/Access.jsx'
 import Studio15 from './s15/Studio15.jsx'
 import S15BuildingView from './s15/S15BuildingView.jsx'
+import S15Status from './s15/S15Status.jsx'
 import ProjectPicker, { PROJECTS, PROJECT_KEY } from './ProjectPicker.jsx'
 import { allowedProjects } from './lib/projectAccess.js'
 import WelcomeStart, { shouldAskStart } from './WelcomeStart.jsx'
@@ -50,14 +51,27 @@ const NAV_TRINITY = {
  * Team is the one exception for an admin: the crew roster is shared across
  * every job, so approving somebody should not mean switching projects. */
 const S15_CREW = [['studio15', '🏢', 'Units'], ['s15building', '🏗️', 'Building']]
+
+/* Casey, 2026-10-22: "studio 15 viewer mode ... this would be for the
+ * management and property managers to use to track what we are doning."
+ *
+ * A viewer gets ONE destination, not the crew's two. They are not working
+ * the job, they are watching it, and a nav bar is a thing to learn. The page
+ * answers the only question they have - where are you up to - at three
+ * magnifications and ends there. */
+const S15_VIEWER = [['s15status', '📊', 'Status']]
 const NAV_STUDIO15 = {
-  admin: [...S15_CREW, ['team', '👥', 'Team'], ['timesheets', '⏱️', 'Timesheets']],
+  /* The admin gets the client's page too. Casey has to be able to see what
+   * the property manager sees before he sends them the link, and to open it
+   * in front of them in a meeting. A client-facing page its owner cannot
+   * look at is one that quietly rots. */
+  admin: [...S15_CREW, ['s15status', '📊', 'Client view'], ['team', '👥', 'Team'], ['timesheets', '⏱️', 'Timesheets']],
   packer: S15_CREW,
   mover: S15_CREW,
   crew: S15_CREW,
   driver: S15_CREW,
   warehouse: S15_CREW,
-  viewer: S15_CREW,
+  viewer: S15_VIEWER,
 }
 
 const NAV_BY_PROJECT = { trinity: NAV_TRINITY, studio15: NAV_STUDIO15 }
@@ -227,6 +241,7 @@ function Shell() {
       case 'activity': return <Activity openUnit={openUnit} openContainer={openContainer} />
       case 'mywork': return <MyWork openUnit={openUnit} openContainer={openContainer} toast={toast} />
       case 'studio15': return <Studio15 toast={toast} />
+      case 's15status': return <S15Status toast={toast} />
       case 's15building': return <S15BuildingView toast={toast} />
       default: return null
     }

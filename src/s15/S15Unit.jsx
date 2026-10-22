@@ -139,7 +139,28 @@ function PackingExtras({ unit, user, editable, toast }) {
   const answered = materialsAnswered(unit)
   const anyCount = Object.values(counts).some((v) => Number(v) > 0)
 
+  /* ONLY WRITE WHEN SOMETHING ACTUALLY CHANGED.
+   *
+   * These fields save on blur, which is right - a packer who closes the app
+   * mid-count has not lost it - but blur fires when you merely TAB THROUGH a
+   * field, or when React re-renders under you. Unconditionally saving put
+   * two "Materials: nothing" lines into unit 508's record within a second of
+   * each other, which Casey found on the client page: the property manager's
+   * view is the one place a stray write is actually read by somebody.
+   *
+   * Comparing the normalised shape, not the raw inputs, so "0" and "" and
+   * absent all count as the same answer. */
+  function normal(c, none) {
+    const out = {}
+    for (const k of Object.keys(c || {})) {
+      const v = Math.max(0, Math.floor(Number(c[k]) || 0))
+      if (v > 0) out[k] = v
+    }
+    return JSON.stringify({ m: out, none: !!none })
+  }
+
   async function save(none = false) {
+    if (normal(counts, none) === normal(unit.materials, unit.materialsNone)) return
     setBusy(true)
     try { await setMaterials(unit, counts, none, user) } catch (e) { toast(e.message) } finally { setBusy(false) }
   }
@@ -225,7 +246,11 @@ function PackingExtras({ unit, user, editable, toast }) {
           disabled={!editable}
           placeholder="minutes"
           onChange={(e) => setMins(e.target.value)}
-          onBlur={() => setPackMinutes(unit, mins, user).catch((e) => toast(e.message))}
+          onBlur={() => {
+            const next = Math.max(0, Math.floor(Number(mins) || 0))
+            if (next === Math.max(0, Math.floor(Number(unit.packMinutes) || 0))) return
+            setPackMinutes(unit, mins, user).catch((e) => toast(e.message))
+          }}
           style={{ width: 110, minHeight: 44, fontSize: 16 }}
         />
         <span className="muted" style={{ fontSize: 12 }}>minutes, all packers together</span>

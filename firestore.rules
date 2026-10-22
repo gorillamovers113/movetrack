@@ -488,9 +488,15 @@ service cloud.firestore {
       // it used to be any active user, which nothing in the UI offered but
       // the rules allowed. Mirrors canAddUnit() in src/s15/s15.js.
       allow create: if isAdmin() || isSupervisor();
+      /* Casey, 2026-10-22: a viewer is the property manager's login. They
+       * watch the job and may leave a note; they may not touch anything
+       * else. Until now "any active user" included them, so a property
+       * manager could have marked a unit complete or cleared a photograph.
+       * Nothing in the UI offered it, but a hidden button is not a lock. */
       allow update: if isAdmin()
-        || (isActive() && resource.data.get('done', false) == false)
-        || (isActive() && s15NoteAppendOnly());
+        || (hasRole('viewer') && s15NoteAppendOnly())
+        || (isActive() && !hasRole('viewer') && resource.data.get('done', false) == false)
+        || (isActive() && !hasRole('viewer') && s15NoteAppendOnly());
       allow delete: if isAdmin();
     }
 
