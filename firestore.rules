@@ -484,7 +484,10 @@ service cloud.firestore {
 
     match /s15Units/{unitId} {
       allow read: if canSeeProject('studio15');
-      allow create: if isAdmin() || isActive();
+      // Casey, 2026-10-22: admin and supervisor only. This is a tightening -
+      // it used to be any active user, which nothing in the UI offered but
+      // the rules allowed. Mirrors canAddUnit() in src/s15/s15.js.
+      allow create: if isAdmin() || isSupervisor();
       allow update: if isAdmin()
         || (isActive() && resource.data.get('done', false) == false)
         || (isActive() && s15NoteAppendOnly());

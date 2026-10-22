@@ -11,7 +11,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useStore } from '../store.jsx'
 import {
-  subscribeUnits, doneCount, S15_STEPS, isAdmin, seedUnits, addUnit, deleteUnit,
+  subscribeUnits, doneCount, S15_STEPS, isAdmin, canAddUnit, seedUnits, addUnit, deleteUnit,
   STUDIO15_SCHEDULED,
 } from './s15.js'
 import S15Unit from './S15Unit.jsx'
@@ -25,6 +25,7 @@ export default function Studio15({ toast }) {
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   const admin = isAdmin(currentUser)
+  const mayAdd = canAddUnit(currentUser)
 
   useEffect(() => {
     if (!currentUser || currentUser.status !== 'active') return undefined
@@ -150,10 +151,16 @@ export default function Studio15({ toast }) {
         })}
       </div>
 
-      {admin && units.length > 0 && (
+      {mayAdd && units.length > 0 && (
         <div className="card" style={{ padding: 14, marginTop: 20 }}>
-          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>ADMIN</div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+            {admin ? 'ADMIN' : 'SUPERVISOR'}
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>
+            A unit that is not on the list yet. Check the number on the door first.
+          </div>
           <AddUnit currentUser={currentUser} toast={toast} />
+          {admin && (
           <button
             className="btn btn-sm"
             style={{ marginTop: 10 }}
@@ -166,6 +173,7 @@ export default function Studio15({ toast }) {
               } catch (e) { toast(e.message) } finally { setBusy(false) }
             }}
           >Re-check the scheduled list</button>
+          )}
         </div>
       )}
 

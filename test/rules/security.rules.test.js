@@ -2861,3 +2861,54 @@ describe('a packer works a Studio 15 unit end to end', () => {
     })
   })
 })
+
+/* ── Adding a Studio 15 unit ────────────────────────────────────────
+ *
+ * Casey, 2026-10-22: "maybe the admin and supervisor will only have the
+ * ability to add a unit."
+ *
+ * Note this TIGHTENED the rule. It read `isAdmin() || isActive()`, which no
+ * screen offered but the rules permitted, so any signed-in crew member could
+ * have created units straight against Firestore.
+ */
+describe('who may add a Studio 15 unit', () => {
+  const unit = { number: '512', destination: '', done: false, shots: {}, notes: [] }
+
+  it('an admin may', async () => {
+    await assertSucceeds(addDoc(collection(dbAs(ADMIN), 's15Units'), unit))
+  })
+
+  it('a supervisor may, on top of whatever role they hold', async () => {
+    /* SUPER is a PACKER with the flag, deliberately the lowest-reach role,
+       so a pass proves the flag did the work and not the role. */
+    await assertSucceeds(addDoc(collection(dbAs(SUPER), 's15Units'), unit))
+  })
+
+  it('an ordinary packer may not', async () => {
+    await assertFails(addDoc(collection(dbAs(PACKER), 's15Units'), unit))
+  })
+
+  it('nor a mover, nor somebody who does both', async () => {
+    await assertFails(addDoc(collection(dbAs(MOVER), 's15Units'), unit))
+    await assertFails(addDoc(collection(dbAs(BOTH), 's15Units'), unit))
+  })
+
+  it('nor anybody waiting for approval', async () => {
+    await assertFails(addDoc(collection(dbAs(PENDING), 's15Units'), unit))
+  })
+
+  it('and a supervisor still cannot DELETE one', async () => {
+    /* Adding a wrong unit leaves a tile to ignore. Deleting the right one
+       takes its photographs with it. */
+    await seed('s15Units', 'del-1', unit)
+    await assertFails(deleteDoc(doc(dbAs(SUPER), 's15Units', 'del-1')))
+    await assertSucceeds(deleteDoc(doc(dbAs(ADMIN), 's15Units', 'del-1')))
+  })
+
+  it('but can still work a unit like anyone else', async () => {
+    await seed('s15Units', 'work-1', unit)
+    await assertSucceeds(updateDoc(doc(dbAs(SUPER), 's15Units', 'work-1'), {
+      'shots.door': arrayUnion({ url: 'x', uid: SUPER, name: 's', ts: 1 }),
+    }))
+  })
+})

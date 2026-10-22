@@ -90,6 +90,27 @@ export function canEdit(unit, user) {
 
 export const isAdmin = (user) => !!user && user.role === 'admin'
 
+/* Who may put a NEW unit on the board.
+ *
+ * Casey, 2026-10-22: "there is a supervisor check box in the admin setttings.
+ * maybe the admin and supervisor will only have the ability to add a unit."
+ *
+ * The problem it solves: the list is Casey's, and until now only Casey could
+ * add to it, so an apartment that turns up unlisted stopped the crew dead on
+ * site. Opening it to everyone invites a board full of typos, since a unit is
+ * created from a free-typed number.
+ *
+ * Supervisor is already the flag MoveTrack uses for exactly this shape of
+ * trust - a crew member with reach over the record, granted by Casey one
+ * person at a time - so it is the flag here too rather than a new one.
+ *
+ * Deleting stays admin-only. Adding a wrong unit leaves a tile to ignore;
+ * deleting the right one takes its photographs with it. */
+export function canAddUnit(user) {
+  if (!user || user.status !== 'active') return false
+  return user.role === 'admin' || user.supervisor === true
+}
+
 /* ── reads ──────────────────────────────────────────────────────── */
 
 export function subscribeUnits(onUnits, onError) {
