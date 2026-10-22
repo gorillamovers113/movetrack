@@ -156,7 +156,7 @@ export default function S15UnitCard({ unit, onOpen }) {
 /** The cards, in a grid. Same shape everywhere this appears. */
 export function S15UnitGrid({ units, onOpen }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(158px, 1fr))', gap: 10 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(158px, 100%), 1fr))', gap: 10 }}>
       {units.map((u) => <S15UnitCard key={u.id} unit={u} onOpen={onOpen} />)}
     </div>
   )

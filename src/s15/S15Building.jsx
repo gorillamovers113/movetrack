@@ -170,7 +170,7 @@ export default function S15Building({ units, selected, onSelect, onOpenUnit }) {
                 >
                   {u && (
                     <title>
-                      {`Unit ${u.number} — ${u.done
+                      {`Unit ${u.number}: ${u.done
                         ? 'complete'
                         : `${doneCount(u)} of ${stepTotal(u)} done, ${photoCount(u)} photos`}${
                         weArePacking(u) && !u.done

@@ -204,8 +204,11 @@ function AddUnit({ currentUser, toast }) {
   const [packers, setPackers] = useState('0')
   return (
     <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-      <input className="input" placeholder="Unit #" value={num} inputMode="numeric" onChange={(e) => setNum(e.target.value)} style={{ width: 110 }} />
-      <select className="input" value={packers} onChange={(e) => setPackers(e.target.value)} style={{ width: 150 }}>
+      {/* 16px and 44px on both: under 16 iOS zooms the page the moment a
+          supervisor taps the field, and they are doing this one-handed in a
+          corridor. */}
+      <input className="input" placeholder="Unit #" value={num} inputMode="numeric" onChange={(e) => setNum(e.target.value)} style={{ width: 110, minHeight: 44, fontSize: 16 }} />
+      <select className="input" value={packers} onChange={(e) => setPackers(e.target.value)} style={{ width: 150, minHeight: 44, fontSize: 16 }}>
         <option value="0">Tenant packs</option>
         <option value="1">1 packer</option>
         <option value="2">2 packers</option>

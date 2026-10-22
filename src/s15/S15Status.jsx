@@ -132,7 +132,7 @@ function TrustStrip() {
   ]
   return (
     <div style={{ background: T.paper, borderBottom: `1px solid ${T.line}` }}>
-      <div style={{ ...WRAP, display: 'grid', gap: 18, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', padding: '22px 24px' }}>
+      <div style={{ ...WRAP, display: 'grid', gap: 18, gridTemplateColumns: 'repeat(auto-fit, minmax(min(180px, 100%), 1fr))', padding: '22px 24px' }}>
         {items.map((it) => (
           <div key={it.icon} style={{ display: 'flex', gap: 12, alignItems: 'center', minWidth: 0 }}>
             <span style={{ color: T.blue, flexShrink: 0 }}><Icon name={it.icon} size={21} /></span>
@@ -262,7 +262,7 @@ function UnitDetail({ unit, events, onBack, user, toast }) {
         return (
           <section key={s.key} style={{ marginTop: 34 }}>
             <SectionTitle>{s.label}</SectionTitle>
-            <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fill, minmax(190px, 1fr))' }}>
+            <div style={{ display: 'grid', gap: 14, gridTemplateColumns: 'repeat(auto-fill, minmax(min(190px, 100%), 1fr))' }}>
               {shots.map((sh, i) => (
                 <a
                   key={i}
@@ -408,7 +408,7 @@ function Services() {
             All services →
           </a>
         </div>
-        <div style={{ display: 'grid', gap: 18, gridTemplateColumns: 'repeat(auto-fit, minmax(290px, 1fr))', alignItems: 'stretch', marginTop: 34 }}>
+        <div style={{ display: 'grid', gap: 18, gridTemplateColumns: 'repeat(auto-fit, minmax(min(290px, 100%), 1fr))', alignItems: 'stretch', marginTop: 34 }}>
           {ADS.map((ad) => <AdCard key={ad.key} ad={ad} />)}
         </div>
         <p style={{ marginTop: 26, fontSize: 14, color: T.muted, maxWidth: 760 }}>

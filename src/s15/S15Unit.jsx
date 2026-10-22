@@ -202,12 +202,12 @@ function PackingExtras({ unit, user, editable, toast }) {
           : 'What did you use? Count it whoever supplied it, and say below whose it was.'}
       </div>
 
-      <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))' }}>
+      <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(min(190px, 100%), 1fr))' }}>
         {CARTON_TYPES.map((t) => <Field key={t.key} t={t} />)}
       </div>
 
       <div className="muted" style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.08em', margin: '14px 0 8px' }}>SUPPLIES</div>
-      <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))' }}>
+      <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(min(190px, 100%), 1fr))' }}>
         {SUPPLY_TYPES.map((t) => <Field key={t.key} t={t} />)}
       </div>
 
@@ -312,15 +312,23 @@ function Ask({ question, hint, yes, no, answered, answerText, onYes, onNo, onReo
 function AskPacked({ unit, user, toast }) {
   const [busy, setBusy] = useState(false)
   const [howMany, setHowMany] = useState(false)
-  const [n, setN] = useState('2')
+  /* Re-asking, rather than flipping. "Change" used to call answerPacked with
+     the service inverted and a hardcoded two packers, so an admin who only
+     wanted to correct a crew size either could not, or silently changed it
+     to two. It cost unit 508 its third packer during a demo. Now it reopens
+     the question and the answer is given again, count included. */
+  const [reask, setReask] = useState(false)
+  const [n, setN] = useState(() => String(unit.packers || 2))
 
   async function answer(ready, packers) {
     setBusy(true)
-    try { await answerPacked(unit, ready, packers, user); setHowMany(false) }
+    try { await answerPacked(unit, ready, packers, user); setHowMany(false); setReask(false) }
     catch (e) { toast(e.message) } finally { setBusy(false) }
   }
 
-  if (howMany && !packedAnswered(unit)) {
+  const answered = packedAnswered(unit) && !reask
+
+  if (howMany) {
     return (
       <div className="card" style={{ padding: 16, marginBottom: 12, background: '#fffaf0', border: '1px solid #fde68a' }}>
         <div style={{ fontSize: 15, fontWeight: 650 }}>How many of us are packing it?</div>
@@ -331,7 +339,7 @@ function AskPacked({ unit, user, toast }) {
           <button className="btn btn-primary" disabled={busy} onClick={() => answer(false, n)} style={{ minHeight: 48 }}>
             {busy ? 'Saving…' : 'Start packing'}
           </button>
-          <button className="btn btn-sm" disabled={busy} onClick={() => setHowMany(false)}>Back</button>
+          <button className="btn btn-sm" disabled={busy} onClick={() => { setHowMany(false); setReask(false) }}>Back</button>
         </div>
       </div>
     )
@@ -344,7 +352,7 @@ function AskPacked({ unit, user, toast }) {
       yes="Yes, ready to move"
       no="No, we pack it"
       busy={busy}
-      answered={packedAnswered(unit)}
+      answered={answered}
       answerText={
         weArePacking(unit)
           ? `We are packing this one${unit.packers ? `, ${unit.packers} packer${unit.packers === 1 ? '' : 's'}` : ''}. Said by ${unit.packedConfirmedBy || 'someone'}.`
@@ -352,7 +360,7 @@ function AskPacked({ unit, user, toast }) {
       }
       onYes={() => answer(true, 0)}
       onNo={() => setHowMany(true)}
-      onReopen={canSetService(unit, user) ? () => answer(!weArePacking(unit), 2) : null}
+      onReopen={canSetService(unit, user) ? () => setReask(true) : null}
     />
   )
 }
@@ -447,8 +455,8 @@ export default function S15Unit({ unit, goBack, toast }) {
         >
           <b>{onPackDay ? 'Packing day' : 'Move day'}</b>
           {onPackDay
-            ? ' — pack it and photograph it. The move happens on a later visit.'
-            : ` — packed by ${unit.packingDoneBy || 'the pack crew'}. Move it out and into the new unit.`}
+            ? '. Pack it and photograph it. The move happens on a later visit.'
+            : `. Packed by ${unit.packingDoneBy || 'the pack crew'}. Move it out and into the new unit.`}
         </div>
       )}
 
@@ -578,7 +586,7 @@ export default function S15Unit({ unit, goBack, toast }) {
               placeholder="Anything the office should know"
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              style={{ minHeight: 44 }}
+              style={{ minHeight: 44, fontSize: 16 }}
             />
             <button
               className="btn"
