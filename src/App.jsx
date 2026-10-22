@@ -35,6 +35,9 @@ const NAV_TRINITY = {
   // actions are shown inside My queue.
   packer: [['mywork', '✓', 'My queue'], ['schedule', '📅', 'Schedule']],
   mover: [['mywork', '✓', 'My queue'], ['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['containers', '📦', 'Vaults'], ['overflow', '🛋️', 'Overflow'], ['activity', '🕘', 'Activity']],
+  // Packer + Mover in one person. Missing since the role was added, so every
+  // crew member has been running on an empty sidebar.
+  crew: [['mywork', '✓', 'My queue'], ['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['containers', '📦', 'Vaults'], ['overflow', '🛋️', 'Overflow'], ['activity', '🕘', 'Activity']],
   driver: [['mywork', '✓', 'My queue'], ['containers', '📦', 'Vaults'], ['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['activity', '🕘', 'Activity']],
   warehouse: [['mywork', '✓', 'My queue'], ['containers', '📦', 'Vaults'], ['overflow', '🛋️', 'Overflow'], ['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['activity', '🕘', 'Activity']],
   viewer: [['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['containers', '📦', 'Vaults'], ['overflow', '🛋️', 'Overflow'], ['reports', '📊', 'Reports'], ['activity', '🕘', 'Activity']],
@@ -51,6 +54,7 @@ const NAV_STUDIO15 = {
   admin: [...S15_CREW, ['team', '👥', 'Team'], ['timesheets', '⏱️', 'Timesheets']],
   packer: S15_CREW,
   mover: S15_CREW,
+  crew: S15_CREW,
   driver: S15_CREW,
   warehouse: S15_CREW,
   viewer: S15_CREW,
@@ -125,7 +129,12 @@ function Shell() {
     const nextNav = (NAV_BY_PROJECT[key] || NAV_TRINITY)[currentUser.role] || []
     setView({ name: nextNav[0]?.[0] || 'dashboard' })
   }
-  const nav = ((NAV_BY_PROJECT[effectiveProject] || NAV_TRINITY)[currentUser.role]) || []
+  const navsFor = NAV_BY_PROJECT[effectiveProject] || NAV_TRINITY
+  /* A role with no entry used to fall through to `first = 'dashboard'`, which
+     belongs to Trinity: on Studio 15 that stranded the person on another
+     project's home screen with no way back. Falling back to the project's own
+     crew nav keeps them inside the job they picked. */
+  const nav = navsFor[currentUser.role] || navsFor.crew || navsFor.viewer || []
   const first = nav[0]?.[0] || 'dashboard'
   const [view, setView] = useState({ name: first })
   const [toastMsg, setToastMsg] = useState(null)

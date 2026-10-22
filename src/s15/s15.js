@@ -140,7 +140,11 @@ export async function addShot(unit, stepKey, file, user) {
   const media = await captureMedia(file, path)
   const shot = {
     url: media.url,
-    stored: !!media.stored,
+    // captureMedia returns { url, storage }. This read media.stored, which
+    // is undefined, so every photo was filed as an offline fallback - even
+    // the ones that went straight to Storage. The flag is how anyone later
+    // tells an uploaded photo from one living inside the Firestore document.
+    stored: media.storage === true,
     uid: user.uid,
     name: user.name || user.email || 'someone',
     ts: stamp,

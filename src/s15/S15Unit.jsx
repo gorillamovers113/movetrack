@@ -71,6 +71,9 @@ function StepCard({ step, index, unit, user, editable, onToast }) {
               </a>
               <div className="muted" style={{ fontSize: 10.5, marginTop: 3, maxWidth: 94, lineHeight: 1.25 }}>
                 {s.name}<br />{stamp(s.ts)}
+                {s.stored === false && (
+                  <><br /><span title="Saved on the phone because there was no signal. It stays in the record either way." style={{ color: '#b45309' }}>no signal</span></>
+                )}
               </div>
               {admin && (
                 <button

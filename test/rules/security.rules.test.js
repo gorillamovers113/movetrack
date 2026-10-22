@@ -2778,3 +2778,86 @@ describe('who can see which job', () => {
     await assertFails(getDoc(doc(dbAs(S_ONLY), 'schedule', 'd1')))
   })
 })
+
+/* ── A packer's whole day on Studio 15 ──────────────────────────────
+ *
+ * Every live check so far was run as Casey, who is an admin and therefore
+ * passes almost every rule by a different branch than the crew do. This
+ * walks the journey an actual packer takes, in order, as a packer.
+ */
+describe('a packer works a Studio 15 unit end to end', () => {
+  const UNIT = 'walk-1'
+  const shot = (step) => ({ url: 'https://firebasestorage.googleapis.com/x', uid: PACKER, name: 'p', ts: Date.now(), stored: true })
+
+  beforeEach(async () => {
+    await seed('s15Units', UNIT, { number: '578', destination: '', done: false, shots: {}, notes: [] })
+  })
+
+  it('1. sees the board', async () => {
+    await assertSucceeds(getDoc(doc(dbAs(PACKER), 's15Units', UNIT)))
+  })
+
+  it('2. takes all five photos', async () => {
+    const d = dbAs(PACKER)
+    for (const step of ['door', 'before', 'empty', 'newDoor', 'newFull']) {
+      await assertSucceeds(updateDoc(doc(d, 's15Units', UNIT), { [`shots.${step}`]: arrayUnion(shot(step)) }))
+    }
+  })
+
+  it('3. types the destination unit', async () => {
+    await assertSucceeds(updateDoc(doc(dbAs(PACKER), 's15Units', UNIT), { destination: '412' }))
+  })
+
+  it('4. leaves a note', async () => {
+    await assertSucceeds(updateDoc(doc(dbAs(PACKER), 's15Units', UNIT), {
+      notes: arrayUnion({ text: 'tenant has a cat', uid: PACKER, name: 'p', ts: Date.now() }),
+    }))
+  })
+
+  it('5. marks it complete', async () => {
+    await assertSucceeds(updateDoc(doc(dbAs(PACKER), 's15Units', UNIT), {
+      done: true, doneBy: PACKER, doneByName: 'p',
+    }))
+  })
+
+  it('6. and logs every one of those to the event trail', async () => {
+    await assertSucceeds(addDoc(collection(dbAs(PACKER), 's15Events'), {
+      ts: Date.now(), uid: PACKER, name: 'p', unitId: UNIT, action: 'Photo: Front door',
+    }))
+  })
+
+  describe('once it is sealed', () => {
+    beforeEach(async () => {
+      await seed('s15Units', UNIT, { number: '578', destination: '412', done: true, shots: {}, notes: [] })
+    })
+
+    it('another crew member cannot change a photo', async () => {
+      await assertFails(updateDoc(doc(dbAs(MOVER), 's15Units', UNIT), { 'shots.door': arrayUnion(shot('door')) }))
+    })
+
+    it('nor the destination', async () => {
+      await assertFails(updateDoc(doc(dbAs(MOVER), 's15Units', UNIT), { destination: '999' }))
+    })
+
+    it('nor reopen it', async () => {
+      await assertFails(updateDoc(doc(dbAs(MOVER), 's15Units', UNIT), { done: false }))
+    })
+
+    it('nor delete it', async () => {
+      await assertFails(deleteDoc(doc(dbAs(MOVER), 's15Units', UNIT)))
+    })
+
+    it('but can still leave a note, which is the one door left open', async () => {
+      await assertSucceeds(updateDoc(doc(dbAs(MOVER), 's15Units', UNIT), {
+        notes: arrayUnion({ text: 'found a key in 578', uid: MOVER, name: 'm', ts: Date.now() }),
+      }))
+    })
+
+    it('and Casey can put it all right', async () => {
+      const d = dbAs(ADMIN)
+      await assertSucceeds(updateDoc(doc(d, 's15Units', UNIT), { done: false }))
+      await assertSucceeds(updateDoc(doc(d, 's15Units', UNIT), { destination: '415' }))
+      await assertSucceeds(deleteDoc(doc(d, 's15Units', UNIT)))
+    })
+  })
+})

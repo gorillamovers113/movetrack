@@ -5,6 +5,7 @@
  * automaticaly."
  */
 import { describe, it, expect, beforeEach } from 'vitest'
+import { readFileSync } from 'node:fs'
 
 /* These tests run in node, which has no localStorage. shouldAskStart wraps
    its read in try/catch so the app survives private mode, which also means a
@@ -65,5 +66,34 @@ describe('who gets asked, and when', () => {
 
   it('and a missing entries list does not throw', () => {
     expect(shouldAskStart(crew(), undefined)).toBe(true)
+  })
+})
+
+describe('the screen cannot trap somebody on it', () => {
+  /* The timeEntries subscription may not have landed when the app paints -
+     a real possibility on a slow phone. shouldAskStart then sees no entry,
+     asks, and the write is refused as a duplicate. Treating that refusal as
+     an error left the person stuck on the welcome screen, whose only other
+     exit says "Not working today" - which would then read, on Casey's
+     timesheet, as somebody who never turned up. */
+  const SRC = readFileSync('src/WelcomeStart.jsx', 'utf8')
+
+  it('an "already clocked in" refusal lets them through', () => {
+    expect(SRC).toContain("if (/already clocked in/i.test(msg))")
+    const at = SRC.indexOf("if (/already clocked in/i.test(msg))")
+    expect(SRC.slice(at, at + 220)).toContain('onDone()')
+  })
+
+  it('and the wording it matches is the wording the store throws', () => {
+    /* Two files agreeing by coincidence is how this silently stops working.
+       If the message is ever reworded, this fails rather than the phone. */
+    const STORE = readFileSync('src/store.jsx', 'utf8')
+    expect(STORE).toContain("'You are already clocked in for today.'")
+    expect(/already clocked in/i.test('You are already clocked in for today.')).toBe(true)
+  })
+
+  it('every other failure still shows and keeps them put', () => {
+    const at = SRC.indexOf("if (/already clocked in/i.test(msg))")
+    expect(SRC.slice(at, at + 320)).toContain('toast(msg)')
   })
 })

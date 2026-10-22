@@ -73,7 +73,20 @@ export default function WelcomeStart({ onDone, toast }) {
       toast(status === 'queued' ? QUEUED_MESSAGE : `Started at ${hhmm(chosen)}. Have a good one.`)
       onDone()
     } catch (e) {
-      toast(e.message || 'Could not start your day.')
+      const msg = e.message || 'Could not start your day.'
+      /* "You are already clocked in for today." is not a failure, it is the
+         answer. It happens when the timeEntries subscription has not landed
+         yet - a real possibility on a slow phone in a stairwell - so
+         shouldAskStart saw no entry and asked anyway. Treating it as an
+         error trapped the person on this screen with no way into the app
+         except "Not working today", which would then look like they never
+         showed up. */
+      if (/already clocked in/i.test(msg)) {
+        toast('You were already started today.')
+        onDone()
+        return
+      }
+      toast(msg)
     } finally {
       setBusy(false)
     }
