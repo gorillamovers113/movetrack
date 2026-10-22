@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { lastTouch } from '../../s15/S15UnitCard.jsx'
-import { doneCount, stepTotal, photoCount, stepsFor, weArePacking, materialsAnswered, readyToFinish } from '../../s15/s15.js'
+import { doneCount, stepTotal, photoCount, stepsFor, weArePacking, materialsAnswered, readyToFinish, phaseOf, readyToFinishPacking, earlierSteps } from '../../s15/s15.js'
 
 const CARD = readFileSync('src/s15/S15UnitCard.jsx', 'utf8')
 const BUILDING = readFileSync('src/s15/S15Building.jsx', 'utf8')
@@ -25,12 +25,15 @@ describe('how far along a unit is', () => {
     expect(Math.round((1 / stepTotal(u)) * 100)).toBe(20)
   })
 
-  it('and one of six on a unit we packed, because it has an extra shot', () => {
-    /* The denominator has to be the unit's own, not a constant. A card that
-       divided by a fixed five would show a Gorilla-packed unit as 120% done. */
+  it('and one of three on a unit being packed today', () => {
+    /* The denominator is the unit's own and changes with the visit, because
+       a packer cannot do the move-day steps and should not be measured
+       against them. A card dividing by a constant would read 20% for
+       somebody who is a third of the way through their actual job. */
     const u = { service: 'gorilla', shots: { door: [shot(1, 'a')] } }
-    expect(stepTotal(u)).toBe(6)
-    expect(Math.round((1 / stepTotal(u)) * 100)).toBe(17)
+    expect(phaseOf(u)).toBe('packing')
+    expect(stepTotal(u)).toBe(3)
+    expect(Math.round((1 / stepTotal(u)) * 100)).toBe(33)
   })
 
   it('the fill is proportional, not a fixed bar', () => {
@@ -119,10 +122,9 @@ describe('a unit Gorilla packs', () => {
     expect(stepsFor(tenant).map((s) => s.key)).not.toContain('packed')
   })
 
-  it('placed between the untouched shot and the empty one', () => {
+  it('packed-and-ready is the last thing the pack crew do', () => {
     const keys = stepsFor(ours).map((s) => s.key)
-    expect(keys.indexOf('packed')).toBeGreaterThan(keys.indexOf('before'))
-    expect(keys.indexOf('packed')).toBeLessThan(keys.indexOf('empty'))
+    expect(keys).toEqual(['door', 'before', 'packed'])
   })
 
   it('a tenant-packed unit keeps exactly the five', () => {
@@ -171,7 +173,7 @@ describe('materials must be answered before a packed unit is finished', () => {
 describe('what it takes to finish a unit', () => {
   const allShots = (keys) => Object.fromEntries(keys.map((k) => [k, [shot(1, 'a')]]))
   const tenantKeys = ['door', 'before', 'empty', 'newDoor', 'newFull']
-  const ourKeys = ['door', 'before', 'packed', 'empty', 'newDoor', 'newFull']
+  const ourKeys = ['door', 'before', 'packed', 'moveDoor', 'empty', 'newDoor', 'newFull']
 
   it('a tenant-packed unit needs its five photos and nothing else', () => {
     expect(readyToFinish({ service: 'tenant', shots: allShots(tenantKeys) })).toBe(true)
@@ -187,12 +189,13 @@ describe('what it takes to finish a unit', () => {
     expect(readyToFinish({ service: 'gorilla', shots: allShots(ourKeys) })).toBe(false)
   })
 
-  it('it is ready once the materials are recorded', () => {
-    expect(readyToFinish({ service: 'gorilla', shots: allShots(ourKeys), materials: { small: 6, paper: 2 } })).toBe(true)
+  it('it is ready once the materials are recorded AND packing is signed off', () => {
+    const packed = { service: 'gorilla', shots: allShots(ourKeys), materials: { small: 6, paper: 2 }, packingDoneAt: 1 }
+    expect(readyToFinish(packed)).toBe(true)
   })
 
   it('or once somebody says we used none', () => {
-    expect(readyToFinish({ service: 'gorilla', shots: allShots(ourKeys), materialsNone: true })).toBe(true)
+    expect(readyToFinish({ service: 'gorilla', shots: allShots(ourKeys), materialsNone: true, packingDoneAt: 1 })).toBe(true)
   })
 
   it('but materials alone do not finish it either', () => {
@@ -248,5 +251,85 @@ describe('photos are uncapped, and the label now says so', () => {
   it('an empty unit counts zero photos without throwing', () => {
     expect(photoCount({})).toBe(0)
     expect(photoCount({ shots: {} })).toBe(0)
+  })
+})
+
+/* ── Two visits, when we do the packing ─────────────────────────────
+ *
+ * Casey, 2026-10-22: "when we do packing, its usualy done before the move.
+ * so for the units 508 they are packing today, and tomorrow will be the move
+ * ... when the packers finish today, now the movers will need to do that
+ * same steps again."
+ *
+ * Unit 508 was being packed by Rogelio while this was written, which is why
+ * `phase` is derived rather than stored: nothing had to be written to a
+ * document somebody was holding.
+ */
+describe('a unit we pack has two visits', () => {
+  const packDay = { service: 'gorilla', shots: {} }
+  const moveDay = { service: 'gorilla', shots: {}, packingDoneAt: 1, packingDoneBy: 'Rogelio' }
+  const tenant = { service: 'tenant', shots: {} }
+
+  it('starts on packing day', () => {
+    expect(phaseOf(packDay)).toBe('packing')
+  })
+
+  it('and moves to move day only once packing is signed off', () => {
+    expect(phaseOf(moveDay)).toBe('moving')
+  })
+
+  it('a tenant-packed unit is never on packing day', () => {
+    expect(phaseOf(tenant)).toBe('moving')
+  })
+
+  it('the packers see three steps, and none they cannot do today', () => {
+    const keys = stepsFor(packDay).map((s) => s.key)
+    expect(keys).toEqual(['door', 'before', 'packed'])
+    expect(keys).not.toContain('empty')
+    expect(keys).not.toContain('newDoor')
+  })
+
+  it('the movers see four, and none that were done without them', () => {
+    const keys = stepsFor(moveDay).map((s) => s.key)
+    expect(keys).toEqual(['moveDoor', 'empty', 'newDoor', 'newFull'])
+    expect(keys).not.toContain('packed')
+    expect(keys).not.toContain('before')
+  })
+
+  it('the door is shot on both days, which is deliberate', () => {
+    /* Cheapest proof of which apartment and which day, and the two visits
+       are a night apart. */
+    expect(stepsFor(packDay).map((s) => s.key)).toContain('door')
+    expect(stepsFor(moveDay).map((s) => s.key)).toContain('moveDoor')
+  })
+
+  it('but a tenant-packed unit photographs it once, not twice', () => {
+    /* One visit. A second door shot would be the same door, same morning. */
+    const keys = stepsFor(tenant).map((s) => s.key)
+    expect(keys).toEqual(['door', 'before', 'empty', 'newDoor', 'newFull'])
+  })
+
+  it('packing cannot be signed off without its photos AND materials', () => {
+    const shots = { door: [shot(1,'a')], before: [shot(2,'a')], packed: [shot(3,'a')] }
+    expect(readyToFinishPacking({ service: 'gorilla', shots })).toBe(false)
+    expect(readyToFinishPacking({ service: 'gorilla', shots, materialsNone: true })).toBe(true)
+  })
+
+  it('and the unit cannot be COMPLETED while it is still being packed', () => {
+    /* The move has not happened. Completing here would close a unit whose
+       contents are still in the old apartment. */
+    const everything = { service: 'gorilla', materialsNone: true,
+      shots: Object.fromEntries(['door','before','packed','moveDoor','empty','newDoor','newFull'].map(k => [k, [shot(1,'a')]])) }
+    expect(readyToFinish({ ...everything, packingDoneAt: null })).toBe(false)
+    expect(readyToFinish({ ...everything, packingDoneAt: 1 })).toBe(true)
+  })
+
+  it('move day can still see what the packers left', () => {
+    expect(earlierSteps(moveDay).map((s) => s.key)).toEqual(['door', 'before', 'packed'])
+  })
+
+  it('but packing day has no earlier visit to show', () => {
+    expect(earlierSteps(packDay)).toEqual([])
+    expect(earlierSteps(tenant)).toEqual([])
   })
 })

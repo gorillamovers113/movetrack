@@ -17,7 +17,7 @@
  * two copies of the same markup drifting apart already.
  */
 import React from 'react'
-import { doneCount, stepTotal, photoCount, shotsFor, S15_STEP_KEYS } from './s15.js'
+import { doneCount, stepTotal, photoCount, shotsFor, S15_STEP_KEYS, phaseOf, weArePacking } from './s15.js'
 
 /** The most recent photo on a unit, whichever step it belongs to. */
 export function lastTouch(unit) {
@@ -46,6 +46,7 @@ export default function S15UnitCard({ unit, onOpen }) {
   const pct = Math.round((n / total) * 100)
   const touch = lastTouch(unit)
   const shots = photoCount(unit)
+  const packDay = weArePacking(unit) && phaseOf(unit) === 'packing' && !unit.done
   const started = n > 0 && !unit.done
 
   return (
@@ -94,6 +95,14 @@ export default function S15UnitCard({ unit, onOpen }) {
         {started && touch && (
           <span style={{ display: 'block', marginTop: 3, fontSize: 11, color: '#15803d', fontWeight: 600 }}>
             {touch.name} · {ago(touch.ts)}
+          </span>
+        )}
+
+        {/* Which visit. A mover scanning the board has to be able to see
+            that 508 is not theirs yet without opening it. */}
+        {packDay && (
+          <span style={{ display: 'inline-block', marginTop: 6, marginRight: 6, fontSize: 11, fontWeight: 700, color: '#92400e', background: '#fef3c7', padding: '2px 7px', borderRadius: 999 }}>
+            packing today
           </span>
         )}
 

@@ -48,9 +48,33 @@ export const S15_EVENTS = 's15Events'
  * pictures of the unit". Both are stored as arrays either way, so a retake is
  * an append rather than a destructive overwrite - the crew can always shoot
  * again, and the earlier frame stays in the record for the admin to see. */
+/* TWO VISITS, NOT ONE, WHEN WE PACK.
+ *
+ * Casey, 2026-10-22: "when we do packing, its usualy done before the move. so
+ * for the units 508 they are packing today, and tomorrow will be the move ...
+ * when the packers finish today, now the movers will need to do that same
+ * steps again."
+ *
+ * A tenant-packed unit is one visit: the crew arrive, it is already boxed,
+ * they move it. Thirteen of the sixteen work that way and are unchanged.
+ *
+ * A unit we pack is two visits on two different days, by two different
+ * crews. Putting all of it on one screen would show a packer four steps they
+ * cannot do today and a mover three that were done without them. So the unit
+ * has a PHASE, and each crew sees only their own half:
+ *
+ *   packing   door, the unit untouched, packed and ready, materials, time
+ *   moving    door again, empty, new door, everything in the new unit
+ *
+ * The door is photographed on both days on purpose. It is the cheapest proof
+ * of which apartment and which day, and the two visits are a night apart.
+ *
+ * `phase` is absent on every unit that already exists, so phaseOf() derives
+ * it: a unit we pack that has not finished packing is packing, everything
+ * else is moving. Nothing had to be migrated under a crew mid-shift. */
 export const S15_STEPS = [
-  { key: 'door', label: 'Front door, unit number showing', hint: 'The door you are starting at. More than one is fine.', multi: false, side: 'from' },
-  { key: 'before', label: 'The unit before we touch anything', hint: 'A few. Every room you can see.', multi: true, side: 'from' },
+  { key: 'door', label: 'Front door, unit number showing', hint: 'The door you are starting at. More than one is fine.', multi: false, side: 'from', phase: 'packing' },
+  { key: 'before', label: 'The unit before we touch anything', hint: 'A few. Every room you can see.', multi: true, side: 'from', phase: 'packing' },
   /* Only when Gorilla did the packing. Casey, 2026-10-22: "if gorilla is
      packing, make sure to add extra steps."
 
@@ -58,10 +82,11 @@ export const S15_STEPS = [
      when it exists: boxed, labelled, still in the apartment. It is the only
      evidence of how the pack was done, and on a disability unit - which is
      every unit we pack here - it is the shot that answers a complaint. */
-  { key: 'packed', label: 'Packed and ready, before it moves', hint: 'A few. Boxes stacked, labels showing.', multi: true, side: 'from', packingOnly: true },
-  { key: 'empty', label: 'The unit once everything is out', hint: 'Proves nothing was left behind. Add as many as you need.', multi: false, side: 'from' },
-  { key: 'newDoor', label: 'New front door, unit number showing', hint: 'The door you are moving them to. More than one is fine.', multi: false, side: 'to' },
-  { key: 'newFull', label: 'Everything in the new unit', hint: 'A few. Show where it all landed.', multi: true, side: 'to' },
+  { key: 'packed', label: 'Packed and ready, before it moves', hint: 'A few. Boxes stacked, labels showing.', multi: true, side: 'from', packingOnly: true, phase: 'packing' },
+  { key: 'moveDoor', label: 'Front door, unit number showing', hint: 'Move day. Shows which door and which day.', multi: false, side: 'from', phase: 'moving', movingOnly: true },
+  { key: 'empty', label: 'The unit once everything is out', hint: 'Proves nothing was left behind. Add as many as you need.', multi: false, side: 'from', phase: 'moving' },
+  { key: 'newDoor', label: 'New front door, unit number showing', hint: 'The door you are moving them to. More than one is fine.', multi: false, side: 'to', phase: 'moving' },
+  { key: 'newFull', label: 'Everything in the new unit', hint: 'A few. Show where it all landed.', multi: true, side: 'to', phase: 'moving' },
 ]
 
 export const S15_STEP_KEYS = S15_STEPS.map((s) => s.key)
@@ -73,10 +98,40 @@ export function weArePacking(unit) {
   return !!unit && unit.service === 'gorilla'
 }
 
-/** The steps THIS unit actually asks for. A tenant-packed unit keeps the
- *  five photographs and nothing else; ours gains the packed shot. */
+/** Which visit this unit is on.
+ *
+ *  Derived, not stored, so the units already on the board did not need
+ *  migrating while a crew was standing in one of them. */
+export function phaseOf(unit) {
+  if (!weArePacking(unit)) return 'moving'
+  return unit && unit.packingDoneAt ? 'moving' : 'packing'
+}
+
+/** The steps THIS unit asks for RIGHT NOW.
+ *
+ *  A tenant-packed unit: the five, one visit, no phases involved - the
+ *  move-day door shot would be a second photograph of the same door on the
+ *  same morning, so it is left out.
+ *  A unit we pack: three today, four tomorrow. */
 export function stepsFor(unit) {
-  return weArePacking(unit) ? S15_STEPS : S15_STEPS.filter((s) => !s.packingOnly)
+  if (!weArePacking(unit)) return S15_STEPS.filter((s) => !s.packingOnly && !s.movingOnly)
+  const phase = phaseOf(unit)
+  return S15_STEPS.filter((s) => s.phase === phase)
+}
+
+/** Everything already shot on the visit before this one, so a mover can see
+ *  what the packers left without any of it cluttering their own list. */
+export function earlierSteps(unit) {
+  if (!weArePacking(unit) || phaseOf(unit) !== 'moving') return []
+  return S15_STEPS.filter((s) => s.phase === 'packing')
+}
+
+/** Packing is finished when its three shots are in and the materials are
+ *  answered. The move cannot start before that, which is the whole point. */
+export function readyToFinishPacking(unit) {
+  if (phaseOf(unit) !== 'packing') return false
+  return S15_STEPS.filter((s) => s.phase === 'packing').every((s) => stepDone(unit, s.key))
+    && materialsAnswered(unit)
 }
 
 /** Shots taken for one step, oldest first. Tolerates a doc written before a
@@ -135,6 +190,7 @@ export function materialsAnswered(unit) {
  *  step 4 is a photograph of that door with its number on it, so the record
  *  is complete without anybody typing. Typing it only makes it searchable. */
 export function readyToFinish(unit) {
+  if (phaseOf(unit) === 'packing') return false
   return doneCount(unit) === stepTotal(unit) && materialsAnswered(unit)
 }
 
@@ -309,6 +365,26 @@ export async function setPackMinutes(unit, minutes, user) {
     updatedAt: serverTimestamp(),
   })
   await logEvent(user, unit, `Packing time: ${m} min`)
+}
+
+/** Packing done. The unit changes hands: tomorrow's crew open it and find
+ *  their own four steps, with today's work shown above, read only. */
+export async function finishPacking(unit, user) {
+  await updateDoc(doc(db, S15_UNITS, unit.id), {
+    packingDoneAt: Date.now(),
+    packingDoneBy: user.name || user.email || 'someone',
+    updatedAt: serverTimestamp(),
+  })
+  await logEvent(user, unit, 'Packing finished, ready for move day')
+}
+
+/** Admin only: put it back on the packers. */
+export async function reopenPacking(unit, user) {
+  await updateDoc(doc(db, S15_UNITS, unit.id), {
+    packingDoneAt: null,
+    updatedAt: serverTimestamp(),
+  })
+  await logEvent(user, unit, 'Reopened packing')
 }
 
 export async function finishUnit(unit, user) {

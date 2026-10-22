@@ -17,6 +17,7 @@ import {
   addShot, removeShot, setDestination, addNote, removeNote, finishUnit,
   reopenUnit, setService, deleteUnit,
   stepsFor, stepTotal, photoCount, weArePacking, materialsAnswered, setMaterials, setPackMinutes,
+  phaseOf, earlierSteps, readyToFinishPacking, finishPacking, reopenPacking,
   CARTON_TYPES, SUPPLY_TYPES,
 } from './s15.js'
 
@@ -237,6 +238,10 @@ export default function S15Unit({ unit, goBack, toast }) {
   const steps = stepsFor(unit)
   const total = stepTotal(unit)
   const packing = weArePacking(unit)
+  const phase = phaseOf(unit)
+  const onPackDay = phase === 'packing'
+  const earlier = earlierSteps(unit)
+  const packReady = readyToFinishPacking(unit)
   const n = doneCount(unit)
   const shotTotal = photoCount(unit)
   const ready = readyToFinish(unit)
@@ -271,10 +276,56 @@ export default function S15Unit({ unit, goBack, toast }) {
       </div>
       {unit.note && <div className="muted" style={{ marginTop: 2 }}>{unit.note}</div>}
 
+      {packing && !unit.done && (
+        <div
+          className="card"
+          style={{
+            padding: '10px 14px', marginTop: 12, fontSize: 13,
+            background: onPackDay ? '#fffbeb' : '#eff6ff',
+            border: `1px solid ${onPackDay ? '#fde68a' : '#bfdbfe'}`,
+          }}
+        >
+          <b>{onPackDay ? 'Packing day' : 'Move day'}</b>
+          {onPackDay
+            ? ' — pack it and photograph it. The move happens on a later visit.'
+            : ` — packed by ${unit.packingDoneBy || 'the pack crew'}. Move it out and into the new unit.`}
+        </div>
+      )}
+
       {unit.done && !admin && (
         <div className="card" style={{ padding: 12, marginTop: 12, background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
           Finished by {unit.doneByName || 'someone'}. Ask Casey if something needs changing.
         </div>
+      )}
+
+      {/* What the packers left. Read only, and above the mover's own list,
+          because a mover arriving at a packed apartment wants to see what was
+          boxed without any of it sitting in their list of things to do. */}
+      {earlier.length > 0 && (
+        <details style={{ marginTop: 16 }}>
+          <summary style={{ cursor: 'pointer', fontSize: 13, fontWeight: 650 }}>
+            From packing day · {earlier.reduce((n, st) => n + shotsFor(unit, st.key).length, 0)} photos
+            {unit.materials && Object.keys(unit.materials).length > 0 && ' · materials recorded'}
+          </summary>
+          <div className="card" style={{ padding: 14, marginTop: 8 }}>
+            {earlier.map((st) => (
+              <div key={st.key} style={{ marginBottom: 10 }}>
+                <div className="muted" style={{ fontSize: 12, marginBottom: 4 }}>{st.label}</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {shotsFor(unit, st.key).map((sh, i) => (
+                    <a key={i} href={sh.url} target="_blank" rel="noopener">
+                      <img src={sh.url} alt={st.label} style={{ width: 62, height: 62, objectFit: 'cover', borderRadius: 7 }} />
+                    </a>
+                  ))}
+                  {!shotsFor(unit, st.key).length && <span className="muted" style={{ fontSize: 12 }}>none</span>}
+                </div>
+              </div>
+            ))}
+            {unit.packMinutes > 0 && (
+              <div className="muted" style={{ fontSize: 12 }}>Packing took {unit.packMinutes} min</div>
+            )}
+          </div>
+        </details>
       )}
 
       <div className="row" style={{ alignItems: 'center', margin: '18px 0 10px' }}>
@@ -298,7 +349,7 @@ export default function S15Unit({ unit, goBack, toast }) {
         <StepCard key={s.key} step={s} index={i} unit={unit} user={user} editable={editable} onToast={toast} />
       ))}
 
-      {packing && (
+      {packing && onPackDay && (
         <PackingExtras unit={unit} user={user} editable={editable} toast={toast} />
       )}
 
@@ -383,7 +434,25 @@ export default function S15Unit({ unit, goBack, toast }) {
 
       {/* Finish. Only offered once all five are in, so the button cannot be
           the thing that produces a half-recorded unit. */}
-      {!unit.done && editable && (
+      {onPackDay && editable && (
+        <button
+          className="btn btn-primary btn-lg"
+          disabled={!packReady}
+          onClick={async () => {
+            try { await finishPacking(unit, user); toast(`Unit ${unit.number} packed. Ready for move day.`); goBack() }
+            catch (e) { toast(e.message) }
+          }}
+          style={{ width: '100%', minHeight: 56, fontSize: 17, marginTop: 16 }}
+        >
+          {packReady
+            ? '✓ Packing finished'
+            : n < total
+              ? `${total - n} photo${total - n === 1 ? '' : 's'} to go`
+              : 'Add the materials you used first'}
+        </button>
+      )}
+
+      {!unit.done && !onPackDay && editable && (
         <button
           className="btn btn-primary btn-lg"
           disabled={!ready}
@@ -401,6 +470,14 @@ export default function S15Unit({ unit, goBack, toast }) {
       {unit.done && admin && (
         <div className="row" style={{ gap: 8, marginTop: 16 }}>
           <button className="btn" onClick={() => reopenUnit(unit, user).catch((e) => toast(e.message))}>Reopen this unit</button>
+        </div>
+      )}
+
+      {packing && !onPackDay && !unit.done && admin && (
+        <div className="row" style={{ gap: 8, marginTop: 16 }}>
+          <button className="btn btn-sm" onClick={() => reopenPacking(unit, user).catch((e) => toast(e.message))}>
+            Send back to packing
+          </button>
         </div>
       )}
 
