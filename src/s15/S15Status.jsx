@@ -187,7 +187,7 @@ function UnitDetail({ unit, events, onBack, user, toast }) {
                 >
                   <img src={sh.url} alt={s.label} style={{ width: '100%', aspectRatio: '4/3', objectFit: 'cover', display: 'block' }} />
                   <span style={{ display: 'block', padding: '8px 10px', fontSize: 11.5, color: T.mutedLight }}>
-                    {sh.name} · {when(sh.ts)}
+                    {sh.name || 'someone'} · {when(sh.ts)}
                   </span>
                 </a>
               ))}
@@ -224,7 +224,13 @@ function UnitDetail({ unit, events, onBack, user, toast }) {
               {notes.map((nt, i) => (
                 <li key={i} style={{ borderTop: `1px solid ${T.stone}`, paddingTop: 12 }}>
                   <div style={{ fontSize: 14.5, color: T.navy }}>{nt.text}</div>
-                  <div style={{ fontSize: 11.5, color: T.mutedLight, marginTop: 3 }}>{nt.by} · {when(nt.ts)}</div>
+                  {/* The data layer stores this as `name`; reading `by`
+                      printed a bare "· Oct 22, 12:13 PM" with nobody
+                      against it, on the one page where who said it is the
+                      whole point. */}
+                  <div style={{ fontSize: 11.5, color: T.mutedLight, marginTop: 3 }}>
+                    {nt.name || nt.by || 'someone'} · {when(nt.ts)}
+                  </div>
                 </li>
               ))}
             </ul>

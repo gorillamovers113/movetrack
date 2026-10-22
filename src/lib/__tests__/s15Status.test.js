@@ -103,7 +103,8 @@ describe('what the page has to show a client', () => {
   })
 
   it('the notes, with who left each one and when', () => {
-    expect(PAGE).toMatch(/\{nt\.by\} · \{when\(nt\.ts\)\}/)
+    /* Was {nt.by}, which printed no name at all. */
+    expect(PAGE).toContain("{nt.name || nt.by || 'someone'} · ")
   })
 
   it('and the whole timeline, not an edited one', () => {
@@ -117,7 +118,7 @@ describe('what the page has to show a client', () => {
   })
 
   it('every photo and event is stamped with a name and a time', () => {
-    expect(PAGE).toMatch(/\{sh\.name\} · \{when\(sh\.ts\)\}/)
+    expect(PAGE).toContain("{sh.name || 'someone'} · {when(sh.ts)}")
     expect(PAGE).toMatch(/\{e\.name\} · \{when\(e\.ts\)\}/)
   })
 })
@@ -212,5 +213,42 @@ describe('the record does not fill up with writes nobody made', () => {
        zero and write anyway. */
     expect(UNITJSX).toContain('const v = Math.max(0, Math.floor(Number(c[k]) || 0))')
     expect(UNITJSX).toContain('if (v > 0) out[k] = v')
+  })
+})
+
+/* ── Who said it ────────────────────────────────────────────────────
+ *
+ * Found by demoing the page, not by testing it: a note posted on unit 508
+ * read "· Oct 22, 12:13 PM" with nobody against it. The data layer stores a
+ * note's author as `name`; the page was reading `by`.
+ *
+ * On this page that is not cosmetic. Casey: "track everyting that happens
+ * who, when and where for each unit." A record with the WHO missing is the
+ * one thing it exists to carry.
+ */
+describe('every line on the client page names a person', () => {
+  const S15SRC = readFileSync('src/s15/s15.js', 'utf8')
+
+  it('the page reads the field the data layer actually writes', () => {
+    expect(S15SRC).toMatch(/notes: arrayUnion\(\{[\s\S]{0,120}name: user\.name/)
+    expect(PAGE).toContain('{nt.name || nt.by || \'someone\'}')
+  })
+
+  it('a photograph names its photographer', () => {
+    expect(S15SRC).toMatch(/const shot = \{[\s\S]{0,420}name: user\.name/)
+    expect(PAGE).toContain("{sh.name || 'someone'}")
+  })
+
+  it('and an event names who caused it', () => {
+    expect(S15SRC).toMatch(/addDoc\(collection\(db, S15_EVENTS\), \{[\s\S]{0,200}name: user\.name/)
+    expect(PAGE).toMatch(/\{e\.name\} · \{when\(e\.ts\)\}/)
+  })
+
+  it('nothing on the page reads a byline field that is never written', () => {
+    /* `by` was the invented one. If a future shape adds it, the fallback
+       above still works, but nothing may depend on it alone. */
+    expect(PAGE).not.toMatch(/\{nt\.by\}/)
+    expect(PAGE).not.toMatch(/\{sh\.by\}/)
+    expect(PAGE).not.toMatch(/\{e\.by\}/)
   })
 })
