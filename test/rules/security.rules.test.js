@@ -1913,7 +1913,7 @@ describe('timeEntries', () => {
   const now = () => Date.now()
   const entry = (over = {}) => ({
     uid: PACKER, userName: 'Test packer-1', role: 'packer', day: '2026-09-10',
-    clockIn: now(), clockOut: null,
+    clockIn: now(), clockOut: null, openedAt: now(),
     lunchMinutes: 0, workedThroughLunch: false, source: 'self', ...over,
   })
 
@@ -1930,14 +1930,36 @@ describe('timeEntries', () => {
     await assertFails(addDoc(collection(dbAs(PACKER), 'timeEntries'), entry({ uid: OTHER_PACKER })))
   })
 
-  // The strongest guarantee here: a crew member can only stamp the moment they
-  // are actually in, so no clock-in can be invented or moved earlier.
-  it('a packer may not backdate their clock-in', async () => {
-    await assertFails(addDoc(collection(dbAs(PACKER), 'timeEntries'),
+  /* THIS GUARANTEE WAS DELIBERATELY RELAXED on 2026-10-22, and these tests
+   * are where that is written down.
+   *
+   * It used to read: a crew member can only stamp the moment they are
+   * actually in, so no clock-in can be invented or moved earlier. That is
+   * also why the app told anyone who started before 8am to go and find
+   * Casey, which is the errand he asked to remove with the welcome screen's
+   * start-time box.
+   *
+   * What is kept is the audit rather than the prohibition. openedAt is still
+   * pinned to server time, so the moment the app was really opened cannot be
+   * forged, and a declared start is visibly a claim sitting next to it. */
+  it('a packer may now declare an earlier start, which is the new behaviour', async () => {
+    await assertSucceeds(addDoc(collection(dbAs(PACKER), 'timeEntries'),
       entry({ clockIn: now() - 3 * 3600000 })))
   })
 
-  it('a packer may not post-date their clock-in either', async () => {
+  it('but openedAt still has to be the real moment', async () => {
+    /* The half that is not negotiable. Forge this and the gap between "what
+       I said" and "when I opened the app" disappears. */
+    await assertFails(addDoc(collection(dbAs(PACKER), 'timeEntries'),
+      entry({ clockIn: now() - 3 * 3600000, openedAt: now() - 3 * 3600000 })))
+  })
+
+  it('a whole day cannot be invented from one tap', async () => {
+    await assertFails(addDoc(collection(dbAs(PACKER), 'timeEntries'),
+      entry({ clockIn: now() - 20 * 3600000 })))
+  })
+
+  it('and a shift cannot start in the future', async () => {
     await assertFails(addDoc(collection(dbAs(PACKER), 'timeEntries'),
       entry({ clockIn: now() + 3 * 3600000 })))
   })
@@ -2140,7 +2162,7 @@ describe('somebody who packs and loads', () => {
     await assertSucceeds(
       setDoc(doc(dbAs(BOTH), 'timeEntries', 'e1'), {
         uid: BOTH, userName: 'Test crew-1', day: '2026-09-11',
-        clockIn: Date.now(), clockOut: null, lunchMinutes: 0, source: 'self', role: 'crew',
+        clockIn: Date.now(), clockOut: null, openedAt: Date.now(), lunchMinutes: 0, source: 'self', role: 'crew',
       })
     )
   })
@@ -2318,7 +2340,7 @@ describe('the access log', () => {
 describe('who may clock in', () => {
   const entry = (uid) => ({
     uid, userName: `Test ${uid}`, day: '2026-09-11',
-    clockIn: Date.now(), clockOut: null, lunchMinutes: 0, source: 'self',
+    clockIn: Date.now(), clockOut: null, openedAt: Date.now(), lunchMinutes: 0, source: 'self',
   })
 
   it('everybody who works a shift', async () => {

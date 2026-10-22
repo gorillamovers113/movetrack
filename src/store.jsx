@@ -916,16 +916,30 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
       case 'clockIn': {
         const now = Date.now()
         if (!usesClock(currentUser.role)) throw new Error('A viewer keeps no time, so there is nothing to clock.')
-        // Enforced here rather than in the rules: the exact local minute needs
-        // a timezone, which security rules do not have. See firestore.rules.
-        if (!canClockInAt(now)) throw new Error('The clock opens at 8:00am.')
-        const day = businessDayKey(now)
+        /* The start time the person actually gives us.
+         *
+         * Casey, 2026-10-22: the welcome screen asks each person what time
+         * they started and defaults it to now. Somebody who began at 6am used
+         * to be told the clock opens at 8 and to go and ask Casey; that
+         * errand is the thing being removed.
+         *
+         * So the 8am floor now applies to a punch taken AT the default, and
+         * a declared earlier start is allowed and recorded as a claim.
+         * `openedAt` stays pinned to the real moment by the rules, so the
+         * timesheet can always show the gap between what was said and when
+         * the app was opened. */
+        const declared = Number.isFinite(p && p.startedAt) ? Number(p.startedAt) : now
+        if (declared > now) throw new Error('That is in the future. Pick when you actually started.')
+        if (now - declared > 18 * 60 * 60 * 1000) throw new Error('That is more than 18 hours ago.')
+        if (declared === now && !canClockInAt(now)) throw new Error('The clock opens at 8:00am.')
+        const day = businessDayKey(declared)
         if (state.timeEntries.some((e) => e.uid === currentUser.uid && e.day === day)) {
           throw new Error('You are already clocked in for today.')
         }
         await addDoc(collection(db, 'timeEntries'), {
           uid: currentUser.uid, userName: currentUser.name, role: currentUser.role,
-          day, clockIn: now, clockOut: null,
+          day, clockIn: declared, clockOut: null, openedAt: now,
+          declaredStart: declared !== now,
           lunchMinutes: 0, workedThroughLunch: false, source: 'self',
         })
         return

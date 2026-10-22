@@ -653,11 +653,31 @@ service cloud.firestore {
        * admin could not clock themselves in at all. Aaron was made an admin
        * at lunchtime and lost the rest of his day to it.
        */
+      /* A SELF PUNCH MAY NOW DECLARE AN EARLIER START, AND THAT IS A
+       * DELIBERATE RELAXATION. Casey, 2026-10-22: the welcome screen asks
+       * each person what time they started, defaulted to now.
+       *
+       * This rule used to require stampedNow(clockIn), so a crew member who
+       * began at 6am could not record it - the app told them to go and ask
+       * Casey, which is the friction he is removing.
+       *
+       * What replaces it keeps the audit rather than the prohibition:
+       *   - openedAt is still pinned to server time, so the moment the app
+       *     was actually opened can never be forged
+       *   - clockIn may be earlier than that, but never later, so nobody
+       *     clocks in for a shift that has not started
+       *   - and never more than 18 hours earlier, so a whole day cannot be
+       *     invented from a single tap
+       * A declared start that differs from openedAt is visible on the
+       * timesheet, which is the point: it is a claim, attributed and
+       * timestamped, not an unrecorded edit. */
       allow create: if (onTheClock()
                         && request.resource.data.uid == request.auth.uid
                         && request.resource.data.source == 'self'
                         && request.resource.data.clockOut == null
-                        && stampedNow(request.resource.data.clockIn))
+                        && stampedNow(request.resource.data.openedAt)
+                        && request.resource.data.clockIn <= request.resource.data.openedAt
+                        && request.resource.data.clockIn >= request.resource.data.openedAt - 18 * 60 * 60 * 1000)
                  || (isAdmin()
                      && request.resource.data.source == 'admin'
                      && request.resource.data.enteredBy == request.auth.uid);

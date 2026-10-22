@@ -18,6 +18,7 @@ import Studio15 from './s15/Studio15.jsx'
 import S15BuildingView from './s15/S15BuildingView.jsx'
 import ProjectPicker, { PROJECTS, PROJECT_KEY } from './ProjectPicker.jsx'
 import { allowedProjects } from './lib/projectAccess.js'
+import WelcomeStart, { shouldAskStart } from './WelcomeStart.jsx'
 import UpdateBar from './components/UpdateBar.jsx'
 import { recordSession } from './lib/telemetry.js'
 
@@ -99,6 +100,10 @@ function Shell() {
   // against a missing/unknown NAV[role] anyway rather than throwing.
   // Which job. Remembered so a packer on Studio 15 all week is not asked
   // every morning; the sidebar chip is the way back to the picker.
+  /* Asked once per business day, before the job picker: the clock is the
+     whole crew's, the job is today's. Held in state so answering it moves
+     straight on without a reload. */
+  const [startAsked, setStartAsked] = useState(false)
   const [project, setProject] = useState(() => {
     try { return localStorage.getItem(PROJECT_KEY) || null } catch { return null }
   })
@@ -224,6 +229,12 @@ function Shell() {
       {!mobile && key === 'team' && pendingCount > 0 && <span className="count">{pendingCount}</span>}
     </button>
   ))
+
+  // Casey, 2026-10-22: "for each user that logsin you should have a welcome
+  // screen with a imput for there start time."
+  if (!startAsked && shouldAskStart(currentUser, state.timeEntries)) {
+    return <WelcomeStart onDone={() => setStartAsked(true)} toast={toast} />
+  }
 
   // Casey: "the user would click on one or the other at the starting page."
   if (!effectiveProject) return <ProjectPicker onPick={pickProject} />
