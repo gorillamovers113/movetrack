@@ -65,3 +65,25 @@ describe('nav coverage', () => {
     }
   })
 })
+
+describe('a Studio 15 crew member can get back off the clock', () => {
+  /* The welcome screen puts everyone ON the clock at sign-in. ClockCard -
+     the only way off it - lived solely in Dashboard and MyWork, and neither
+     is in Studio 15's nav. A packer working only Studio 15 would have
+     clocked in every morning with no way to clock out: the shift stays open
+     for ever, and Casey repairs every row by hand.
+     Found on 2026-10-22 answering "anything else". */
+  const BOARD = readFileSync('src/s15/Studio15.jsx', 'utf8')
+
+  it('the Studio 15 board carries the clock', () => {
+    expect(BOARD).toContain("import ClockCard from '../components/ClockCard.jsx'")
+    expect(BOARD).toContain('<ClockCard toast={toast} />')
+  })
+
+  it('and it is reachable from that project nav, not Trinity\'s', () => {
+    /* The board is the first item in S15_CREW, so every role that can work
+       this job lands on the screen holding the clock. */
+    const at = APP.indexOf('const S15_CREW =')
+    expect(APP.slice(at, at + 120)).toContain("'studio15'")
+  })
+})

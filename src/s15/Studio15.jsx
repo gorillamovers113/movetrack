@@ -15,6 +15,7 @@ import {
   STUDIO15_SCHEDULED,
 } from './s15.js'
 import S15Unit from './S15Unit.jsx'
+import ClockCard from '../components/ClockCard.jsx'
 
 export default function Studio15({ toast }) {
   const { currentUser } = useStore()
@@ -63,6 +64,17 @@ export default function Studio15({ toast }) {
       {err && (
         <div className="card" style={{ padding: 12, marginTop: 12, background: '#fef2f2', border: '1px solid #fecaca' }}>{err}</div>
       )}
+
+      {/* THE WAY BACK OFF THE CLOCK.
+          The welcome screen puts everyone ON the clock at sign-in, but it
+          lives in Trinity's Dashboard and My-queue, neither of which is in
+          Studio 15's nav. Without this, a crew member here clocks in every
+          morning and can never clock out: the shift stays open for ever and
+          Casey repairs every row by hand. ClockCard renders nothing for a
+          role that keeps no time, so it costs a viewer nothing. */}
+      <div style={{ marginTop: 14 }}>
+        <ClockCard toast={toast} />
+      </div>
 
       {units.length > 0 && (
         <div className="row" style={{ gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
