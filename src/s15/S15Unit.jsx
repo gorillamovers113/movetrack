@@ -17,7 +17,7 @@ import {
   addShot, removeShot, setDestination, addNote, removeNote, finishUnit,
   reopenUnit, setService, deleteUnit,
   stepsFor, stepTotal, photoCount, weArePacking, materialsAnswered, setMaterials, setPackMinutes,
-  phaseOf, earlierSteps, readyToFinishPacking, finishPacking, reopenPacking,
+  phaseOf, earlierSteps, readyToFinishPacking, finishPacking, reopenPacking, canSetService,
   CARTON_TYPES, SUPPLY_TYPES,
 } from './s15.js'
 
@@ -238,6 +238,98 @@ function PackingExtras({ unit, user, editable, toast }) {
   )
 }
 
+/* Who packs this one, changeable at the door.
+ *
+ * Deliberately NOT in the admin card at the bottom next to Delete. This is a
+ * routine field decision a supervisor makes standing in a doorway on a
+ * phone, and a routine control does not belong in the same neighbourhood as
+ * an irreversible one.
+ *
+ * Supervisors as well as admins, because a supervisor can already add a
+ * whole unit to the board; being trusted to create one but not to say
+ * whether we are packing it was an inconsistency, not a safeguard.
+ */
+function WhoPacks({ unit, user, toast }) {
+  const ours = weArePacking(unit)
+  const [open, setOpen] = useState(false)
+  const [n, setN] = useState(() => String(unit.packers || 1))
+  const [busy, setBusy] = useState(false)
+
+  async function apply(service, packers) {
+    setBusy(true)
+    try {
+      await setService(unit, service, packers, user)
+      toast(service === 'gorilla'
+        ? `Unit ${unit.number}: we are packing it.`
+        : `Unit ${unit.number}: tenant packs it.`)
+      setOpen(false)
+    } catch (e) { toast(e.message) } finally { setBusy(false) }
+  }
+
+  if (!ours && !open) {
+    return (
+      <div className="card" style={{ padding: 14, marginTop: 12 }}>
+        <div className="row" style={{ gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <div className="grow" style={{ minWidth: 180 }}>
+            <div style={{ fontSize: 13, fontWeight: 650 }}>Tenant is packing this one</div>
+            <div className="muted" style={{ fontSize: 11.5, marginTop: 1 }}>
+              Turned up and it is not packed? Change it here.
+            </div>
+          </div>
+          <button className="btn btn-sm" onClick={() => setOpen(true)}>We are packing it</button>
+        </div>
+      </div>
+    )
+  }
+
+  if (!ours && open) {
+    return (
+      <div className="card" style={{ padding: 14, marginTop: 12, background: '#fffaf0', border: '1px solid #fde68a' }}>
+        <div style={{ fontSize: 13, fontWeight: 650 }}>How many packers on this unit?</div>
+        <div className="muted" style={{ fontSize: 11.5, margin: '3px 0 10px' }}>
+          Photos already taken stay. The unit switches to the packing steps and asks for materials.
+        </div>
+        <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <select className="input" value={n} onChange={(e) => setN(e.target.value)} style={{ width: 130, minHeight: 44, fontSize: 16 }}>
+            {[1, 2, 3, 4, 5].map((k) => (
+              <option key={k} value={String(k)}>{k} packer{k === 1 ? '' : 's'}</option>
+            ))}
+          </select>
+          <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => apply('gorilla', n)}>
+            {busy ? 'Saving…' : 'We are packing it'}
+          </button>
+          <button className="btn btn-sm" disabled={busy} onClick={() => setOpen(false)}>Cancel</button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="card" style={{ padding: 14, marginTop: 12, background: '#fffaf0', border: '1px solid #fde68a' }}>
+      <div className="row" style={{ gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <div className="grow" style={{ minWidth: 180 }}>
+          <div style={{ fontSize: 13, fontWeight: 650 }}>We are packing this one</div>
+          <div className="muted" style={{ fontSize: 11.5, marginTop: 1 }}>
+            {unit.packers ? `${unit.packers} packer${unit.packers === 1 ? '' : 's'}` : 'No packer count set'}
+          </div>
+        </div>
+        <select
+          className="input"
+          value={String(unit.packers || 1)}
+          disabled={busy}
+          onChange={(e) => apply('gorilla', e.target.value)}
+          style={{ width: 120, minHeight: 44, fontSize: 15 }}
+        >
+          {[1, 2, 3, 4, 5].map((k) => (
+            <option key={k} value={String(k)}>{k} packer{k === 1 ? '' : 's'}</option>
+          ))}
+        </select>
+        <button className="btn btn-sm" disabled={busy} onClick={() => apply('tenant', 0)}>Tenant packs it</button>
+      </div>
+    </div>
+  )
+}
+
 export default function S15Unit({ unit, goBack, toast }) {
   const user = unit && unit.__user
   const [dest, setDest] = useState(unit ? unit.destination || '' : '')
@@ -363,6 +455,10 @@ export default function S15Unit({ unit, goBack, toast }) {
       {steps.filter((s) => s.side === 'from').map((s, i) => (
         <StepCard key={s.key} step={s} index={i} unit={unit} user={user} editable={editable} onToast={toast} />
       ))}
+
+      {canSetService(unit, user) && (
+        <WhoPacks unit={unit} user={user} toast={toast} />
+      )}
 
       {packing && onPackDay && (
         <PackingExtras unit={unit} user={user} editable={editable} toast={toast} />
@@ -500,9 +596,6 @@ export default function S15Unit({ unit, goBack, toast }) {
         <div className="card" style={{ padding: 14, marginTop: 16 }}>
           <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>ADMIN</div>
           <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
-            <button className="btn btn-sm" onClick={() => setService(unit, unit.service === 'gorilla' ? 'tenant' : 'gorilla', user).catch((e) => toast(e.message))}>
-              {unit.service === 'gorilla' ? 'Switch to tenant-packed' : 'Switch to Gorilla-packed'}
-            </button>
             {confirmDelete ? (
               <>
                 <button

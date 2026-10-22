@@ -439,12 +439,47 @@ export async function reopenUnit(unit, user) {
   await logEvent(user, unit, 'Reopened the unit')
 }
 
-export async function setService(unit, service, user) {
-  await updateDoc(doc(db, S15_UNITS, unit.id), {
-    service,
-    updatedAt: serverTimestamp(),
-  })
-  await logEvent(user, unit, service === 'gorilla' ? 'Gorilla is packing this unit' : 'Tenant packs this unit')
+/* TURNING PACKING ON AT THE DOOR.
+ *
+ * Casey, 2026-10-22: "will there be an option for the admin or supervisor to
+ * add packing on the fly, im assuming it will be added on randome units."
+ *
+ * Yes, and it has to be, because the only way to find out a tenant has not
+ * packed is to open their door on move day. The crew ring a supervisor, the
+ * supervisor flips the unit, and the steps change under them.
+ *
+ * WHAT HAPPENS TO WORK ALREADY DONE: nothing. Photos are stored per step,
+ * and flipping only changes which steps a unit asks for. A crew who had
+ * already shot the door and the rooms find those two ticked off and only the
+ * packed-and-ready shot left, which is exactly the real situation. The same
+ * holds in reverse: a photograph taken under the wrong setting is never
+ * deleted, only hidden, and comes straight back if somebody flips it again.
+ *
+ * NOT ON A FINISHED UNIT. Completing a unit means the move is over; turning
+ * packing on afterwards would reopen it into a phase whose work cannot
+ * happen any more and leave it showing a count it can never reach. An admin
+ * reopens it first, deliberately, which is already a button. */
+export function canSetService(unit, user) {
+  if (!user || user.status !== 'active') return false
+  if (unit && unit.done) return false
+  return user.role === 'admin' || user.supervisor === true
+}
+
+export async function setService(unit, service, packers, user) {
+  const n = Math.max(0, Math.min(9, Math.floor(Number(packers) || 0)))
+  const patch = { service, updatedAt: serverTimestamp() }
+  /* The count only means anything when we are the ones packing. Leaving a
+     stale "3 packers" on a unit handed back to the tenant would put a crew
+     size on the board for work nobody is doing. */
+  patch.packers = service === 'gorilla' ? n : 0
+  await updateDoc(doc(db, S15_UNITS, unit.id), patch)
+  await logEvent(
+    user,
+    unit,
+    service === 'gorilla'
+      ? `Gorilla is packing this unit${n ? ` (${n} packer${n === 1 ? '' : 's'})` : ''}`
+      : 'Tenant packs this unit',
+  )
 }
 
 export async function addUnit({ number, packers = 0, service = 'tenant' }, user) {

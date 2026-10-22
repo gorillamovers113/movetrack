@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { lastTouch, coatFor } from '../../s15/S15UnitCard.jsx'
-import { doneCount, stepTotal, photoCount, stepsFor, weArePacking, materialsAnswered, materialsAreOurs, readyToFinish, phaseOf, readyToFinishPacking, earlierSteps } from '../../s15/s15.js'
+import { doneCount, stepTotal, photoCount, stepsFor, weArePacking, materialsAnswered, materialsAreOurs, canSetService, readyToFinish, phaseOf, readyToFinishPacking, earlierSteps } from '../../s15/s15.js'
 
 const CARD = readFileSync('src/s15/S15UnitCard.jsx', 'utf8')
 const BUILDING = readFileSync('src/s15/S15Building.jsx', 'utf8')
@@ -445,5 +445,70 @@ describe('the property can supply the materials and we still count them', () => 
     /* The inputs are gated on `editable` alone, never on materialsNone. */
     expect(UNIT2).toContain('disabled={!editable}')
     expect(UNIT2).not.toMatch(/disabled=\{[^}]*materialsNone/)
+  })
+})
+
+/* ── Turning packing on at the door ─────────────────────────────────
+ *
+ * Casey, 2026-10-22: "will there be an option for the admin or supervisor to
+ * add packing on the fly, im assuming it will be added on randome units."
+ *
+ * He is right that it will be random: the only way to find out a tenant has
+ * not packed is to open their door on move day.
+ */
+describe('adding packing on the fly', () => {
+  const S15B = readFileSync('src/s15/s15.js', 'utf8')
+  const UNIT3 = readFileSync('src/s15/S15Unit.jsx', 'utf8')
+  const admin = { status: 'active', role: 'admin' }
+  const supervisor = { status: 'active', role: 'crew', supervisor: true }
+  const packer = { status: 'active', role: 'crew' }
+
+  it('a supervisor can, not just an admin', () => {
+    /* A supervisor can already add a whole unit to the board. Being trusted
+       to create one but not to say whether we pack it was an inconsistency,
+       not a safeguard. */
+    expect(canSetService({}, supervisor)).toBe(true)
+    expect(canSetService({}, admin)).toBe(true)
+  })
+
+  it('a packer cannot', () => {
+    expect(canSetService({}, packer)).toBe(false)
+  })
+
+  it('and nobody can on a finished unit', () => {
+    /* The move is over. Turning packing on would reopen it into a phase
+       whose work cannot happen and leave a count it can never reach. */
+    expect(canSetService({ done: true }, admin)).toBe(false)
+    expect(canSetService({ done: true }, supervisor)).toBe(false)
+  })
+
+  it('an inactive account cannot, whatever its role says', () => {
+    expect(canSetService({}, { status: 'suspended', role: 'admin' })).toBe(false)
+    expect(canSetService({}, null)).toBe(false)
+  })
+
+  it('photos already taken survive the switch', () => {
+    /* A crew who shot the door and the rooms, then found it unpacked, keep
+       both: the unit just asks for the packed shot next. Nothing in the
+       switch touches `shots`. */
+    const before = { service: 'tenant', shots: { door: [shot(1,'a')], before: [shot(2,'a')] } }
+    const after = { ...before, service: 'gorilla' }
+    expect(doneCount(after)).toBe(2)
+    expect(stepsFor(after).map((s) => s.key)).toEqual(['door', 'before', 'packed'])
+    expect(S15B).not.toMatch(/setService[\s\S]{0,400}shots:/)
+  })
+
+  it('the packer count is cleared when it goes back to the tenant', () => {
+    /* A stale "3 packers" would put a crew size on the board for work
+       nobody is doing. */
+    expect(S15B).toContain("patch.packers = service === 'gorilla' ? n : 0")
+  })
+
+  it('the control does not live next to Delete', () => {
+    /* A routine field decision made in a doorway, on a phone, does not
+       belong in the same neighbourhood as an irreversible one. */
+    const adminCard = UNIT3.slice(UNIT3.indexOf('>ADMIN<'))
+    expect(adminCard).not.toContain('Switch to tenant-packed')
+    expect(UNIT3).toContain('<WhoPacks unit={unit} user={user} toast={toast} />')
   })
 })
