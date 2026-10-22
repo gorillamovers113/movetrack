@@ -173,8 +173,10 @@ function PackingExtras({ unit, user, editable, toast }) {
       <div style={{ fontWeight: 650 }}>We packed this one</div>
       <div className="muted" style={{ fontSize: 12.5, marginTop: 2, marginBottom: 12 }}>
         {answered
-          ? 'Materials recorded. Change them any time before the unit is finished.'
-          : 'What did you use? This is what the pack gets billed and restocked from.'}
+          ? unit.materialsNone && anyCount
+            ? 'Recorded as the property\'s materials. Change them any time before the unit is finished.'
+            : 'Materials recorded. Change them any time before the unit is finished.'
+          : 'What did you use? Count it whoever supplied it, and say below whose it was.'}
       </div>
 
       <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))' }}>
@@ -186,16 +188,29 @@ function PackingExtras({ unit, user, editable, toast }) {
         {SUPPLY_TYPES.map((t) => <Field key={t.key} t={t} />)}
       </div>
 
-      {editable && !anyCount && (
-        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, cursor: 'pointer' }}>
+      {/* ALWAYS AVAILABLE, and it never clears the counts.
+          Casey, 2026-10-22: the property supplies the cartons on this job,
+          we do the packing, and he still wants the count. Ticking this says
+          whose they were; it does not say there was nothing to count. */}
+      {editable && (
+        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginTop: 16, cursor: 'pointer' }}>
           <input
             type="checkbox"
             checked={!!unit.materialsNone}
             disabled={busy}
             onChange={(e) => save(e.target.checked)}
-            style={{ width: 18, height: 18 }}
+            style={{ width: 18, height: 18, marginTop: 2, flexShrink: 0 }}
           />
-          <span style={{ fontSize: 13 }}>We used none of our own materials</span>
+          <span style={{ fontSize: 13 }}>
+            We used none of our own materials
+            <span className="muted" style={{ display: 'block', fontSize: 11.5, marginTop: 1 }}>
+              {unit.materialsNone
+                ? anyCount
+                  ? 'Counted above as the property\'s. Tracked, not restocked to us.'
+                  : 'Nothing used, or the property supplied it. Add counts above if you want them tracked.'
+                : 'Tick this if the property supplied them. You can still count them above.'}
+            </span>
+          </span>
         </label>
       )}
 

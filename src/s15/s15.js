@@ -179,11 +179,38 @@ export function photoCount(unit) {
  * nobody can reconstruct afterwards from photographs. So finishing a unit we
  * packed asks for them - but "we used nothing" is a real answer and gets its
  * own tick, because forcing a false number is worse than an honest zero. */
+/* WHOSE MATERIALS, AND HOW MANY, ARE TWO SEPARATE FACTS.
+ *
+ * Casey, 2026-10-22: "the management has all of there own matterials. so
+ * click the box, should still allow us to add the matterials becuse i still
+ * want to track what was used."
+ *
+ * The first version treated them as one, and the storage enforced it:
+ * materialsNone was written as `none && no counts`, so ticking the box threw
+ * the counts away and typing a count silently unticked the box. That was
+ * wrong for the commonest case on this job - the property supplies the
+ * cartons, we do the packing, and Casey still wants to know that forty of
+ * them went into 508.
+ *
+ * So `materialsNone` now means only "none of these were OURS", and the
+ * counts stand on their own. Both can be true at once. What it drives:
+ *
+ *   counts, box clear      our stock. Bill it, restock it.
+ *   counts, box ticked     the property's. Tracked, not restocked.
+ *   no counts, box ticked  nothing used at all.
+ *   no counts, box clear   nobody has answered yet.
+ */
 export function materialsAnswered(unit) {
   if (!weArePacking(unit)) return true
   if (unit && unit.materialsNone === true) return true
   const m = (unit && unit.materials) || {}
   return Object.values(m).some((v) => Number(v) > 0)
+}
+
+/** True when there is a count to bill and restock against our own stock. */
+export function materialsAreOurs(unit) {
+  if (!unit || unit.materialsNone === true) return false
+  return Object.values(unit.materials || {}).some((v) => Number(v) > 0)
 }
 
 /** Every step shot. The destination number is deliberately NOT required:
@@ -345,7 +372,9 @@ export async function setMaterials(unit, counts, none, user) {
   }
   await updateDoc(doc(db, S15_UNITS, unit.id), {
     materials: clean,
-    materialsNone: !!none && Object.keys(clean).length === 0,
+    /* Independent of the counts, on purpose. Tying them together is what
+       made the box destroy what the packer had just typed. */
+    materialsNone: !!none,
     materialsBy: user.name || user.email || 'someone',
     materialsAt: Date.now(),
     updatedAt: serverTimestamp(),
@@ -353,7 +382,8 @@ export async function setMaterials(unit, counts, none, user) {
   const summary = Object.keys(clean).length
     ? [...CARTON_TYPES, ...SUPPLY_TYPES].filter((t) => clean[t.key]).map((t) => `${clean[t.key]} ${t.label.toLowerCase()}`).join(', ')
     : 'nothing'
-  await logEvent(user, unit, `Materials: ${summary}`)
+  const whose = Object.keys(clean).length && none ? ' (the property\'s, not ours)' : ''
+  await logEvent(user, unit, `Materials: ${summary}${whose}`)
 }
 
 export async function setPackMinutes(unit, minutes, user) {

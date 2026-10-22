@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { lastTouch, coatFor } from '../../s15/S15UnitCard.jsx'
-import { doneCount, stepTotal, photoCount, stepsFor, weArePacking, materialsAnswered, readyToFinish, phaseOf, readyToFinishPacking, earlierSteps } from '../../s15/s15.js'
+import { doneCount, stepTotal, photoCount, stepsFor, weArePacking, materialsAnswered, materialsAreOurs, readyToFinish, phaseOf, readyToFinishPacking, earlierSteps } from '../../s15/s15.js'
 
 const CARD = readFileSync('src/s15/S15UnitCard.jsx', 'utf8')
 const BUILDING = readFileSync('src/s15/S15Building.jsx', 'utf8')
@@ -389,5 +389,61 @@ describe('cards are coated by who packs, and which visit', () => {
        still starts at the card edge and the two read as separate facts. */
     expect(CARD4).toContain('inset 5px 0 0')
     expect(CARD4).toContain('paddingLeft: coat.rail && !unit.done ? 18 : 14')
+  })
+})
+
+/* ── Whose materials, and how many, are two separate facts ──────────
+ *
+ * Casey, 2026-10-22: "the management has all of there own matterials. so
+ * click the box, should still allow us to add the matterials becuse i still
+ * want to track what was used."
+ *
+ * The first version treated them as one fact and the STORAGE enforced it:
+ * materialsNone was written as `none && no counts`. Ticking the box threw
+ * away what the packer had typed, and typing a count silently unticked the
+ * box. Four states have to survive a round trip, not two.
+ */
+describe('the property can supply the materials and we still count them', () => {
+  const S15 = readFileSync('src/s15/s15.js', 'utf8')
+  const UNIT2 = readFileSync('src/s15/S15Unit.jsx', 'utf8')
+
+  it('counts and "none of ours" can both be true', () => {
+    const u = { service: 'gorilla', materials: { small: 40 }, materialsNone: true }
+    expect(materialsAnswered(u)).toBe(true)
+    expect(u.materials.small).toBe(40)
+  })
+
+  it('and that combination means tracked, not ours to restock', () => {
+    expect(materialsAreOurs({ materials: { small: 40 }, materialsNone: true })).toBe(false)
+    expect(materialsAreOurs({ materials: { small: 40 } })).toBe(true)
+  })
+
+  it('nothing used at all is still a valid answer', () => {
+    expect(materialsAnswered({ service: 'gorilla', materialsNone: true })).toBe(true)
+    expect(materialsAreOurs({ materialsNone: true })).toBe(false)
+  })
+
+  it('and nobody having answered is still not one', () => {
+    expect(materialsAnswered({ service: 'gorilla' })).toBe(false)
+  })
+
+  it('the stored flag no longer depends on the counts', () => {
+    /* `materialsNone: !!none && Object.keys(clean).length === 0` is the
+       line that destroyed a packer's typing. It must not come back. */
+    expect(S15).toContain('materialsNone: !!none,')
+    expect(S15).not.toContain('Object.keys(clean).length === 0')
+  })
+
+  it('the box is not hidden once a count exists', () => {
+    /* It used to render only when every field was empty, so the packer who
+       counted first could never say whose they were. */
+    expect(UNIT2).not.toContain('{editable && !anyCount && (')
+    expect(UNIT2).toContain('{editable && (')
+  })
+
+  it('and ticking it never disables the count fields', () => {
+    /* The inputs are gated on `editable` alone, never on materialsNone. */
+    expect(UNIT2).toContain('disabled={!editable}')
+    expect(UNIT2).not.toMatch(/disabled=\{[^}]*materialsNone/)
   })
 })
