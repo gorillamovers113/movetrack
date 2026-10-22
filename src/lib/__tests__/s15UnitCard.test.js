@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { lastTouch } from '../../s15/S15UnitCard.jsx'
-import { doneCount, stepTotal, stepsFor, weArePacking, materialsAnswered, readyToFinish } from '../../s15/s15.js'
+import { doneCount, stepTotal, photoCount, stepsFor, weArePacking, materialsAnswered, readyToFinish } from '../../s15/s15.js'
 
 const CARD = readFileSync('src/s15/S15UnitCard.jsx', 'utf8')
 const BUILDING = readFileSync('src/s15/S15Building.jsx', 'utf8')
@@ -45,7 +45,9 @@ describe('how far along a unit is', () => {
   })
 
   it('the exact count is printed too, because a bar alone is a guess', () => {
-    expect(CARD).toContain('${n} of ${total} photos')
+    /* Was '${n} of ${total} photos' until Casey read that as a cap on
+       2026-10-22. Same number, wording that does not promise a limit. */
+    expect(CARD).toContain('${n} of ${total} done')
   })
 
   it('an untouched unit gets no fill at all', () => {
@@ -195,5 +197,56 @@ describe('what it takes to finish a unit', () => {
 
   it('but materials alone do not finish it either', () => {
     expect(readyToFinish({ service: 'gorilla', shots: allShots(ourKeys.slice(0, 3)), materials: { small: 6 } })).toBe(false)
+  })
+})
+
+/* ── "0 of 5 photos" was never a limit ──────────────────────────────
+ *
+ * Casey, 2026-10-22: "i just noticed you have 0 of 5 photos on each card,
+ * there should be no limit on how many photos are uploaded. i would prefrer
+ * 5 or less, but some will need to be more, and some less."
+ *
+ * There was no cap. The five are the five SHOTS the record needs, and each
+ * holds as many frames as the crew take - Rogelio had already put two on one
+ * of them. But the label read as a quota to the person who commissioned the
+ * app, which is as clear a verdict on the wording as you can get.
+ */
+describe('photos are uncapped, and the label now says so', () => {
+  const UNIT = readFileSync('src/s15/S15Unit.jsx', 'utf8')
+  const CARD3 = readFileSync('src/s15/S15UnitCard.jsx', 'utf8')
+
+  it('a step holds as many photos as you put in it', () => {
+    const u = { service: 'tenant', shots: { before: [shot(1,'a'), shot(2,'b'), shot(3,'c'), shot(4,'d')] } }
+    expect(photoCount(u)).toBe(4)
+    expect(doneCount(u)).toBe(1)
+  })
+
+  it('photos and steps are counted separately', () => {
+    const u = { service: 'tenant', shots: { door: [shot(1,'a')], before: [shot(2,'b'), shot(3,'c')] } }
+    expect(doneCount(u)).toBe(2)
+    expect(photoCount(u)).toBe(3)
+  })
+
+  it('nothing says "of N photos" any more', () => {
+    /* That phrasing is what made it sound like a ration. */
+    expect(CARD3).not.toContain('${total} photos`')
+    expect(UNIT).not.toContain('PHOTOS · {n} of {total}')
+  })
+
+  it('the card says how many are done AND how many photos exist', () => {
+    expect(CARD3).toContain('${n} of ${total} done')
+    expect(CARD3).toContain('{shots} photo')
+  })
+
+  it('and every step accepts several at once, not just the multi ones', () => {
+    /* Three steps were single-select, so a packer with four shots of an
+       empty room had to pick them one at a time. */
+    expect(UNIT).toContain('            multiple\n')
+    expect(UNIT).not.toContain('multiple={step.multi}')
+  })
+
+  it('an empty unit counts zero photos without throwing', () => {
+    expect(photoCount({})).toBe(0)
+    expect(photoCount({ shots: {} })).toBe(0)
   })
 })

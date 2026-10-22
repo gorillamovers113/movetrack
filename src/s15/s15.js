@@ -49,7 +49,7 @@ export const S15_EVENTS = 's15Events'
  * an append rather than a destructive overwrite - the crew can always shoot
  * again, and the earlier frame stays in the record for the admin to see. */
 export const S15_STEPS = [
-  { key: 'door', label: 'Front door, unit number showing', hint: 'The door you are starting at.', multi: false, side: 'from' },
+  { key: 'door', label: 'Front door, unit number showing', hint: 'The door you are starting at. More than one is fine.', multi: false, side: 'from' },
   { key: 'before', label: 'The unit before we touch anything', hint: 'A few. Every room you can see.', multi: true, side: 'from' },
   /* Only when Gorilla did the packing. Casey, 2026-10-22: "if gorilla is
      packing, make sure to add extra steps."
@@ -59,8 +59,8 @@ export const S15_STEPS = [
      evidence of how the pack was done, and on a disability unit - which is
      every unit we pack here - it is the shot that answers a complaint. */
   { key: 'packed', label: 'Packed and ready, before it moves', hint: 'A few. Boxes stacked, labels showing.', multi: true, side: 'from', packingOnly: true },
-  { key: 'empty', label: 'The unit once everything is out', hint: 'Proves nothing was left behind.', multi: false, side: 'from' },
-  { key: 'newDoor', label: 'New front door, unit number showing', hint: 'The door you are moving them to.', multi: false, side: 'to' },
+  { key: 'empty', label: 'The unit once everything is out', hint: 'Proves nothing was left behind. Add as many as you need.', multi: false, side: 'from' },
+  { key: 'newDoor', label: 'New front door, unit number showing', hint: 'The door you are moving them to. More than one is fine.', multi: false, side: 'to' },
   { key: 'newFull', label: 'Everything in the new unit', hint: 'A few. Show where it all landed.', multi: true, side: 'to' },
 ]
 
@@ -100,6 +100,22 @@ export function doneCount(unit) {
 
 export function stepTotal(unit) {
   return stepsFor(unit).length
+}
+
+/* HOW MANY PHOTOGRAPHS ARE ACTUALLY ON THIS UNIT.
+ *
+ * Casey, 2026-10-22: "i just noticed you have 0 of 5 photos on each card,
+ * there should be no limit on how many photos are uploaded."
+ *
+ * There never was one. The five are the five SHOTS the record needs - door,
+ * rooms, empty, new door, new rooms - and each holds as many frames as the
+ * crew take; Rogelio put two on one of them this morning. But "0 of 5
+ * photos" reads as a quota, and the owner of the company read it that way,
+ * so the crew certainly would. The cards now say how many steps are done AND
+ * how many photographs exist, which are two different numbers and both
+ * worth knowing. */
+export function photoCount(unit) {
+  return S15_STEP_KEYS.reduce((n, k) => n + shotsFor(unit, k).length, 0)
 }
 
 /* MATERIALS HAVE TO BE ANSWERED, NOT REMEMBERED.

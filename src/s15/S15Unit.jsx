@@ -16,7 +16,7 @@ import {
   shotsFor, stepDone, doneCount, readyToFinish, canEdit, isAdmin,
   addShot, removeShot, setDestination, addNote, removeNote, finishUnit,
   reopenUnit, setService, deleteUnit,
-  stepsFor, stepTotal, weArePacking, materialsAnswered, setMaterials, setPackMinutes,
+  stepsFor, stepTotal, photoCount, weArePacking, materialsAnswered, setMaterials, setPackMinutes,
   CARTON_TYPES, SUPPLY_TYPES,
 } from './s15.js'
 
@@ -100,7 +100,7 @@ function StepCard({ step, index, unit, user, editable, onToast }) {
             type="file"
             accept="image/*"
             capture="environment"
-            multiple={step.multi}
+            multiple
             onChange={onPick}
             style={{ display: 'none' }}
           />
@@ -238,6 +238,7 @@ export default function S15Unit({ unit, goBack, toast }) {
   const total = stepTotal(unit)
   const packing = weArePacking(unit)
   const n = doneCount(unit)
+  const shotTotal = photoCount(unit)
   const ready = readyToFinish(unit)
   const notes = Array.isArray(unit.notes) ? [...unit.notes].sort((a, b) => b.ts - a.ts) : []
   // Every shot at the old door taken, which is the moment the destination
@@ -277,7 +278,10 @@ export default function S15Unit({ unit, goBack, toast }) {
       )}
 
       <div className="row" style={{ alignItems: 'center', margin: '18px 0 10px' }}>
-        <div className="section-title grow" style={{ margin: 0 }}>PHOTOS · {n} of {total}</div>
+        <div className="section-title grow" style={{ margin: 0 }}>
+          {n} OF {total} DONE
+          {shotTotal > 0 && <span className="muted" style={{ fontWeight: 500 }}> · {shotTotal} photo{shotTotal === 1 ? '' : 's'}</span>}
+        </div>
       </div>
 
       {/* The three at the old door, then where they are going, then the two

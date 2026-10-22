@@ -17,7 +17,7 @@
  * two copies of the same markup drifting apart already.
  */
 import React from 'react'
-import { doneCount, stepTotal, shotsFor, S15_STEP_KEYS } from './s15.js'
+import { doneCount, stepTotal, photoCount, shotsFor, S15_STEP_KEYS } from './s15.js'
 
 /** The most recent photo on a unit, whichever step it belongs to. */
 export function lastTouch(unit) {
@@ -45,6 +45,7 @@ export default function S15UnitCard({ unit, onOpen }) {
   const total = stepTotal(unit)
   const pct = Math.round((n / total) * 100)
   const touch = lastTouch(unit)
+  const shots = photoCount(unit)
   const started = n > 0 && !unit.done
 
   return (
@@ -77,8 +78,15 @@ export default function S15UnitCard({ unit, onOpen }) {
           {unit.destination ? `→ ${unit.destination}` : 'destination tbd'}
         </span>
 
+        {/* Two numbers, because they answer different questions: how far
+            through the required shots, and how many photographs exist. The
+            old single line read "0 of 5 photos", which sounds like a cap -
+            Casey read it that way, so the crew would have. */}
         <span style={{ display: 'block', marginTop: 8, fontSize: 12, fontWeight: 650 }}>
-          {unit.done ? '✓ Complete' : `${n} of ${total} photos`}
+          {unit.done ? '✓ Complete' : `${n} of ${total} done`}
+          {shots > 0 && (
+            <span style={{ fontWeight: 500, opacity: unit.done ? 0.9 : 0.6 }}> · {shots} photo{shots === 1 ? '' : 's'}</span>
+          )}
         </span>
 
         {/* Who, and how long ago. The thing that says whether anyone is

@@ -25,7 +25,7 @@
  * and the street level is glazed.
  */
 import React from 'react'
-import { doneCount, stepTotal } from './s15.js'
+import { doneCount, stepTotal, photoCount } from './s15.js'
 
 export const UNITS_PER_FLOOR = 50
 export const FLOORS = [5, 4, 3, 2, 1]
@@ -149,7 +149,7 @@ export default function S15Building({ units, selected, onSelect, onOpenUnit }) {
                     onOpenUnit(u.id)
                   }}
                 >
-                  {u && <title>{`Unit ${u.number} — ${u.done ? 'complete' : `${doneCount(u)} of ${stepTotal(u)} photos`}`}</title>}
+                  {u && <title>{`Unit ${u.number} — ${u.done ? 'complete' : `${doneCount(u)} of ${stepTotal(u)} done, ${photoCount(u)} photos`}`}</title>}
                 </rect>
               )
             })}
