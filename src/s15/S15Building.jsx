@@ -25,7 +25,7 @@
  * and the street level is glazed.
  */
 import React from 'react'
-import { doneCount, stepTotal, photoCount } from './s15.js'
+import { doneCount, stepTotal, photoCount, weArePacking, phaseOf } from './s15.js'
 
 export const UNITS_PER_FLOOR = 50
 export const FLOORS = [5, 4, 3, 2, 1]
@@ -50,6 +50,24 @@ function slotFill(unit) {
   if (!unit) return null
   if (unit.done) return '#16a34a'
   return doneCount(unit) > 0 ? '#f0a81e' : '#ffffff'
+}
+
+/* WHO PACKS IT, drawn as the outline rather than the fill.
+ *
+ * Casey, 2026-10-22: "color coat the cards, for gorillla pack"
+ *
+ * The fill is spoken for: on a drawing this size it is the only way to read
+ * progress across two hundred and fifty slots at a glance, and gold already
+ * means "in progress" here. So the pack coat goes on the stroke, the same
+ * two-channel split the cards use - a slot can be half done AND ours, and
+ * both have to be legible at the same time. A tenant-packed unit keeps the
+ * plain dark hairline it has always had. */
+function slotStroke(unit) {
+  if (!unit) return null
+  if (!weArePacking(unit)) return { c: 'rgba(0,0,0,0.45)', w: 0.6 }
+  return phaseOf(unit) === 'packing'
+    ? { c: '#b45309', w: 1.5 }
+    : { c: '#23409f', w: 1.5 }
 }
 
 /** Horizontal slat texture, the thing that makes the colour panels read as
@@ -131,6 +149,7 @@ export default function S15Building({ units, selected, onSelect, onOpenUnit }) {
             {Array.from({ length: UNITS_PER_FLOOR }).map((_, i) => {
               const u = list[i]
               const fill = slotFill(u)
+              const stroke = slotStroke(u)
               const x = X0 + i * PITCH + PITCH * 0.28
               const w = PITCH * 0.44
               return (
@@ -139,7 +158,7 @@ export default function S15Building({ units, selected, onSelect, onOpenUnit }) {
                   x={x} y={y + 11} width={w} height={FLOOR_H * 0.42} rx="0.8"
                   fill={fill || '#1d2733'}
                   opacity={fill ? 1 : 0.42}
-                  stroke={u ? 'rgba(0,0,0,0.45)' : 'none'} strokeWidth={u ? 0.6 : 0}
+                  stroke={stroke ? stroke.c : 'none'} strokeWidth={stroke ? stroke.w : 0}
                   style={{ cursor: u && onOpenUnit ? 'pointer' : 'inherit' }}
                   onClick={(e) => {
                     if (!u || !onOpenUnit) return
@@ -149,7 +168,16 @@ export default function S15Building({ units, selected, onSelect, onOpenUnit }) {
                     onOpenUnit(u.id)
                   }}
                 >
-                  {u && <title>{`Unit ${u.number} — ${u.done ? 'complete' : `${doneCount(u)} of ${stepTotal(u)} done, ${photoCount(u)} photos`}`}</title>}
+                  {u && (
+                    <title>
+                      {`Unit ${u.number} — ${u.done
+                        ? 'complete'
+                        : `${doneCount(u)} of ${stepTotal(u)} done, ${photoCount(u)} photos`}${
+                        weArePacking(u) && !u.done
+                          ? phaseOf(u) === 'packing' ? ' · we pack, today' : ' · we packed it'
+                          : ''}`}
+                    </title>
+                  )}
                 </rect>
               )
             })}

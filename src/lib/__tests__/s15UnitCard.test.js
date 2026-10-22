@@ -7,7 +7,7 @@
  */
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { lastTouch } from '../../s15/S15UnitCard.jsx'
+import { lastTouch, coatFor } from '../../s15/S15UnitCard.jsx'
 import { doneCount, stepTotal, photoCount, stepsFor, weArePacking, materialsAnswered, readyToFinish, phaseOf, readyToFinishPacking, earlierSteps } from '../../s15/s15.js'
 
 const CARD = readFileSync('src/s15/S15UnitCard.jsx', 'utf8')
@@ -331,5 +331,63 @@ describe('a unit we pack has two visits', () => {
   it('but packing day has no earlier visit to show', () => {
     expect(earlierSteps(packDay)).toEqual([])
     expect(earlierSteps(tenant)).toEqual([])
+  })
+})
+
+/* ── The colour coat ────────────────────────────────────────────────
+ *
+ * Casey, 2026-10-22: "color coat the cards, for gorillla pack"
+ *
+ * Green was already the progress fill and had to stay it, so the coat is a
+ * second channel: a tint and a left rail the green sits on top of.
+ */
+describe('cards are coated by who packs, and which visit', () => {
+  const CARD4 = readFileSync('src/s15/S15UnitCard.jsx', 'utf8')
+
+  it('a tenant-packed unit stays white with no rail', () => {
+    const c = coatFor({ service: 'tenant' })
+    expect(c.bg).toBe('#fff')
+    expect(c.rail).toBeNull()
+  })
+
+  it('one we pack today is gold', () => {
+    const c = coatFor({ service: 'gorilla' })
+    expect(c.rail).toBe('#e9a21c')
+  })
+
+  it('one we have packed turns cobalt for the movers', () => {
+    const c = coatFor({ service: 'gorilla', packingDoneAt: 1 })
+    expect(c.rail).toBe('#23409f')
+  })
+
+  it('the two visits never share a colour', () => {
+    /* The whole point is telling them apart across a room. */
+    expect(coatFor({ service: 'gorilla' }).rail)
+      .not.toBe(coatFor({ service: 'gorilla', packingDoneAt: 1 }).rail)
+  })
+
+  it('green is left alone, because it still means progress', () => {
+    for (const u of [{ service: 'tenant' }, { service: 'gorilla' }, { service: 'gorilla', packingDoneAt: 1 }]) {
+      expect(coatFor(u).rail).not.toBe('#16a34a')
+      expect(coatFor(u).bg).not.toBe('#16a34a')
+    }
+  })
+
+  it('every coat says it in words too, not only in colour', () => {
+    /* Colour alone fails a colour-blind crew member and fails a phone in
+       direct sun on a loading dock. */
+    expect(coatFor({ service: 'gorilla' }).chip.text).toMatch(/we pack/i)
+    expect(coatFor({ service: 'gorilla', packingDoneAt: 1 }).chip.text).toMatch(/packed/i)
+  })
+
+  it('a finished unit is solid green whoever packed it', () => {
+    expect(CARD4).toContain("background: unit.done ? '#16a34a' : coat.bg")
+  })
+
+  it('the rail does not sit under the progress fill', () => {
+    /* inset box-shadow, with the padding moved to match, so the green bar
+       still starts at the card edge and the two read as separate facts. */
+    expect(CARD4).toContain('inset 5px 0 0')
+    expect(CARD4).toContain('paddingLeft: coat.rail && !unit.done ? 18 : 14')
   })
 })

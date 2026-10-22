@@ -19,6 +19,37 @@
 import React from 'react'
 import { doneCount, stepTotal, photoCount, shotsFor, S15_STEP_KEYS, phaseOf, weArePacking } from './s15.js'
 
+/* THE COLOUR OF A UNIT WE PACK.
+ *
+ * Casey, 2026-10-22: "color coat the cards, for gorillla pack"
+ *
+ * Green was already taken - it is the progress fill, and it has to stay the
+ * progress fill, because "how far along" is the question the board is asked
+ * most. So the pack coat is a SECOND channel: a tinted ground and a coloured
+ * rail down the left edge, which the green fill sits on top of without
+ * either one muddying the other.
+ *
+ * Gold and cobalt, because they are the building's own colours - the slatted
+ * bay and the upper slab at 1475 Imperial - and gold is ours. Three of the
+ * sixteen are ours to pack, and which VISIT they are on is the thing a crew
+ * needs off the board without opening anything:
+ *
+ *   tenant packs      white, no rail        not our problem until move day
+ *   we pack, today    gold                  a packer belongs here now
+ *   we packed it      cobalt                boxed; movers, it is yours
+ *   complete          solid green           done, either way
+ */
+const COAT = {
+  tenant: { bg: '#fff', rail: null, chip: null },
+  packing: { bg: '#fffaf0', rail: '#e9a21c', chip: { fg: '#92400e', bg: '#fef3c7', text: 'we pack · today' } },
+  moving: { bg: '#f5f8ff', rail: '#23409f', chip: { fg: '#1e3a8a', bg: '#dbeafe', text: 'we packed it' } },
+}
+
+export function coatFor(unit) {
+  if (!weArePacking(unit)) return COAT.tenant
+  return phaseOf(unit) === 'packing' ? COAT.packing : COAT.moving
+}
+
 /** The most recent photo on a unit, whichever step it belongs to. */
 export function lastTouch(unit) {
   let best = null
@@ -46,7 +77,7 @@ export default function S15UnitCard({ unit, onOpen }) {
   const pct = Math.round((n / total) * 100)
   const touch = lastTouch(unit)
   const shots = photoCount(unit)
-  const packDay = weArePacking(unit) && phaseOf(unit) === 'packing' && !unit.done
+  const coat = unit.done ? COAT.tenant : coatFor(unit)
   const started = n > 0 && !unit.done
 
   return (
@@ -57,8 +88,12 @@ export default function S15UnitCard({ unit, onOpen }) {
         position: 'relative', overflow: 'hidden', padding: 14, textAlign: 'left',
         minHeight: 100, borderRadius: 12, cursor: 'pointer', width: '100%',
         border: started ? '1px solid #16a34a' : '1px solid var(--line, #e4e7ee)',
-        background: unit.done ? '#16a34a' : '#fff',
+        background: unit.done ? '#16a34a' : coat.bg,
         color: unit.done ? '#fff' : 'inherit',
+        /* The rail, inset so the green progress fill still starts at the
+           very edge of the card and the two never overlap. */
+        boxShadow: coat.rail && !unit.done ? `inset 5px 0 0 ${coat.rail}` : undefined,
+        paddingLeft: coat.rail && !unit.done ? 18 : 14,
       }}
     >
       {/* The fill. Sits behind the text at low opacity so a card three
@@ -98,11 +133,13 @@ export default function S15UnitCard({ unit, onOpen }) {
           </span>
         )}
 
-        {/* Which visit. A mover scanning the board has to be able to see
-            that 508 is not theirs yet without opening it. */}
-        {packDay && (
-          <span style={{ display: 'inline-block', marginTop: 6, marginRight: 6, fontSize: 11, fontWeight: 700, color: '#92400e', background: '#fef3c7', padding: '2px 7px', borderRadius: 999 }}>
-            packing today
+        {/* Which visit, in words as well as colour. Colour alone is not an
+            answer for a colour-blind crew member or a phone in direct sun on
+            a loading dock, and it is not an answer for somebody on their
+            first day who has not learned the key yet. */}
+        {coat.chip && !unit.done && (
+          <span style={{ display: 'inline-block', marginTop: 6, marginRight: 6, fontSize: 11, fontWeight: 700, color: coat.chip.fg, background: coat.chip.bg, padding: '2px 7px', borderRadius: 999 }}>
+            {coat.chip.text}
           </span>
         )}
 

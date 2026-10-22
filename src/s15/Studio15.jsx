@@ -11,8 +11,8 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useStore } from '../store.jsx'
 import {
-  subscribeUnits, doneCount, S15_STEPS, isAdmin, canAddUnit, seedUnits, addUnit, deleteUnit,
-  STUDIO15_SCHEDULED,
+  subscribeUnits, doneCount, isAdmin, canAddUnit, seedUnits, addUnit, deleteUnit,
+  STUDIO15_SCHEDULED, weArePacking, phaseOf,
 } from './s15.js'
 import S15Unit from './S15Unit.jsx'
 import ClockCard from '../components/ClockCard.jsx'
@@ -45,6 +45,13 @@ export default function Studio15({ toast }) {
   }, [units, q])
 
   const finished = units.filter((u) => u.done).length
+
+  /* The key, and only when there is something to key. On a board of
+     sixteen tenant-packed units it would be three lines explaining colours
+     that are not on the screen. */
+  const ours = units.filter((u) => weArePacking(u) && !u.done)
+  const packToday = ours.filter((u) => phaseOf(u) === 'packing').length
+  const packed = ours.length - packToday
   const working = useMemo(
     () => units
       .filter((u) => !u.done && doneCount(u) > 0)
@@ -90,6 +97,13 @@ export default function Studio15({ toast }) {
             <div style={{ fontSize: 24, fontWeight: 700 }}>{finished}<span className="muted" style={{ fontSize: 15 }}> /{units.length}</span></div>
             <div className="muted" style={{ fontSize: 12 }}>Units complete</div>
           </div>
+        </div>
+      )}
+
+      {ours.length > 0 && (
+        <div className="row" style={{ gap: 14, marginTop: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+          {packToday > 0 && <Key c="#e9a21c" bg="#fffaf0" label={`${packToday} we pack today`} />}
+          {packed > 0 && <Key c="#23409f" bg="#f5f8ff" label={`${packed} packed, ready to move`} />}
         </div>
       )}
 
@@ -171,6 +185,17 @@ export default function Studio15({ toast }) {
 
       <div style={{ height: 40 }} />
     </div>
+  )
+}
+
+/** One entry in the key. The swatch carries the rail colour and the tint
+ *  together, so it reads as the card it stands for rather than as a dot. */
+function Key({ c, bg, label }) {
+  return (
+    <span className="row" style={{ gap: 7, alignItems: 'center' }}>
+      <span style={{ width: 22, height: 15, borderRadius: 4, background: bg, border: '1px solid var(--line, #e4e7ee)', boxShadow: `inset 4px 0 0 ${c}` }} />
+      <span className="muted" style={{ fontSize: 12 }}>{label}</span>
+    </span>
   )
 }
 
