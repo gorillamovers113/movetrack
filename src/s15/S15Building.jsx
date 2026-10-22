@@ -1,115 +1,172 @@
-/* Studio 15, 1475 Imperial Avenue - drawn the way it actually looks.
+/* Studio 15, 1475 Imperial Avenue - drawn from the building.
  *
- * Trinity Manor got an elevation of its own (terracotta stair tower, greige
- * body, stepped balcony bays) and Casey asked for the same here rather than
- * a generic block. Studio 15 is the opposite building: a 2007 contemporary
- * infill in the East Village whose whole character is flat panels of hard
- * colour - a crimson strip at the west end, a gold bay, a deep cobalt slab
- * right of the entrance, a charcoal block closing the east end, all held in
- * a pale concrete frame, with a recessed glass entry running full height and
- * a canted gold canopy along the roof.
+ * Casey, 2026-10-22: "i think you can do a bettter job with the building
+ * mockup too ... and just so you know, each floor has 50 unts and its 5
+ * storys tall."
  *
- * Five storeys, 275 units. The unit numbers are floor-prefixed, so 578 is on
- * the fifth, which is where Casey's first sixteen are and why the top floor
- * is the busy one.
+ * FIFTY UNITS A FLOOR IS WHY THIS IS WIDE. A five-storey block with fifty
+ * apartments on each floor is a long building, not a tall one, and the first
+ * version drew it as a squat tower because it was sized to the sixteen units
+ * on the board rather than to the property. At this width fifty window bays
+ * per floor is simply what the elevation looks like.
  *
- * Only units actually on the board are drawn. The building is a way to find
- * a door, not a model of the property: a floor nobody is working stays an
- * empty band rather than inventing 50 cells for units that do not exist in
- * the app.
+ * WHICH MEANS THE WINDOWS CAN BE THE UNITS. Fifty bays, five floors, two
+ * hundred and fifty slots - the building IS the board. A unit on Casey's
+ * list takes a slot and carries its colour; the rest stay glass. Slots fill
+ * from the left in number order because the real mapping of unit number to
+ * window is not something the app knows, and inventing one would be a
+ * drawing that lies.
+ *
+ * What the photograph actually shows, west to east: pale concrete with a
+ * crimson strip near the west end, a gold horizontal-slatted bay carrying
+ * the vertical STUDIO FIFTEEN sign, a recessed full-height glass entry, a
+ * cobalt slatted slab over the upper floors, then a charcoal wing with red
+ * accent panels at its far end. A canted gold brise-soleil runs the roofline
+ * and the street level is glazed.
  */
 import React from 'react'
 import { doneCount, S15_STEPS } from './s15.js'
 
-const TOP = 86
-const FLOOR_H = 46
-const FLOORS = [5, 4, 3, 2, 1]
+export const UNITS_PER_FLOOR = 50
+export const FLOORS = [5, 4, 3, 2, 1]
 
-/* Unit numbers here are floor-prefixed: 578 -> 5. Falls back to the top
- * floor rather than dropping a unit off the drawing entirely, because a
- * tile you cannot see is worse than one in the wrong band. */
+const X0 = 24          // west face
+const X1 = 596         // east face
+const TOP = 54         // underside of the parapet
+const FLOOR_H = 38
+const BODY_W = X1 - X0
+const PITCH = BODY_W / UNITS_PER_FLOOR
+
+/* Unit numbers are floor-prefixed: 578 -> 5. Falls back to the top floor
+ * rather than dropping a unit off the drawing, because a tile you cannot see
+ * is worse than one in the wrong band. */
 export function floorOf(number) {
   const n = String(number || '').trim()
   const f = parseInt(n[0], 10)
   return Number.isFinite(f) && f >= 1 && f <= 5 ? f : 5
 }
 
-function cellFill(unit) {
+function slotFill(unit) {
+  if (!unit) return null
   if (unit.done) return '#16a34a'
-  return doneCount(unit) > 0 ? '#f0a81e' : 'rgba(255,255,255,0.72)'
+  return doneCount(unit) > 0 ? '#f0a81e' : '#ffffff'
+}
+
+/** Horizontal slat texture, the thing that makes the colour panels read as
+ *  siding rather than as flat blocks of paint. */
+function Slats({ x, y, w, h, step = 5, opacity = 0.16 }) {
+  const rows = []
+  for (let i = y + step; i < y + h; i += step) {
+    rows.push(<line key={i} x1={x} y1={i} x2={x + w} y2={i} stroke="#000" strokeWidth="0.7" opacity={opacity} />)
+  }
+  return <g>{rows}</g>
 }
 
 export default function S15Building({ units, selected, onSelect }) {
   const bottom = TOP + FLOORS.length * FLOOR_H
-  const byFloor = FLOORS.map((f) => ({ f, units: units.filter((u) => floorOf(u.number) === f) }))
+
+  // Units on the board, per floor, in number order.
+  const byFloor = {}
+  for (const f of FLOORS) {
+    byFloor[f] = units
+      .filter((u) => floorOf(u.number) === f)
+      .sort((a, b) => String(a.number).localeCompare(String(b.number), undefined, { numeric: true }))
+  }
 
   return (
-    <svg viewBox="0 0 360 400" width="100%" role="img" aria-label="Studio 15: live progress by floor">
-      <text x="180" y="30" textAnchor="middle" fontSize="9.5" letterSpacing="3.5" fill="#8a93a2" fontWeight="600">STUDIO 15</text>
-      <text x="180" y="44" textAnchor="middle" fontSize="8" letterSpacing="1.4" fill="#aab2bf">1475 IMPERIAL AVE</text>
+    <svg viewBox="0 0 620 300" width="100%" role="img" aria-label="Studio 15: five floors, fifty units each, coloured by progress">
+      <defs>
+        <linearGradient id="s15sky" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#0d1b3e" /><stop offset="100%" stopColor="#1b3566" />
+        </linearGradient>
+      </defs>
+      <rect x="0" y="0" width="620" height="300" fill="url(#s15sky)" rx="10" />
 
-      {/* pale concrete frame the colour panels are set into */}
-      <rect x="18" y={TOP - 14} width="324" height={bottom - TOP + 14} fill="#d9d6ce" />
+      {/* ── the mass: pale concrete ───────────────────────────── */}
+      <rect x={X0} y={TOP - 12} width={BODY_W} height={bottom - TOP + 12} fill="#d6d2c8" />
+      <rect x={X0} y={TOP - 12} width={BODY_W} height="7" fill="#bfb9ad" />
 
-      {/* west end: the crimson strip */}
-      <rect x="18" y={TOP - 14} width="26" height={bottom - TOP + 14} fill="#c8372c" />
-      {/* the gold bay */}
-      <rect x="62" y={TOP + 8} width="62" height={bottom - TOP - 8} fill="#efa91f" />
-      {/* recessed glass entry, full height, left of centre */}
-      <rect x="128" y={TOP - 14} width="40" height={bottom - TOP + 14} fill="#8fa0ad" />
-      <rect x="134" y={TOP - 8} width="28" height={bottom - TOP + 2} fill="#b9ccd8" opacity="0.75" />
-      {/* the cobalt slab */}
-      <rect x="172" y={TOP - 4} width="92" height={bottom - TOP + 4} fill="#23409f" />
-      {/* charcoal block closing the east end */}
-      <rect x="268" y={TOP - 14} width="74" height={bottom - TOP + 14} fill="#3a3f45" />
+      {/* gold slatted bay, lower floors */}
+      <rect x={X0 + 120} y={TOP + FLOOR_H * 2.1} width="118" height={bottom - (TOP + FLOOR_H * 2.1)} fill="#e9a21c" />
+      <Slats x={X0 + 120} y={TOP + FLOOR_H * 2.1} w={118} h={bottom - (TOP + FLOOR_H * 2.1)} />
+      {/* the vertical STUDIO FIFTEEN sign on its east edge */}
+      <rect x={X0 + 228} y={TOP + FLOOR_H * 2.2} width="13" height={bottom - (TOP + FLOOR_H * 2.2) - 6} fill="#f3f1ec" />
+      <text
+        x={X0 + 234.5} y={TOP + FLOOR_H * 2.2 + 11}
+        fontSize="7.5" fill="#55606e" letterSpacing="1.6" fontWeight="700"
+        transform={`rotate(90 ${X0 + 234.5} ${TOP + FLOOR_H * 2.2 + 11})`}
+      >STUDIO FIFTEEN</text>
 
-      {/* the canted gold canopy along the roofline */}
-      <path d={`M 62 ${TOP - 18} L 266 ${TOP - 30} L 266 ${TOP - 22} L 62 ${TOP - 10} Z`} fill="#efa91f" opacity="0.95" />
+      {/* recessed full-height glass entry */}
+      <rect x={X0 + 252} y={TOP - 12} width="44" height={bottom - TOP + 12} fill="#7f94a6" />
+      <rect x={X0 + 257} y={TOP - 6} width="34" height={bottom - TOP} fill="#a9c4d4" opacity="0.8" />
+      {FLOORS.map((_, i) => (
+        <line key={i} x1={X0 + 252} y1={TOP + i * FLOOR_H} x2={X0 + 296} y2={TOP + i * FLOOR_H} stroke="#6f8496" strokeWidth="1.2" />
+      ))}
 
-      {/* floors */}
-      {byFloor.map(({ f, units: us }, i) => {
-        const y = TOP + i * FLOOR_H
+      {/* cobalt slatted slab over the upper floors */}
+      <rect x={X0 + 310} y={TOP - 6} width="150" height={FLOOR_H * 3.4} fill="#23409f" />
+      <Slats x={X0 + 310} y={TOP - 6} w={150} h={FLOOR_H * 3.4} />
+
+      {/* charcoal east wing, with its red accent panels */}
+      <rect x={X0 + 476} y={TOP - 12} width={X1 - (X0 + 476)} height={bottom - TOP + 12} fill="#3a3f45" />
+      {[0, 1].map((k) => (
+        <rect key={k} x={X1 - 26} y={TOP + 12 + k * FLOOR_H * 1.6} width="15" height={FLOOR_H * 0.75} fill="#c8372c" />
+      ))}
+
+      {/* canted gold brise-soleil along the roofline */}
+      <path d={`M ${X0 + 86} ${TOP - 16} L ${X0 + 452} ${TOP - 30} L ${X0 + 452} ${TOP - 23} L ${X0 + 86} ${TOP - 9} Z`} fill="#e9a21c" />
+
+      {/* ── floors: fifty unit slots each ─────────────────────── */}
+      {FLOORS.map((f, row) => {
+        const y = TOP + row * FLOOR_H
         const active = selected === f
+        const list = byFloor[f]
         return (
           <g key={f} onClick={() => onSelect && onSelect(active ? null : f)} style={{ cursor: onSelect ? 'pointer' : 'default' }}>
-            {/* floor band, lifted when selected */}
-            <rect
-              x="18" y={y} width="324" height={FLOOR_H - 4}
-              fill={active ? 'rgba(255,255,255,0.22)' : 'transparent'}
-              stroke={active ? '#fff' : 'transparent'} strokeWidth="1.5"
-            />
-            <text x="10" y={y + 24} textAnchor="middle" fontSize="10" fontWeight="700" fill="#6b7280">{f}</text>
+            <rect x={X0} y={y} width={BODY_W} height={FLOOR_H} fill={active ? '#fff' : 'transparent'} opacity={active ? 0.3 : 0} />
+            {active && <rect x={X0} y={y} width={BODY_W} height={FLOOR_H} fill="none" stroke="#fff" strokeWidth="1.6" />}
+            <text x={X0 - 11} y={y + FLOOR_H / 2 + 4} textAnchor="middle" fontSize="11" fontWeight="700" fill={active ? '#fff' : '#8e99a8'}>{f}</text>
 
-            {/* One cell per unit on the board for this floor, sized to fit.
-                A fixed pitch overflowed the facade at sixteen units and this
-                building runs to about fifty-five a floor, so the pitch is
-                computed from the count instead of assumed. */}
-            {(() => {
-              const LEFT = 26, RIGHT = 334
-              const span = RIGHT - LEFT
-              const pitch = us.length ? Math.min(22, span / us.length) : 22
-              const cw = Math.max(4, pitch - Math.min(5, pitch * 0.22))
-              return us.map((u, j) => (
+            {Array.from({ length: UNITS_PER_FLOOR }).map((_, i) => {
+              const u = list[i]
+              const fill = slotFill(u)
+              const x = X0 + i * PITCH + PITCH * 0.28
+              const w = PITCH * 0.44
+              return (
                 <rect
-                  key={u.id}
-                  x={LEFT + j * pitch} y={y + 12} width={cw} height="15" rx={cw > 8 ? 2 : 1}
-                  fill={cellFill(u)}
-                  stroke="rgba(0,0,0,0.25)" strokeWidth="0.5"
+                  key={i}
+                  x={x} y={y + 11} width={w} height={FLOOR_H * 0.42} rx="0.8"
+                  fill={fill || '#1d2733'}
+                  opacity={fill ? 1 : 0.42}
+                  stroke={u ? 'rgba(0,0,0,0.45)' : 'none'} strokeWidth={u ? 0.6 : 0}
                 >
-                  <title>{`Unit ${u.number} — ${u.done ? 'complete' : `${doneCount(u)} of ${S15_STEPS.length} photos`}`}</title>
+                  {u && <title>{`Unit ${u.number} — ${u.done ? 'complete' : `${doneCount(u)} of ${S15_STEPS.length} photos`}`}</title>}
                 </rect>
-              ))
-            })()}
+              )
+            })}
+
+            {/* a couple of Juliet balconies, as on the real elevation */}
+            {row > 0 && [0.19, 0.63].map((p) => (
+              <rect key={p} x={X0 + BODY_W * p} y={y + 9} width="19" height="10" fill="none" stroke="#eef1f4" strokeWidth="1.1" opacity="0.85" />
+            ))}
           </g>
         )
       })}
 
-      {/* street level: glazing and the sidewalk */}
-      <rect x="18" y={bottom} width="324" height="22" fill="#2b3036" />
-      {Array.from({ length: 11 }).map((_, i) => (
-        <rect key={i} x={26 + i * 29} y={bottom + 5} width="20" height="12" rx="1" fill="#9fd3e8" opacity="0.5" />
+      {/* crimson fin near the west end, unbroken, stopping short of the
+          ground. Drawn after the window row so it reads as one element
+          rather than as three blocks with holes punched through it. */}
+      <rect x={X0 + 30} y={TOP - 5} width="16" height={(bottom - TOP) * 0.74} fill="#c8372c" />
+      <Slats x={X0 + 30} y={TOP - 5} w={16} h={(bottom - TOP) * 0.74} step={9} opacity={0.2} />
+
+      {/* ── street level ──────────────────────────────────────── */}
+      <rect x={X0} y={bottom} width={BODY_W} height="20" fill="#8a8178" />
+      <rect x={X0} y={bottom + 20} width={BODY_W} height="12" fill="#2b3036" />
+      {Array.from({ length: 22 }).map((_, i) => (
+        <rect key={i} x={X0 + 8 + i * 25} y={bottom + 4} width="16" height="13" rx="1" fill="#ffd79a" opacity="0.55" />
       ))}
-      <rect x="10" y={bottom + 22} width="340" height="5" fill="#cfd4da" />
+      <rect x={X0 - 8} y={bottom + 32} width={BODY_W + 16} height="4" fill="#4a5158" />
     </svg>
   )
 }

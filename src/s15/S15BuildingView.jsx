@@ -6,7 +6,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useStore } from '../store.jsx'
 import { subscribeUnits, doneCount, S15_STEPS } from './s15.js'
-import S15Building, { floorOf } from './S15Building.jsx'
+import S15Building, { floorOf, UNITS_PER_FLOOR } from './S15Building.jsx'
 import S15Unit from './S15Unit.jsx'
 
 export default function S15BuildingView({ toast }) {
@@ -34,14 +34,15 @@ export default function S15BuildingView({ toast }) {
   return (
     <div style={{ maxWidth: 720, margin: '0 auto' }}>
       <h1 style={{ margin: 0 }}>Studio 15</h1>
-      <div className="muted" style={{ marginBottom: 14 }}>1475 Imperial Ave · five floors · tap a floor</div>
+      <div className="muted" style={{ marginBottom: 14 }}>1475 Imperial Ave · five floors · {UNITS_PER_FLOOR} units a floor · tap a floor</div>
 
       {err && <div className="card" style={{ padding: 12, marginBottom: 12, background: '#fef2f2', border: '1px solid #fecaca' }}>{err}</div>}
 
       <div className="card" style={{ padding: 16 }}>
         <S15Building units={units} selected={floor} onSelect={setFloor} />
         <div className="legend row" style={{ gap: 14, justifyContent: 'center', marginTop: 10, flexWrap: 'wrap', fontSize: 12 }}>
-          <span><i style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: 'rgba(160,160,160,0.6)', marginRight: 5 }} />Not started</span>
+          <span><i style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: '#1d2733', opacity: 0.42, marginRight: 5 }} />Not on the list</span>
+          <span><i style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: '#fff', border: '1px solid #bbb', marginRight: 5 }} />Not started</span>
           <span><i style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: '#f0a81e', marginRight: 5 }} />In progress</span>
           <span><i style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: '#16a34a', marginRight: 5 }} />Complete</span>
         </div>
@@ -50,7 +51,9 @@ export default function S15BuildingView({ toast }) {
       {floor && (
         <>
           <div className="row" style={{ alignItems: 'baseline', marginTop: 18 }}>
-            <div className="section-title grow" style={{ margin: 0 }}>FLOOR {floor} · {onFloor.length} unit{onFloor.length === 1 ? '' : 's'}</div>
+            <div className="section-title grow" style={{ margin: 0 }}>
+              FLOOR {floor} · {onFloor.length} of {UNITS_PER_FLOOR} on the list · {onFloor.filter((u) => u.done).length} done
+            </div>
             <button className="btn btn-sm" onClick={() => setFloor(null)}>Clear</button>
           </div>
           {!onFloor.length && <div className="muted" style={{ marginTop: 10 }}>No units from this floor are on the board yet.</div>}
