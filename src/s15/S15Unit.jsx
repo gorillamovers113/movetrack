@@ -18,6 +18,8 @@ import {
   reopenUnit, setService, deleteUnit,
   stepsFor, stepTotal, photoCount, weArePacking, materialsAnswered, setMaterials, setPackMinutes,
   phaseOf, earlierSteps, readyToFinishPacking, finishPacking, reopenPacking, canSetService,
+  PACKED_Q, UNPACK_Q, packedAnswered, unpackAnswered, weAreUnpacking,
+  answerPacked, answerUnpack, blockedBy,
   CARTON_TYPES, SUPPLY_TYPES,
 } from './s15.js'
 
@@ -238,95 +240,121 @@ function PackingExtras({ unit, user, editable, toast }) {
   )
 }
 
-/* Who packs this one, changeable at the door.
+/* A question, asked at the door, answered by whoever is standing at it.
  *
- * Deliberately NOT in the admin card at the bottom next to Delete. This is a
- * routine field decision a supervisor makes standing in a doorway on a
- * phone, and a routine control does not belong in the same neighbourhood as
- * an irreversible one.
+ * Casey, 2026-10-22: "wouldnt it be easyer, to have a steep 'is the customer
+ * packed and ready for this move'?"
  *
- * Supervisors as well as admins, because a supervisor can already add a
- * whole unit to the board; being trusted to create one but not to say
- * whether we are packing it was an inconsistency, not a safeguard.
+ * It is, and it replaces a control only a supervisor could reach - which
+ * meant a crew at an unpacked apartment had to telephone somebody before the
+ * app would let them record what was in front of them.
+ *
+ * Two buttons, neither preselected. A default answer is the one that gets
+ * tapped through, and the whole value of asking is that the schedule is
+ * sometimes wrong. Once answered it collapses to one line with the name
+ * against it and a way to change it, because a wrong tap at a door must not
+ * be something you need an admin to undo.
  */
-function WhoPacks({ unit, user, toast }) {
-  const ours = weArePacking(unit)
-  const [open, setOpen] = useState(false)
-  const [n, setN] = useState(() => String(unit.packers || 1))
-  const [busy, setBusy] = useState(false)
-
-  async function apply(service, packers) {
-    setBusy(true)
-    try {
-      await setService(unit, service, packers, user)
-      toast(service === 'gorilla'
-        ? `Unit ${unit.number}: we are packing it.`
-        : `Unit ${unit.number}: tenant packs it.`)
-      setOpen(false)
-    } catch (e) { toast(e.message) } finally { setBusy(false) }
-  }
-
-  if (!ours && !open) {
+function Ask({ question, hint, yes, no, answered, answerText, onYes, onNo, onReopen, busy, tone }) {
+  if (answered) {
     return (
-      <div className="card" style={{ padding: 14, marginTop: 12 }}>
+      <div className="card" style={{ padding: '12px 14px', marginBottom: 12 }}>
         <div className="row" style={{ gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <div className="grow" style={{ minWidth: 180 }}>
-            <div style={{ fontSize: 13, fontWeight: 650 }}>Tenant is packing this one</div>
-            <div className="muted" style={{ fontSize: 11.5, marginTop: 1 }}>
-              Turned up and it is not packed? Change it here.
-            </div>
-          </div>
-          <button className="btn btn-sm" onClick={() => setOpen(true)}>We are packing it</button>
+          <span style={{ color: '#16a34a', fontWeight: 700 }}>✓</span>
+          <span className="grow" style={{ fontSize: 13, minWidth: 160 }}>{answerText}</span>
+          {onReopen && <button className="btn btn-sm" disabled={busy} onClick={onReopen}>Change</button>}
         </div>
       </div>
     )
   }
+  return (
+    <div
+      className="card"
+      style={{ padding: 16, marginBottom: 12, background: tone || '#fffbeb', border: '1px solid #fde68a' }}
+    >
+      <div style={{ fontSize: 15, fontWeight: 650 }}>{question}</div>
+      {hint && <div className="muted" style={{ fontSize: 12, marginTop: 3 }}>{hint}</div>}
+      <div className="row" style={{ gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
+        <button className="btn btn-primary" disabled={busy} onClick={onYes} style={{ minHeight: 50, fontSize: 16, flex: '1 1 140px' }}>{yes}</button>
+        <button className="btn" disabled={busy} onClick={onNo} style={{ minHeight: 50, fontSize: 16, flex: '1 1 140px' }}>{no}</button>
+      </div>
+    </div>
+  )
+}
 
-  if (!ours && open) {
+/** "Is the customer packed and ready?" plus, when the answer is no, how many
+ *  of us are packing it. */
+function AskPacked({ unit, user, toast }) {
+  const [busy, setBusy] = useState(false)
+  const [howMany, setHowMany] = useState(false)
+  const [n, setN] = useState('2')
+
+  async function answer(ready, packers) {
+    setBusy(true)
+    try { await answerPacked(unit, ready, packers, user); setHowMany(false) }
+    catch (e) { toast(e.message) } finally { setBusy(false) }
+  }
+
+  if (howMany && !packedAnswered(unit)) {
     return (
-      <div className="card" style={{ padding: 14, marginTop: 12, background: '#fffaf0', border: '1px solid #fde68a' }}>
-        <div style={{ fontSize: 13, fontWeight: 650 }}>How many packers on this unit?</div>
-        <div className="muted" style={{ fontSize: 11.5, margin: '3px 0 10px' }}>
-          Photos already taken stay. The unit switches to the packing steps and asks for materials.
-        </div>
-        <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          <select className="input" value={n} onChange={(e) => setN(e.target.value)} style={{ width: 130, minHeight: 44, fontSize: 16 }}>
-            {[1, 2, 3, 4, 5].map((k) => (
-              <option key={k} value={String(k)}>{k} packer{k === 1 ? '' : 's'}</option>
-            ))}
+      <div className="card" style={{ padding: 16, marginBottom: 12, background: '#fffaf0', border: '1px solid #fde68a' }}>
+        <div style={{ fontSize: 15, fontWeight: 650 }}>How many of us are packing it?</div>
+        <div className="row" style={{ gap: 8, marginTop: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+          <select className="input" value={n} onChange={(e) => setN(e.target.value)} style={{ width: 130, minHeight: 48, fontSize: 16 }}>
+            {[1, 2, 3, 4, 5].map((k) => <option key={k} value={String(k)}>{k} packer{k === 1 ? '' : 's'}</option>)}
           </select>
-          <button className="btn btn-primary btn-sm" disabled={busy} onClick={() => apply('gorilla', n)}>
-            {busy ? 'Saving…' : 'We are packing it'}
+          <button className="btn btn-primary" disabled={busy} onClick={() => answer(false, n)} style={{ minHeight: 48 }}>
+            {busy ? 'Saving…' : 'Start packing'}
           </button>
-          <button className="btn btn-sm" disabled={busy} onClick={() => setOpen(false)}>Cancel</button>
+          <button className="btn btn-sm" disabled={busy} onClick={() => setHowMany(false)}>Back</button>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="card" style={{ padding: 14, marginTop: 12, background: '#fffaf0', border: '1px solid #fde68a' }}>
-      <div className="row" style={{ gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        <div className="grow" style={{ minWidth: 180 }}>
-          <div style={{ fontSize: 13, fontWeight: 650 }}>We are packing this one</div>
-          <div className="muted" style={{ fontSize: 11.5, marginTop: 1 }}>
-            {unit.packers ? `${unit.packers} packer${unit.packers === 1 ? '' : 's'}` : 'No packer count set'}
-          </div>
-        </div>
-        <select
-          className="input"
-          value={String(unit.packers || 1)}
-          disabled={busy}
-          onChange={(e) => apply('gorilla', e.target.value)}
-          style={{ width: 120, minHeight: 44, fontSize: 15 }}
-        >
-          {[1, 2, 3, 4, 5].map((k) => (
-            <option key={k} value={String(k)}>{k} packer{k === 1 ? '' : 's'}</option>
-          ))}
-        </select>
-        <button className="btn btn-sm" disabled={busy} onClick={() => apply('tenant', 0)}>Tenant packs it</button>
-      </div>
-    </div>
+    <Ask
+      question={PACKED_Q}
+      hint="Look inside first. This decides whether we pack it."
+      yes="Yes, ready to move"
+      no="No, we pack it"
+      busy={busy}
+      answered={packedAnswered(unit)}
+      answerText={
+        weArePacking(unit)
+          ? `We are packing this one${unit.packers ? `, ${unit.packers} packer${unit.packers === 1 ? '' : 's'}` : ''}. Said by ${unit.packedConfirmedBy || 'someone'}.`
+          : `Customer packed and ready. Said by ${unit.packedConfirmedBy || 'someone'}.`
+      }
+      onYes={() => answer(true, 0)}
+      onNo={() => setHowMany(true)}
+      onReopen={canSetService(unit, user) ? () => answer(!weArePacking(unit), 2) : null}
+    />
+  )
+}
+
+/** "Will Gorilla Movers unpack?" - two more photographs if yes. */
+function AskUnpack({ unit, user, toast }) {
+  const [busy, setBusy] = useState(false)
+  async function answer(v) {
+    setBusy(true)
+    try { await answerUnpack(unit, v, user) } catch (e) { toast(e.message) } finally { setBusy(false) }
+  }
+  return (
+    <Ask
+      question={UNPACK_Q}
+      hint="Yes adds two photos: before we unpack, and once it is put away."
+      yes="Yes, we unpack"
+      no="No unpacking"
+      tone="#f5f8ff"
+      busy={busy}
+      answered={unpackAnswered(unit)}
+      answerText={weAreUnpacking(unit)
+        ? `We are unpacking this one. Said by ${unit.unpackAnsweredBy || 'someone'}.`
+        : `No unpacking. Said by ${unit.unpackAnsweredBy || 'someone'}.`}
+      onYes={() => answer(true)}
+      onNo={() => answer(false)}
+      onReopen={() => answer(!weAreUnpacking(unit))}
+    />
   )
 }
 
@@ -452,13 +480,15 @@ export default function S15Unit({ unit, goBack, toast }) {
           one and walking to the new one. So it sits exactly there, between
           step 3 and step 4, and the next thing after typing it is
           photographing that door. */}
+      {/* The packed question sits right after the rooms shot, because that
+          is the first moment anybody can answer it: you cannot tell from the
+          corridor whether a tenant has really packed. */}
       {steps.filter((s) => s.side === 'from').map((s, i) => (
-        <StepCard key={s.key} step={s} index={i} unit={unit} user={user} editable={editable} onToast={toast} />
+        <React.Fragment key={s.key}>
+          <StepCard step={s} index={i} unit={unit} user={user} editable={editable} onToast={toast} />
+          {s.key === 'before' && editable && <AskPacked unit={unit} user={user} toast={toast} />}
+        </React.Fragment>
       ))}
-
-      {canSetService(unit, user) && (
-        <WhoPacks unit={unit} user={user} toast={toast} />
-      )}
 
       {packing && onPackDay && (
         <PackingExtras unit={unit} user={user} editable={editable} toast={toast} />
@@ -500,13 +530,17 @@ export default function S15Unit({ unit, goBack, toast }) {
         </div>
       </div>
 
+      {/* And the unpack question after everything is in the new unit, which
+          is when it is actually settled with the customer. */}
       {steps.filter((s) => s.side === 'to').map((s, i) => (
-        <StepCard
-          key={s.key}
-          step={s}
-          index={steps.filter((x) => x.side === 'from').length + i}
-          unit={unit} user={user} editable={editable} onToast={toast}
-        />
+        <React.Fragment key={s.key}>
+          <StepCard
+            step={s}
+            index={steps.filter((x) => x.side === 'from').length + i}
+            unit={unit} user={user} editable={editable} onToast={toast}
+          />
+          {s.key === 'newFull' && editable && <AskUnpack unit={unit} user={user} toast={toast} />}
+        </React.Fragment>
       ))}
 
       {/* Notes: time, date and user stamped, same as everything else. */}
@@ -555,11 +589,7 @@ export default function S15Unit({ unit, goBack, toast }) {
           }}
           style={{ width: '100%', minHeight: 56, fontSize: 17, marginTop: 16 }}
         >
-          {packReady
-            ? '✓ Packing finished'
-            : n < total
-              ? `${total - n} photo${total - n === 1 ? '' : 's'} to go`
-              : 'Add the materials you used first'}
+          {packReady ? '✓ Packing finished' : blockedBy(unit)}
         </button>
       )}
 
@@ -570,11 +600,7 @@ export default function S15Unit({ unit, goBack, toast }) {
           onClick={async () => { try { await finishUnit(unit, user); toast(`Unit ${unit.number} complete.`); goBack() } catch (e) { toast(e.message) } }}
           style={{ width: '100%', minHeight: 56, fontSize: 17, marginTop: 16 }}
         >
-          {ready
-            ? '✓ Mark this unit complete'
-            : n < total
-              ? `${total - n} photo${total - n === 1 ? '' : 's'} to go`
-              : 'Add the materials you used first'}
+          {ready ? '✓ Mark this unit complete' : blockedBy(unit)}
         </button>
       )}
 

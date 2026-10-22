@@ -87,7 +87,47 @@ export const S15_STEPS = [
   { key: 'empty', label: 'The unit once everything is out', hint: 'Proves nothing was left behind. Add as many as you need.', multi: false, side: 'from', phase: 'moving' },
   { key: 'newDoor', label: 'New front door, unit number showing', hint: 'The door you are moving them to. More than one is fine.', multi: false, side: 'to', phase: 'moving' },
   { key: 'newFull', label: 'Everything in the new unit', hint: 'A few. Show where it all landed.', multi: true, side: 'to', phase: 'moving' },
+  { key: 'unpackBefore', label: 'Before we unpack', hint: 'A few. Boxes still sealed, where they sit.', multi: true, side: 'to', phase: 'moving', unpackOnly: true },
+  { key: 'unpackAfter', label: 'Unpacked and put away', hint: 'A few. Every room we touched.', multi: true, side: 'to', phase: 'moving', unpackOnly: true },
 ]
+
+/* THE TWO QUESTIONS.
+ *
+ * Casey, 2026-10-22: "wouldnt it be easyer, to have a steep 'is the customer
+ * packed and ready for this move'? yes, no packing, no, then you have your
+ * matterials list and pictures of after they are packed. and for the move to
+ * the new unit, same thing. 'gorilla mvoers will unpack'? yes, more pictues
+ * needed of before and after (2 added steps)."
+ *
+ * Yes, and it is better than what it replaces. The previous answer was a
+ * control only a SUPERVISOR could reach, which means a crew standing at an
+ * unpacked apartment has to telephone somebody before the app will let them
+ * record what is in front of them. A question in the flow puts the decision
+ * where the information is.
+ *
+ * Both questions are asked at the moment their answer becomes knowable, and
+ * not before: whether a tenant has really packed is not knowable from the
+ * corridor, and whether we are unpacking is settled at the new door. Each
+ * one unlocks the steps it implies and nothing else, so a crew on a plain
+ * move still sees five photographs and no questions they have already
+ * answered by turning up. */
+export const PACKED_Q = 'Is the customer packed and ready for this move?'
+export const UNPACK_Q = 'Will Gorilla Movers unpack?'
+
+/** Has somebody stood at the door and said? The seed carries Casey's
+ *  schedule, but a schedule is a plan and the door is the fact, so a
+ *  planned answer still has to be confirmed by whoever is standing there. */
+export function packedAnswered(unit) {
+  return !!unit && typeof unit.packedConfirmedAt === 'number'
+}
+
+export function unpackAnswered(unit) {
+  return !!unit && typeof unit.unpack === 'boolean'
+}
+
+export function weAreUnpacking(unit) {
+  return !!unit && unit.unpack === true
+}
 
 export const S15_STEP_KEYS = S15_STEPS.map((s) => s.key)
 
@@ -114,9 +154,13 @@ export function phaseOf(unit) {
  *  same morning, so it is left out.
  *  A unit we pack: three today, four tomorrow. */
 export function stepsFor(unit) {
-  if (!weArePacking(unit)) return S15_STEPS.filter((s) => !s.packingOnly && !s.movingOnly)
+  const unpacking = weAreUnpacking(unit)
+  const keep = (s) => (s.unpackOnly ? unpacking : true)
+  if (!weArePacking(unit)) {
+    return S15_STEPS.filter((s) => !s.packingOnly && !s.movingOnly).filter(keep)
+  }
   const phase = phaseOf(unit)
-  return S15_STEPS.filter((s) => s.phase === phase)
+  return S15_STEPS.filter((s) => s.phase === phase).filter(keep)
 }
 
 /** Everything already shot on the visit before this one, so a mover can see
@@ -130,6 +174,7 @@ export function earlierSteps(unit) {
  *  answered. The move cannot start before that, which is the whole point. */
 export function readyToFinishPacking(unit) {
   if (phaseOf(unit) !== 'packing') return false
+  if (!packedAnswered(unit)) return false
   return S15_STEPS.filter((s) => s.phase === 'packing').every((s) => stepDone(unit, s.key))
     && materialsAnswered(unit)
 }
@@ -218,7 +263,24 @@ export function materialsAreOurs(unit) {
  *  is complete without anybody typing. Typing it only makes it searchable. */
 export function readyToFinish(unit) {
   if (phaseOf(unit) === 'packing') return false
+  /* An unanswered question is a hole in the record exactly as much as a
+     missing photograph is, and it is the hole nobody notices later: a unit
+     closed without saying whether we unpacked reads, a month on, as a unit
+     where we did not. */
+  if (!packedAnswered(unit) || !unpackAnswered(unit)) return false
   return doneCount(unit) === stepTotal(unit) && materialsAnswered(unit)
+}
+
+/** What is still in the way of finishing, in words, so the button can say
+ *  why it is disabled instead of just being grey. */
+export function blockedBy(unit) {
+  if (phaseOf(unit) === 'packing') return 'Finish the packing first'
+  if (!packedAnswered(unit)) return 'Answer: is the customer packed?'
+  const short = stepTotal(unit) - doneCount(unit)
+  if (short > 0) return `${short} photo${short === 1 ? '' : 's'} to go`
+  if (!materialsAnswered(unit)) return 'Add the materials you used first'
+  if (!unpackAnswered(unit)) return 'Answer: are we unpacking?'
+  return null
 }
 
 /** Who may still change this unit.
@@ -459,6 +521,39 @@ export async function reopenUnit(unit, user) {
  * packing on afterwards would reopen it into a phase whose work cannot
  * happen any more and leave it showing a count it can never reach. An admin
  * reopens it first, deliberately, which is already a button. */
+/** "Is the customer packed and ready?" - answered at the door by whoever is
+ *  standing at it. Saying no turns the packing work on; saying yes confirms
+ *  the schedule was right. Either way it is recorded against a name. */
+export async function answerPacked(unit, ready, packers, user) {
+  const n = Math.max(0, Math.min(9, Math.floor(Number(packers) || 0)))
+  await updateDoc(doc(db, S15_UNITS, unit.id), {
+    service: ready ? 'tenant' : 'gorilla',
+    packers: ready ? 0 : n,
+    packedConfirmedAt: Date.now(),
+    packedConfirmedBy: user.name || user.email || 'someone',
+    updatedAt: serverTimestamp(),
+  })
+  await logEvent(
+    user,
+    unit,
+    ready
+      ? 'Customer is packed and ready'
+      : `Customer is NOT packed, we are packing it${n ? ` (${n} packer${n === 1 ? '' : 's'})` : ''}`,
+  )
+}
+
+/** "Will Gorilla Movers unpack?" - settled at the new door. Yes adds the
+ *  before and after photographs and nothing else. */
+export async function answerUnpack(unit, willUnpack, user) {
+  await updateDoc(doc(db, S15_UNITS, unit.id), {
+    unpack: !!willUnpack,
+    unpackAnsweredBy: user.name || user.email || 'someone',
+    unpackAnsweredAt: Date.now(),
+    updatedAt: serverTimestamp(),
+  })
+  await logEvent(user, unit, willUnpack ? 'We are unpacking this unit' : 'No unpacking on this unit')
+}
+
 export function canSetService(unit, user) {
   if (!user || user.status !== 'active') return false
   if (unit && unit.done) return false

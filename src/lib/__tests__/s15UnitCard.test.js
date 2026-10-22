@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { lastTouch, coatFor } from '../../s15/S15UnitCard.jsx'
-import { doneCount, stepTotal, photoCount, stepsFor, weArePacking, materialsAnswered, materialsAreOurs, canSetService, readyToFinish, phaseOf, readyToFinishPacking, earlierSteps } from '../../s15/s15.js'
+import { doneCount, stepTotal, photoCount, stepsFor, weArePacking, materialsAnswered, materialsAreOurs, canSetService, readyToFinish, blockedBy, packedAnswered, unpackAnswered, phaseOf, readyToFinishPacking, earlierSteps } from '../../s15/s15.js'
 
 const CARD = readFileSync('src/s15/S15UnitCard.jsx', 'utf8')
 const BUILDING = readFileSync('src/s15/S15Building.jsx', 'utf8')
@@ -172,34 +172,37 @@ describe('materials must be answered before a packed unit is finished', () => {
 
 describe('what it takes to finish a unit', () => {
   const allShots = (keys) => Object.fromEntries(keys.map((k) => [k, [shot(1, 'a')]]))
+  /* Both door questions answered. From 2026-10-22 a unit cannot close with
+     either one open, so every fixture here has to say. */
+  const asked = { packedConfirmedAt: 1, unpack: false }
   const tenantKeys = ['door', 'before', 'empty', 'newDoor', 'newFull']
   const ourKeys = ['door', 'before', 'packed', 'moveDoor', 'empty', 'newDoor', 'newFull']
 
   it('a tenant-packed unit needs its five photos and nothing else', () => {
-    expect(readyToFinish({ service: 'tenant', shots: allShots(tenantKeys) })).toBe(true)
+    expect(readyToFinish({ ...asked, service: 'tenant', shots: allShots(tenantKeys) })).toBe(true)
   })
 
   it('and is not ready one short', () => {
-    expect(readyToFinish({ service: 'tenant', shots: allShots(tenantKeys.slice(0, 4)) })).toBe(false)
+    expect(readyToFinish({ ...asked, service: 'tenant', shots: allShots(tenantKeys.slice(0, 4)) })).toBe(false)
   })
 
   /* The one the first four mutations missed: stripping materialsAnswered()
      out of readyToFinish left every other test passing. */
   it('a unit we packed is NOT ready on photos alone', () => {
-    expect(readyToFinish({ service: 'gorilla', shots: allShots(ourKeys) })).toBe(false)
+    expect(readyToFinish({ ...asked, service: 'gorilla', shots: allShots(ourKeys) })).toBe(false)
   })
 
   it('it is ready once the materials are recorded AND packing is signed off', () => {
-    const packed = { service: 'gorilla', shots: allShots(ourKeys), materials: { small: 6, paper: 2 }, packingDoneAt: 1 }
+    const packed = { ...asked, service: 'gorilla', shots: allShots(ourKeys), materials: { small: 6, paper: 2 }, packingDoneAt: 1 }
     expect(readyToFinish(packed)).toBe(true)
   })
 
   it('or once somebody says we used none', () => {
-    expect(readyToFinish({ service: 'gorilla', shots: allShots(ourKeys), materialsNone: true, packingDoneAt: 1 })).toBe(true)
+    expect(readyToFinish({ ...asked, service: 'gorilla', shots: allShots(ourKeys), materialsNone: true, packingDoneAt: 1 })).toBe(true)
   })
 
   it('but materials alone do not finish it either', () => {
-    expect(readyToFinish({ service: 'gorilla', shots: allShots(ourKeys.slice(0, 3)), materials: { small: 6 } })).toBe(false)
+    expect(readyToFinish({ ...asked, service: 'gorilla', shots: allShots(ourKeys.slice(0, 3)), materials: { small: 6 } })).toBe(false)
   })
 })
 
@@ -311,14 +314,14 @@ describe('a unit we pack has two visits', () => {
 
   it('packing cannot be signed off without its photos AND materials', () => {
     const shots = { door: [shot(1,'a')], before: [shot(2,'a')], packed: [shot(3,'a')] }
-    expect(readyToFinishPacking({ service: 'gorilla', shots })).toBe(false)
-    expect(readyToFinishPacking({ service: 'gorilla', shots, materialsNone: true })).toBe(true)
+    expect(readyToFinishPacking({ packedConfirmedAt: 1, service: 'gorilla', shots })).toBe(false)
+    expect(readyToFinishPacking({ packedConfirmedAt: 1, service: 'gorilla', shots, materialsNone: true })).toBe(true)
   })
 
   it('and the unit cannot be COMPLETED while it is still being packed', () => {
     /* The move has not happened. Completing here would close a unit whose
        contents are still in the old apartment. */
-    const everything = { service: 'gorilla', materialsNone: true,
+    const everything = { packedConfirmedAt: 1, unpack: false, service: 'gorilla', materialsNone: true,
       shots: Object.fromEntries(['door','before','packed','moveDoor','empty','newDoor','newFull'].map(k => [k, [shot(1,'a')]])) }
     expect(readyToFinish({ ...everything, packingDoneAt: null })).toBe(false)
     expect(readyToFinish({ ...everything, packingDoneAt: 1 })).toBe(true)
@@ -509,6 +512,90 @@ describe('adding packing on the fly', () => {
        belong in the same neighbourhood as an irreversible one. */
     const adminCard = UNIT3.slice(UNIT3.indexOf('>ADMIN<'))
     expect(adminCard).not.toContain('Switch to tenant-packed')
-    expect(UNIT3).toContain('<WhoPacks unit={unit} user={user} toast={toast} />')
+  })
+
+  it('and the crew no longer need a supervisor to answer it', () => {
+    /* 2026-10-22, second pass: Casey replaced the supervisor-only control
+       with a question in the flow. canSetService now only governs CHANGING
+       a settled answer, not giving one. */
+    expect(UNIT3).toContain('<AskPacked unit={unit} user={user} toast={toast} />')
+    expect(UNIT3).not.toContain('<WhoPacks')
+  })
+})
+
+/* ── The two questions ──────────────────────────────────────────────
+ *
+ * Casey, 2026-10-22: "wouldnt it be easyer, to have a steep 'is the customer
+ * packed and ready for this move'? yes, no packing, no, then you have your
+ * matterials list and pictures of after they are packed. and for the move to
+ * the new unit, same thing. 'gorilla mvoers will unpack'? yes, more pictues
+ * needed of before and after (2 added steps)."
+ */
+describe('is the customer packed and ready', () => {
+  it('nobody has said until somebody stands there and says', () => {
+    /* The seed carries Casey's schedule, but a schedule is a plan and the
+       door is the fact. A unit seeded as tenant-packed is still unanswered. */
+    expect(packedAnswered({ service: 'tenant' })).toBe(false)
+    expect(packedAnswered({ service: 'gorilla', packers: 3 })).toBe(false)
+    expect(packedAnswered({ service: 'tenant', packedConfirmedAt: 1 })).toBe(true)
+  })
+
+  it('a unit cannot be finished with the question open', () => {
+    const shots = Object.fromEntries(['door','before','empty','newDoor','newFull'].map(k => [k, [shot(1,'a')]]))
+    expect(readyToFinish({ service: 'tenant', shots, unpack: false })).toBe(false)
+    expect(readyToFinish({ service: 'tenant', shots, unpack: false, packedConfirmedAt: 1 })).toBe(true)
+  })
+
+  it('and the button says which question, not just "no"', () => {
+    expect(blockedBy({ service: 'tenant', shots: {}, unpack: false }))
+      .toMatch(/is the customer packed/i)
+  })
+})
+
+describe('will Gorilla Movers unpack', () => {
+  const base = { service: 'tenant', packedConfirmedAt: 1 }
+  const fiveShots = Object.fromEntries(['door','before','empty','newDoor','newFull'].map(k => [k, [shot(1,'a')]]))
+
+  it('unanswered is not the same as no', () => {
+    /* A unit closed without saying reads, a month on, as a unit where we
+       did not unpack. That is a silent wrong answer, not a blank. */
+    expect(unpackAnswered({})).toBe(false)
+    expect(unpackAnswered({ unpack: false })).toBe(true)
+    expect(unpackAnswered({ unpack: true })).toBe(true)
+  })
+
+  it('and it blocks finishing too', () => {
+    expect(readyToFinish({ ...base, shots: fiveShots })).toBe(false)
+    expect(blockedBy({ ...base, shots: fiveShots })).toMatch(/are we unpacking/i)
+    expect(readyToFinish({ ...base, shots: fiveShots, unpack: false })).toBe(true)
+  })
+
+  it('yes adds exactly two steps', () => {
+    const no = stepsFor({ ...base, unpack: false })
+    const yes = stepsFor({ ...base, unpack: true })
+    expect(yes.length - no.length).toBe(2)
+    expect(yes.map((s) => s.key).slice(-2)).toEqual(['unpackBefore', 'unpackAfter'])
+  })
+
+  it('before and after, in that order, at the new unit', () => {
+    const keys = stepsFor({ ...base, unpack: true }).map((s) => s.key)
+    expect(keys.indexOf('unpackBefore')).toBeGreaterThan(keys.indexOf('newFull'))
+    expect(keys.indexOf('unpackAfter')).toBeGreaterThan(keys.indexOf('unpackBefore'))
+  })
+
+  it('both are on the destination side', () => {
+    const extra = stepsFor({ ...base, unpack: true }).filter((s) => s.unpackOnly)
+    expect(extra.every((s) => s.side === 'to')).toBe(true)
+  })
+
+  it('and no unpacking means no unpack photos to chase', () => {
+    expect(stepsFor({ ...base, unpack: false }).some((s) => s.unpackOnly)).toBe(false)
+    expect(stepTotal({ ...base, unpack: false })).toBe(5)
+    expect(stepTotal({ ...base, unpack: true })).toBe(7)
+  })
+
+  it('the unpack steps also apply to a unit we packed', () => {
+    const ours = { service: 'gorilla', packedConfirmedAt: 1, packingDoneAt: 1, unpack: true }
+    expect(stepsFor(ours).map((s) => s.key)).toContain('unpackAfter')
   })
 })
