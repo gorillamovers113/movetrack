@@ -1,0 +1,189 @@
+/* Studio 15 - the board.
+ *
+ * Deliberately one screen and one list. Trinity Manor's crew reach a unit
+ * through a dashboard, a floor plate, a queue or a search depending on role;
+ * here every unit on the job is a tile, biggest thing on the screen, sorted
+ * by number. A packer opens the app and taps the door they are standing at.
+ *
+ * The detail view is held in local state rather than routed, so wiring this
+ * whole project into the app costs App.jsx exactly one case.
+ */
+import React, { useEffect, useMemo, useState } from 'react'
+import { useStore } from '../store.jsx'
+import {
+  subscribeUnits, doneCount, S15_STEPS, isAdmin, seedUnits, addUnit, deleteUnit,
+  STUDIO15_SCHEDULED,
+} from './s15.js'
+import S15Unit from './S15Unit.jsx'
+
+export default function Studio15({ toast }) {
+  const { currentUser } = useStore()
+  const [units, setUnits] = useState([])
+  const [openId, setOpenId] = useState(null)
+  const [q, setQ] = useState('')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const admin = isAdmin(currentUser)
+
+  useEffect(() => {
+    if (!currentUser || currentUser.status !== 'active') return undefined
+    return subscribeUnits(setUnits, (e) => setErr(e.message || 'Could not load the board.'))
+  }, [currentUser && currentUser.uid, currentUser && currentUser.status])
+
+  const open = useMemo(
+    () => (openId ? units.find((u) => u.id === openId) : null),
+    [openId, units],
+  )
+
+  const shown = useMemo(() => {
+    const t = q.trim().toLowerCase()
+    if (!t) return units
+    return units.filter((u) => String(u.number).includes(t) || String(u.destination || '').includes(t))
+  }, [units, q])
+
+  const finished = units.filter((u) => u.done).length
+
+  if (open) {
+    return (
+      <S15Unit
+        unit={{ ...open, __user: currentUser }}
+        goBack={() => setOpenId(null)}
+        toast={toast}
+      />
+    )
+  }
+
+  return (
+    <div style={{ maxWidth: 820, margin: '0 auto' }}>
+      <div className="row" style={{ alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+        <h1 style={{ margin: 0 }}>Studio 15</h1>
+        <span className="muted">San Diego · unit to unit, in building</span>
+      </div>
+
+      {err && (
+        <div className="card" style={{ padding: 12, marginTop: 12, background: '#fef2f2', border: '1px solid #fecaca' }}>{err}</div>
+      )}
+
+      {units.length > 0 && (
+        <div className="row" style={{ gap: 10, marginTop: 14, flexWrap: 'wrap' }}>
+          <div className="kpi card" style={{ padding: '12px 16px' }}>
+            <div style={{ fontSize: 24, fontWeight: 700 }}>{finished}<span className="muted" style={{ fontSize: 15 }}> /{units.length}</span></div>
+            <div className="muted" style={{ fontSize: 12 }}>Units complete</div>
+          </div>
+        </div>
+      )}
+
+      {units.length > 6 && (
+        <input
+          className="input"
+          placeholder="Find a unit number"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          inputMode="numeric"
+          style={{ marginTop: 14, minHeight: 46, fontSize: 16, width: '100%' }}
+        />
+      )}
+
+      {!units.length && (
+        <div className="card" style={{ padding: 24, marginTop: 16, textAlign: 'center' }}>
+          <div style={{ fontSize: 34 }}>🏢</div>
+          <p style={{ marginTop: 8 }}>No units on the board yet.</p>
+          {admin && (
+            <button
+              className="btn btn-primary btn-lg"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true)
+                try {
+                  const n = await seedUnits(STUDIO15_SCHEDULED, currentUser)
+                  toast(n ? `Loaded ${n} units.` : 'Those units were already on the board.')
+                } catch (e) { toast(e.message) } finally { setBusy(false) }
+              }}
+            >
+              {busy ? 'Loading…' : `Load the ${STUDIO15_SCHEDULED.length} scheduled units`}
+            </button>
+          )}
+        </div>
+      )}
+
+      <div className="unit-tiles" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10, marginTop: 16 }}>
+        {shown.map((u) => {
+          const n = doneCount(u)
+          return (
+            <button
+              key={u.id}
+              className="tile"
+              onClick={() => setOpenId(u.id)}
+              style={{
+                padding: 14, textAlign: 'left', minHeight: 96, borderRadius: 12, cursor: 'pointer',
+                border: '1px solid var(--line, #e4e7ee)',
+                background: u.done ? '#16a34a' : '#fff',
+                color: u.done ? '#fff' : 'inherit',
+              }}
+            >
+              <div style={{ fontSize: 21, fontWeight: 700, lineHeight: 1.1 }}>{u.number}</div>
+              <div style={{ fontSize: 12, opacity: u.done ? 0.9 : 0.6, marginTop: 2 }}>
+                {u.destination ? `→ ${u.destination}` : 'destination tbd'}
+              </div>
+              <div style={{ marginTop: 8, fontSize: 12, fontWeight: 650 }}>
+                {u.done ? '✓ Complete' : `${n} of ${S15_STEPS.length} photos`}
+              </div>
+              {u.packers > 0 && !u.done && (
+                <div style={{ marginTop: 6, fontSize: 11, fontWeight: 700, color: '#92400e', background: '#fef3c7', display: 'inline-block', padding: '2px 7px', borderRadius: 999 }}>
+                  {u.packers} packer{u.packers === 1 ? '' : 's'}
+                </div>
+              )}
+            </button>
+          )
+        })}
+      </div>
+
+      {admin && units.length > 0 && (
+        <div className="card" style={{ padding: 14, marginTop: 20 }}>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>ADMIN</div>
+          <AddUnit currentUser={currentUser} toast={toast} />
+          <button
+            className="btn btn-sm"
+            style={{ marginTop: 10 }}
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true)
+              try {
+                const n = await seedUnits(STUDIO15_SCHEDULED, currentUser)
+                toast(n ? `Added ${n} missing units.` : 'All scheduled units are already on the board.')
+              } catch (e) { toast(e.message) } finally { setBusy(false) }
+            }}
+          >Re-check the scheduled list</button>
+        </div>
+      )}
+
+      <div style={{ height: 40 }} />
+    </div>
+  )
+}
+
+function AddUnit({ currentUser, toast }) {
+  const [num, setNum] = useState('')
+  const [packers, setPackers] = useState('0')
+  return (
+    <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+      <input className="input" placeholder="Unit #" value={num} inputMode="numeric" onChange={(e) => setNum(e.target.value)} style={{ width: 110 }} />
+      <select className="input" value={packers} onChange={(e) => setPackers(e.target.value)} style={{ width: 150 }}>
+        <option value="0">Tenant packs</option>
+        <option value="1">1 packer</option>
+        <option value="2">2 packers</option>
+        <option value="3">3 packers</option>
+      </select>
+      <button
+        className="btn"
+        disabled={!num.trim()}
+        onClick={async () => {
+          try {
+            await addUnit({ number: num, packers: Number(packers), service: Number(packers) ? 'gorilla' : 'tenant' }, currentUser)
+            setNum(''); setPackers('0'); toast(`Unit ${num} added.`)
+          } catch (e) { toast(e.message) }
+        }}
+      >Add unit</button>
+    </div>
+  )
+}

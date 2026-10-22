@@ -19,6 +19,23 @@ service cloud.firestore {
       return hasRole('admin');
     }
 
+    /* Which jobs this person may see. Mirrors src/lib/projectAccess.js.
+     *
+     * Casey, 2026-10-22, wants four states per user: Trinity only, Studio 15
+     * only, both, or none. So it is a list on the user document.
+     *
+     * ABSENT IS NOT EMPTY. Every crew member predates this field, and
+     * defaulting a missing list to "none" would have locked the whole
+     * Trinity Manor crew out of a live job the second this deployed. Absent
+     * means nobody has decided yet, so the answer stays what it was
+     * yesterday; an explicit [] means Casey decided none, and denies.
+     *
+     * Admin is never gated: the person who hands out access cannot be shut
+     * out of it. */
+    function canSeeProject(key) {
+      return isAdmin() || (isActive() && (key in me().get('projects', ['trinity', 'studio15'])));
+    }
+
     /* A supervisor is a flag on top of a role, not a role of its own, so a
      * packer who supervises keeps packing and gains reach over every
      * apartment: photos, notes, corrections, at any stage, without being held
@@ -436,8 +453,55 @@ service cloud.firestore {
     }
 
     // ---- operational collections ----
+    /* ── Studio 15 ────────────────────────────────────────────────
+     *
+     * A separate job on the same app and the same logins. Its own
+     * collections on purpose: Trinity Manor's records are a finished client
+     * deliverable, and this project was built in two hours with a crew
+     * already packing. Nothing here can reach that data.
+     *
+     * The lock is `done`. Casey: "after a user makes it as compleated other
+     * user (not inculding admins) its locked out." So any active crew member
+     * may work an open unit, nobody but an admin may touch a finished one,
+     * and an admin may do anything including reopening it.
+     *
+     * Deletes are admin-only: a crew member who fat-fingers a tile should
+     * lose a photo at worst, never the unit and its whole history. */
+    /* A note may be added to ANY unit, finished or not.
+     *
+     * Casey, 2026-10-22: "any user at any time can add notes in. or
+     * multiable times." The thing worth saying about an apartment is often
+     * the thing somebody realises an hour later, by which point the unit is
+     * closed - and a lock that swallows that is worse than no note.
+     *
+     * Append only, and only the notes field: the array has to GROW, so this
+     * cannot be used to quietly drop somebody else's note off a sealed unit.
+     * Removing one stays admin-only, as it is in the UI. */
+    function s15NoteAppendOnly() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['notes', 'updatedAt'])
+        && request.resource.data.notes.size() > resource.data.notes.size();
+    }
+
+    match /s15Units/{unitId} {
+      allow read: if canSeeProject('studio15');
+      allow create: if isAdmin() || isActive();
+      allow update: if isAdmin()
+        || (isActive() && resource.data.get('done', false) == false)
+        || (isActive() && s15NoteAppendOnly());
+      allow delete: if isAdmin();
+    }
+
+    /* The log is append-only to everyone. Even an admin edits the unit
+     * rather than its history: a record of who did what is worth nothing if
+     * it can be rewritten afterwards. */
+    match /s15Events/{eventId} {
+      allow read: if canSeeProject('studio15');
+      allow create: if isActive() && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
     match /units/{unitId} {
-      allow read: if isActive();
+      allow read: if canSeeProject('trinity');
 
       // createUnit: admin, or packer starting a fresh unit at not_started.
       allow create: if (isAdmin() || canPack())
@@ -465,7 +529,7 @@ service cloud.firestore {
     }
 
     match /containers/{containerId} {
-      allow read: if isActive();
+      allow read: if canSeeProject('trinity');
 
       // logEmpties / bigboxSwap new-empties: a mover dropping a fresh empty
       // container, or anyone with full reach.
@@ -497,7 +561,7 @@ service cloud.firestore {
     // packer identifies (create only), mover preps & transports, warehouse
     // receives; admin can always edit/fix/adjust.
     match /overflow/{overflowId} {
-      allow read: if isActive();
+      allow read: if canSeeProject('trinity');
 
       // createOverflow: admin, packer, or mover, always starting at
       // identified, and createdBy must be the caller (mirrors events.uid
@@ -521,14 +585,14 @@ service cloud.firestore {
     // action. Once written, an event may not be edited or removed except by
     // an admin.
     match /events/{eventId} {
-      allow read: if isActive();
+      allow read: if canSeeProject('trinity');
       allow create: if (isAdmin() || isCrew())
         && request.resource.data.uid == request.auth.uid;
       allow update, delete: if isAdmin();
     }
 
     match /schedule/{scheduleId} {
-      allow read: if isActive();
+      allow read: if canSeeProject('trinity');
       allow write: if isAdmin();
     }
 

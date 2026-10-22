@@ -5,6 +5,8 @@ import { app, auth, db } from './firebase.js'
 import { captureMedia, uploadFile } from './lib/upload.js'
 import { businessDayKey, canClockInAt, lunchMinutesFor, openSessionFor, usesClock, tracksUnitTime } from './lib/timeclock.js'
 import { stepRow, pushRows } from './lib/sheetBackup.js'
+import { PROJECT_KEYS } from './lib/projectAccess.js'
+const PROJECT_LABEL = { trinity: 'Trinity Manor', studio15: 'Studio 15' }
 import { makeEvent, boxMismatch, nextReturnUnitAction, nextReturnContainerAction, nextReturnOverflowAction, sumCartons, PACKING_STEPS, REQUIRED_STEPS, packingChecklist, wouldCompletePacking, LOADING_STEPS, loadingComplete, normalizeVaultNumber, normalizeCode, vaultNumberShapeError, vaultsOf, completeVaults, vaultCountMismatch,
   receivedVaultError, receivedVaults, receivingDiff, RECEIVING_STEPS, receivingComplete, readyToReceive,
   isSupervisor, hasFullReach, describeChange, isUnitLocked } from './lib/mutations.js'
@@ -1745,6 +1747,21 @@ export function makeDispatch({ db, currentUser, state, ev, attributeMedia }) {
         if (currentUser.role !== 'admin') throw new Error('Only an admin can make someone a supervisor.')
         await updateDoc(doc(db, 'users', p.userId), { supervisor: !!p.on })
         return ev('system', `${p.on ? 'Made' : 'Removed'} ${name} ${p.on ? 'a supervisor' : 'as a supervisor'}`)
+      }
+      case 'setProjects': {
+        /* Which jobs this person can open. Casey, 2026-10-22: he wants one
+         * crew member on Trinity only, another on Studio 15 only, one on
+         * neither and one on both.
+         *
+         * Always written as an explicit array, including the empty one -
+         * absent means "nobody has decided", and the rules read that as "see
+         * everything" so the crew who predate this field were not locked out
+         * of a live job. Once Casey sets it, [] genuinely means none. */
+        if (currentUser.role !== 'admin') throw new Error('Only an admin can set which jobs someone sees.')
+        const list = (Array.isArray(p.projects) ? p.projects : []).filter((k) => PROJECT_KEYS.includes(k))
+        await updateDoc(doc(db, 'users', p.userId), { projects: list })
+        const label = list.length ? list.map((k) => PROJECT_LABEL[k] || k).join(' + ') : 'no jobs'
+        return ev('system', `Set ${name} to ${label}`)
       }
       case 'removeUser': {
         await updateDoc(doc(db, 'users', p.userId), { status: 'removed', role: null })

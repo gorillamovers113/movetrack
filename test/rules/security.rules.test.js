@@ -2567,3 +2567,192 @@ describe('units — a closed phase', () => {
     await assertFails(updateDoc(doc(dbAs(MOVER), 'units', 'u-lock7'), { locked: false }))
   })
 })
+
+/* ── Studio 15 ──────────────────────────────────────────────────────
+ *
+ * Built 2026-10-22 in two hours, with a crew packing the first two units
+ * that afternoon. These exist because the failure mode is not a cosmetic
+ * one: a rule that denies leaves a packer standing at a door unable to
+ * record the unit, and nobody on site can fix it.
+ */
+describe('studio 15', () => {
+  const OPEN = { number: '578', done: false, shots: {}, notes: [] }
+  const DONE = { number: '509', done: true, shots: {}, notes: [], doneBy: PACKER }
+
+  it('any active crew member can read the board', async () => {
+    await seed('s15Units', 'u1', OPEN)
+    await assertSucceeds(getDoc(doc(dbAs(PACKER), 's15Units', 'u1')))
+    await assertSucceeds(getDoc(doc(dbAs(MOVER), 's15Units', 'u1')))
+    await assertSucceeds(getDoc(doc(dbAs(VIEWER), 's15Units', 'u1')))
+  })
+
+  it('somebody waiting for approval cannot', async () => {
+    await seed('s15Units', 'u1', OPEN)
+    await assertFails(getDoc(doc(dbAs(PENDING), 's15Units', 'u1')))
+  })
+
+  it('crew can add a photo to an open unit', async () => {
+    await seed('s15Units', 'u1', OPEN)
+    await assertSucceeds(updateDoc(doc(dbAs(PACKER), 's15Units', 'u1'), {
+      'shots.door': arrayUnion({ url: 'x', uid: PACKER, name: 'p', ts: 1 }),
+    }))
+  })
+
+  /* Casey: "after a user makes it as compleated other user (not inculding
+     admins) its locked out." */
+  it('and cannot touch it once it is complete', async () => {
+    await seed('s15Units', 'u2', DONE)
+    await assertFails(updateDoc(doc(dbAs(PACKER), 's15Units', 'u2'), {
+      'shots.door': arrayUnion({ url: 'x', uid: PACKER, name: 'p', ts: 1 }),
+    }))
+    await assertFails(updateDoc(doc(dbAs(MOVER), 's15Units', 'u2'), { destination: '999' }))
+  })
+
+  it('but an admin can, which is the way back out of the lock', async () => {
+    await seed('s15Units', 'u2', DONE)
+    await assertSucceeds(updateDoc(doc(dbAs(ADMIN), 's15Units', 'u2'), { done: false }))
+  })
+
+  it('a unit is admin-only to delete', async () => {
+    await seed('s15Units', 'u1', OPEN)
+    await assertFails(deleteDoc(doc(dbAs(PACKER), 's15Units', 'u1')))
+    await assertSucceeds(deleteDoc(doc(dbAs(ADMIN), 's15Units', 'u1')))
+  })
+
+  it('the log takes an entry from the person who did the thing', async () => {
+    await assertSucceeds(addDoc(collection(dbAs(PACKER), 's15Events'), {
+      ts: Date.now(), uid: PACKER, name: 'p', action: 'Photo', unitId: 'u1',
+    }))
+  })
+
+  it('and refuses one signed with somebody else name', async () => {
+    await assertFails(addDoc(collection(dbAs(PACKER), 's15Events'), {
+      ts: Date.now(), uid: OTHER_PACKER, name: 'someone else', action: 'Photo', unitId: 'u1',
+    }))
+  })
+
+  it('history cannot be rewritten, admin included', async () => {
+    await seed('s15Events', 'e1', { ts: 1, uid: PACKER, action: 'Photo' })
+    await assertFails(updateDoc(doc(dbAs(ADMIN), 's15Events', 'e1'), { action: 'something else' }))
+    await assertFails(deleteDoc(doc(dbAs(ADMIN), 's15Events', 'e1')))
+  })
+})
+
+describe('studio 15 notes are never locked', () => {
+  /* Casey: "any user at any time can add notes in. or multiable times." */
+  const DONE = { number: '509', done: true, shots: {}, notes: [{ text: 'first', uid: 'x', ts: 1 }] }
+
+  it('a crew member can add a note to a finished unit', async () => {
+    await seed('s15Units', 'u3', DONE)
+    await assertSucceeds(updateDoc(doc(dbAs(MOVER), 's15Units', 'u3'), {
+      notes: arrayUnion({ text: 'found a key', uid: MOVER, name: 'm', ts: 2 }),
+    }))
+  })
+
+  it('and may add several', async () => {
+    await seed('s15Units', 'u3', DONE)
+    const d = dbAs(PACKER)
+    await assertSucceeds(updateDoc(doc(d, 's15Units', 'u3'), { notes: arrayUnion({ text: 'a', uid: PACKER, ts: 2 }) }))
+    await assertSucceeds(updateDoc(doc(d, 's15Units', 'u3'), { notes: arrayUnion({ text: 'b', uid: PACKER, ts: 3 }) }))
+  })
+
+  /* The note door must not become a way back into a sealed unit. */
+  it('but cannot use the note door to change a photo', async () => {
+    await seed('s15Units', 'u3', DONE)
+    await assertFails(updateDoc(doc(dbAs(MOVER), 's15Units', 'u3'), {
+      notes: arrayUnion({ text: 'ok', uid: MOVER, ts: 2 }),
+      'shots.door': arrayUnion({ url: 'x', uid: MOVER, ts: 2 }),
+    }))
+  })
+
+  it('nor to reopen it', async () => {
+    await seed('s15Units', 'u3', DONE)
+    await assertFails(updateDoc(doc(dbAs(MOVER), 's15Units', 'u3'), {
+      notes: arrayUnion({ text: 'ok', uid: MOVER, ts: 2 }), done: false,
+    }))
+  })
+
+  it('nor to delete somebody else note', async () => {
+    await seed('s15Units', 'u3', DONE)
+    await assertFails(updateDoc(doc(dbAs(MOVER), 's15Units', 'u3'), {
+      notes: [],
+    }))
+  })
+})
+
+/* ── Per-user project access ────────────────────────────────────────
+ *
+ * Casey, 2026-10-22: "for one user i want him to only see trinity mannor but
+ * a different user to only see studio 15 and yet a different user i want
+ * them to see none and lastly i want a user to see both."
+ *
+ * Four states, plus the one that is not a state: a user who predates the
+ * field. That last case is why these exist at all - defaulting an absent
+ * list to "none" would have locked the entire Trinity crew out of a live job.
+ */
+describe('who can see which job', () => {
+  const T_ONLY = 'acc-trinity'
+  const S_ONLY = 'acc-studio'
+  const NEITHER = 'acc-none'
+  const BOTH_P = 'acc-both'
+  const LEGACY = 'acc-legacy'
+
+  beforeEach(async () => {
+    await seed('users', T_ONLY, { uid: T_ONLY, name: 'T', role: 'packer', status: 'active', projects: ['trinity'] })
+    await seed('users', S_ONLY, { uid: S_ONLY, name: 'S', role: 'packer', status: 'active', projects: ['studio15'] })
+    await seed('users', NEITHER, { uid: NEITHER, name: 'N', role: 'packer', status: 'active', projects: [] })
+    await seed('users', BOTH_P, { uid: BOTH_P, name: 'B', role: 'packer', status: 'active', projects: ['trinity', 'studio15'] })
+    // No `projects` key at all, like every user who predates this.
+    await seed('users', LEGACY, { uid: LEGACY, name: 'L', role: 'packer', status: 'active' })
+    await seed('units', 'tu1', { number: '903', stage: 'not_started', floor: 9 })
+    await seed('s15Units', 'su1', { number: '578', done: false, shots: {}, notes: [] })
+  })
+
+  it('Trinity-only sees Trinity and not Studio 15', async () => {
+    await assertSucceeds(getDoc(doc(dbAs(T_ONLY), 'units', 'tu1')))
+    await assertFails(getDoc(doc(dbAs(T_ONLY), 's15Units', 'su1')))
+  })
+
+  it('Studio-15-only sees Studio 15 and not Trinity', async () => {
+    await assertSucceeds(getDoc(doc(dbAs(S_ONLY), 's15Units', 'su1')))
+    await assertFails(getDoc(doc(dbAs(S_ONLY), 'units', 'tu1')))
+  })
+
+  it('a user set to none sees neither', async () => {
+    await assertFails(getDoc(doc(dbAs(NEITHER), 'units', 'tu1')))
+    await assertFails(getDoc(doc(dbAs(NEITHER), 's15Units', 'su1')))
+  })
+
+  it('a user set to both sees both', async () => {
+    await assertSucceeds(getDoc(doc(dbAs(BOTH_P), 'units', 'tu1')))
+    await assertSucceeds(getDoc(doc(dbAs(BOTH_P), 's15Units', 'su1')))
+  })
+
+  /* The one that would have taken the live crew down. */
+  it('a user from before the field keeps seeing everything', async () => {
+    await assertSucceeds(getDoc(doc(dbAs(LEGACY), 'units', 'tu1')))
+    await assertSucceeds(getDoc(doc(dbAs(LEGACY), 's15Units', 'su1')))
+  })
+
+  it('an empty list is a decision, not a missing one', async () => {
+    /* [] and undefined must not collapse to the same answer, or Casey
+       cannot express "this person sees nothing". */
+    await assertFails(getDoc(doc(dbAs(NEITHER), 'units', 'tu1')))
+    await assertSucceeds(getDoc(doc(dbAs(LEGACY), 'units', 'tu1')))
+  })
+
+  it('and the admin is never gated out of either', async () => {
+    await seed('users', ADMIN, { uid: ADMIN, name: 'A', role: 'admin', status: 'active', projects: [] })
+    await assertSucceeds(getDoc(doc(dbAs(ADMIN), 'units', 'tu1')))
+    await assertSucceeds(getDoc(doc(dbAs(ADMIN), 's15Units', 'su1')))
+  })
+
+  it('the Trinity gate covers the whole job, not just units', async () => {
+    await seed('containers', 'c1', { number: '8864', location: 'onsite' })
+    await seed('events', 'e9', { ts: 1, uid: PACKER, action: 'x' })
+    await seed('schedule', 'd1', { date: '2026-10-22', work: 'PACK' })
+    await assertFails(getDoc(doc(dbAs(S_ONLY), 'containers', 'c1')))
+    await assertFails(getDoc(doc(dbAs(S_ONLY), 'events', 'e9')))
+    await assertFails(getDoc(doc(dbAs(S_ONLY), 'schedule', 'd1')))
+  })
+})

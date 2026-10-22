@@ -5,6 +5,10 @@ import { Avatar, Modal } from '../ui.jsx'
 import { submitAction as submitWrite, QUEUED_MESSAGE } from '../lib/submit.js'
 import StarredName from '../components/StarredName.jsx'
 import { hasStar, starReason } from '../lib/awards.js'
+import { allowedProjects } from '../lib/projectAccess.js'
+
+const PROJECT_OPTIONS = [['trinity', 'Trinity Manor'], ['studio15', 'Studio 15']]
+const PROJECT_LABEL_MAP = Object.fromEntries(PROJECT_OPTIONS)
 
 export default function Team({ toast }) {
   const { state, dispatch, currentUser } = useStore()
@@ -93,7 +97,7 @@ export default function Team({ toast }) {
       <div className="card">
         <div className="table-scroll">
           <table className="tbl">
-            <thead><tr><th>Member</th><th>Role</th><th>Supervisor</th><th>Actions logged</th><th>Email</th>{isAdmin && <th></th>}</tr></thead>
+            <thead><tr><th>Member</th><th>Role</th><th>Jobs</th><th>Supervisor</th><th>Actions logged</th><th>Email</th>{isAdmin && <th></th>}</tr></thead>
             <tbody>
               {active.map((u) => (
                 <tr key={u.id}>
@@ -158,6 +162,55 @@ export default function Team({ toast }) {
                       have this reach, so the box reads as ticked and locked on
                       an admin row instead of offering a switch that would do
                       nothing. */}
+                  {/* Which jobs this person can open.
+                      Casey, 2026-10-22: one crew member on Trinity only,
+                      another on Studio 15 only, one on neither, one on both.
+
+                      A user who predates the field has no `projects` key and
+                      sees everything, which is what kept the live Trinity crew
+                      working the day this shipped. The moment Casey touches
+                      either box the list becomes explicit, and from then on
+                      unchecking both genuinely means none. */}
+                  <td>
+                    {u.role === 'admin' ? (
+                      <span className="muted" style={{ fontSize: 12.5 }} title="Admins see every job">✓ all</span>
+                    ) : isAdmin ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                        {PROJECT_OPTIONS.map(([key, label]) => {
+                          const on = allowedProjects(u).includes(key)
+                          return (
+                            <label key={key} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12.5 }}>
+                              <input
+                                type="checkbox"
+                                checked={on}
+                                disabled={busyIds.has(u.id)}
+                                style={{ width: 15, height: 15 }}
+                                onChange={(e) => {
+                                  const next = e.target.checked
+                                    ? [...allowedProjects(u), key]
+                                    : allowedProjects(u).filter((k) => k !== key)
+                                  withUserBusy(u.id, async () => {
+                                    const status = await submitWrite(dispatch({ type: 'setProjects', p: { userId: u.id, projects: next, byId: currentUser.uid } }))
+                                    toast(status === 'queued' ? QUEUED_MESSAGE
+                                      : next.length ? `${u.name}: ${next.length === 2 ? 'both jobs' : PROJECT_LABEL_MAP[next[0]]}`
+                                      : `${u.name} is on no jobs`)
+                                  })
+                                }}
+                              />
+                              {label}
+                            </label>
+                          )
+                        })}
+                        {!Array.isArray(u.projects) && (
+                          <span className="muted" style={{ fontSize: 10.5 }}>not set · sees all</span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="muted" style={{ fontSize: 12 }}>
+                        {allowedProjects(u).map((k) => PROJECT_LABEL_MAP[k]).join(', ') || 'none'}
+                      </span>
+                    )}
+                  </td>
                   <td>
                     {u.role === 'admin' ? (
                       <span className="muted" title="Admins already have full reach" style={{ fontSize: 12.5 }}>✓ admin</span>

@@ -14,6 +14,10 @@ import Schedule from './views/Schedule.jsx'
 import Reports from './views/Reports.jsx'
 import Timesheets from './views/Timesheets.jsx'
 import Access from './views/Access.jsx'
+import Studio15 from './s15/Studio15.jsx'
+import S15BuildingView from './s15/S15BuildingView.jsx'
+import ProjectPicker, { PROJECTS, PROJECT_KEY } from './ProjectPicker.jsx'
+import { allowedProjects } from './lib/projectAccess.js'
 import UpdateBar from './components/UpdateBar.jsx'
 import { recordSession } from './lib/telemetry.js'
 
@@ -22,7 +26,7 @@ import { recordSession } from './lib/telemetry.js'
 // Containers from theirs). Everyone else who touches the overflow lifecycle
 // (or just needs to see it) gets it in the nav. Schedule is for every role
 // (read-only for non-admins) since the crew needs to know today's floor.
-const NAV = {
+const NAV_TRINITY = {
   admin: [['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['containers', '📦', 'Vaults'], ['overflow', '🛋️', 'Overflow'], ['team', '👥', 'Team'], ['reports', '📊', 'Reports'], ['timesheets', '⏱️', 'Timesheets'], ['activity', '🕘', 'Activity'], ['access', '🔎', 'Access log']],
   // Packers deliberately have no Dashboard or Activity: both list every
   // apartment and tenant in the building, and a packer needs the one door
@@ -34,6 +38,24 @@ const NAV = {
   warehouse: [['mywork', '✓', 'My queue'], ['containers', '📦', 'Vaults'], ['overflow', '🛋️', 'Overflow'], ['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['activity', '🕘', 'Activity']],
   viewer: [['dashboard', '▦', 'Dashboard'], ['schedule', '📅', 'Schedule'], ['containers', '📦', 'Vaults'], ['overflow', '🛋️', 'Overflow'], ['reports', '📊', 'Reports'], ['activity', '🕘', 'Activity']],
 }
+
+/* Studio 15 is two screens and nothing else. Casey: the two jobs "should not
+ * be on the same page". A packer here has no business scrolling past Vaults
+ * and Overflow, which belong to a finished building across town.
+ *
+ * Team is the one exception for an admin: the crew roster is shared across
+ * every job, so approving somebody should not mean switching projects. */
+const S15_CREW = [['studio15', '🏢', 'Units'], ['s15building', '🏗️', 'Building']]
+const NAV_STUDIO15 = {
+  admin: [...S15_CREW, ['team', '👥', 'Team'], ['timesheets', '⏱️', 'Timesheets']],
+  packer: S15_CREW,
+  mover: S15_CREW,
+  driver: S15_CREW,
+  warehouse: S15_CREW,
+  viewer: S15_CREW,
+}
+
+const NAV_BY_PROJECT = { trinity: NAV_TRINITY, studio15: NAV_STUDIO15 }
 
 function PendingScreen() {
   const { currentUser, logout } = useStore()
@@ -75,7 +97,30 @@ function Shell() {
   const { state, currentUser, logout, dispatch } = useStore()
   // Defensive: Gate should only ever hand us an active, roled user, but guard
   // against a missing/unknown NAV[role] anyway rather than throwing.
-  const nav = NAV[currentUser.role] || []
+  // Which job. Remembered so a packer on Studio 15 all week is not asked
+  // every morning; the sidebar chip is the way back to the picker.
+  const [project, setProject] = useState(() => {
+    try { return localStorage.getItem(PROJECT_KEY) || null } catch { return null }
+  })
+  const allowed = allowedProjects(currentUser)
+  /* The remembered choice is only as good as today's access. If Casey takes
+     somebody off Trinity overnight, the phone that still has 'trinity' in
+     localStorage has to fall back to the picker rather than render a board
+     whose every read the rules will now deny. And when exactly one job is
+     left there is nothing to choose, so it opens straight into it. */
+  const effectiveProject = project && allowed.includes(project)
+    ? project
+    : (allowed.length === 1 ? allowed[0] : null)
+  const pickProject = (key) => {
+    try { localStorage.setItem(PROJECT_KEY, key) } catch { /* private mode */ }
+    setProject(key)
+    // The view has to travel with the project. useState's initialiser runs
+    // once, so leaving Trinity on 'dashboard' would otherwise render Trinity's
+    // dashboard inside Studio 15 - the exact mixing Casey asked to end.
+    const nextNav = (NAV_BY_PROJECT[key] || NAV_TRINITY)[currentUser.role] || []
+    setView({ name: nextNav[0]?.[0] || 'dashboard' })
+  }
+  const nav = ((NAV_BY_PROJECT[effectiveProject] || NAV_TRINITY)[currentUser.role]) || []
   const first = nav[0]?.[0] || 'dashboard'
   const [view, setView] = useState({ name: first })
   const [toastMsg, setToastMsg] = useState(null)
@@ -167,6 +212,8 @@ function Shell() {
       case 'access': return <Access />
       case 'activity': return <Activity openUnit={openUnit} openContainer={openContainer} />
       case 'mywork': return <MyWork openUnit={openUnit} openContainer={openContainer} toast={toast} />
+      case 'studio15': return <Studio15 toast={toast} />
+      case 's15building': return <S15BuildingView toast={toast} />
       default: return null
     }
   }
@@ -178,6 +225,9 @@ function Shell() {
     </button>
   ))
 
+  // Casey: "the user would click on one or the other at the starting page."
+  if (!effectiveProject) return <ProjectPicker onPick={pickProject} />
+
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -185,10 +235,18 @@ function Shell() {
           <GorillaWordmark width={168} />
           <div className="logo-sub" style={{ textAlign: 'center' }}>MoveTrack · project command center</div>
         </div>
-        <div className="project-chip">
-          <b>{state.project?.name || 'Trinity Manor'}</b>
-          <span>{state.project?.address || '3940 Park Blvd'}</span>
-        </div>
+        <button
+          className="project-chip"
+          onClick={() => { if (allowed.length > 1) setProject(null) }}
+          title={allowed.length > 1 ? 'Switch project' : undefined}
+          style={{ cursor: 'pointer', textAlign: 'left', width: '100%', border: 'none' }}
+        >
+          <b>{PROJECTS.find((p) => p.key === effectiveProject)?.name || state.project?.name || 'Trinity Manor'}</b>
+          <span>{PROJECTS.find((p) => p.key === effectiveProject)?.address || state.project?.address || '3940 Park Blvd'}</span>
+          {allowed.length > 1 && (
+            <span style={{ display: 'block', marginTop: 4, fontSize: 10.5, opacity: 0.75 }}>Switch project ⇄</span>
+          )}
+        </button>
         <nav className="nav"><NavButtons /></nav>
         <div className="side-user">
           <Avatar name={currentUser.name} size="sm" />

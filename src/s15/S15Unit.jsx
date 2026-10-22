@@ -1,0 +1,311 @@
+/* One Studio 15 unit: five photographs, in order, and nothing in the way.
+ *
+ * The whole screen is five cards. A card is a camera button until it holds a
+ * photo, then it is a thumbnail with a "shoot another" underneath. There is
+ * no "save", no "next", no confirmation dialog and no step that has to be
+ * ticked after the photo is taken - taking the photo IS taking the step. That
+ * is the single biggest difference from Trinity Manor, where the photograph
+ * and the tick were two separate taps on every item.
+ *
+ * `capture="environment"` opens the rear camera straight from the tap on a
+ * phone, so the crew member goes from standing at the door to having the
+ * record in two taps: the card, then the shutter.
+ */
+import React, { useRef, useState } from 'react'
+import {
+  S15_STEPS, shotsFor, stepDone, doneCount, readyToFinish, canEdit, isAdmin,
+  addShot, removeShot, setDestination, addNote, removeNote, finishUnit,
+  reopenUnit, setService, deleteUnit,
+} from './s15.js'
+
+function stamp(ts) {
+  if (!ts) return ''
+  const d = new Date(typeof ts === 'number' ? ts : ts.seconds * 1000)
+  return d.toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+}
+
+function StepCard({ step, index, unit, user, editable, onToast }) {
+  const shots = shotsFor(unit, step.key)
+  const done = shots.length > 0
+  const fileRef = useRef(null)
+  const [busy, setBusy] = useState(false)
+  const admin = isAdmin(user)
+
+  async function onPick(e) {
+    const files = [...(e.target.files || [])]
+    e.target.value = ''
+    if (!files.length) return
+    setBusy(true)
+    try {
+      for (const f of files) await addShot(unit, step.key, f, user)
+    } catch (err) {
+      onToast(err.message || 'That photo did not save. Try again.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="card" style={{ padding: 16, marginBottom: 12, borderLeft: `4px solid ${done ? '#16a34a' : '#d8dae2'}` }}>
+      <div className="row" style={{ alignItems: 'flex-start', gap: 12 }}>
+        <div style={{
+          width: 30, height: 30, flexShrink: 0, borderRadius: '50%', display: 'grid', placeItems: 'center',
+          fontWeight: 700, fontSize: 14, background: done ? '#16a34a' : '#eceef3', color: done ? '#fff' : '#6b7280',
+        }}>{done ? '✓' : index + 1}</div>
+        <div className="grow" style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 650, fontSize: 15, lineHeight: 1.3 }}>{step.label}</div>
+          <div className="muted" style={{ fontSize: 12.5, marginTop: 2 }}>{step.hint}</div>
+        </div>
+      </div>
+
+      {shots.length > 0 && (
+        <div className="media-row" style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {shots.map((s, i) => (
+            <div key={`${s.ts}-${i}`} style={{ position: 'relative' }}>
+              <a href={s.url} target="_blank" rel="noopener">
+                <img
+                  src={s.url}
+                  alt={step.label}
+                  style={{ width: 94, height: 94, objectFit: 'cover', borderRadius: 10, display: 'block', border: '1px solid var(--line, #e4e7ee)' }}
+                />
+              </a>
+              <div className="muted" style={{ fontSize: 10.5, marginTop: 3, maxWidth: 94, lineHeight: 1.25 }}>
+                {s.name}<br />{stamp(s.ts)}
+              </div>
+              {admin && (
+                <button
+                  className="btn-icon-sm"
+                  title="Remove this photo"
+                  onClick={() => removeShot(unit, step.key, s, user).catch((e) => onToast(e.message))}
+                  style={{
+                    position: 'absolute', top: -6, right: -6, width: 22, height: 22, borderRadius: '50%',
+                    background: '#dc2626', color: '#fff', border: 'none', fontSize: 13, lineHeight: '22px', padding: 0, cursor: 'pointer',
+                  }}
+                >×</button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {editable && (
+        <>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            multiple={step.multi}
+            onChange={onPick}
+            style={{ display: 'none' }}
+          />
+          <button
+            className={done ? 'btn btn-sm' : 'btn btn-primary btn-lg'}
+            disabled={busy}
+            onClick={() => fileRef.current && fileRef.current.click()}
+            style={{ marginTop: 12, width: done ? 'auto' : '100%', minHeight: done ? 36 : 52, fontSize: done ? 13 : 16 }}
+          >
+            {busy ? 'Saving…' : done ? '+ Another photo' : `📷 Take ${step.multi ? 'photos' : 'the photo'}`}
+          </button>
+        </>
+      )}
+    </div>
+  )
+}
+
+export default function S15Unit({ unit, goBack, toast }) {
+  const user = unit && unit.__user
+  const [dest, setDest] = useState(unit ? unit.destination || '' : '')
+  const [note, setNote] = useState('')
+  const [savingDest, setSavingDest] = useState(false)
+  // Two taps rather than window.confirm: a native dialog blocks the whole
+  // page, and this is the one button that cannot be undone.
+  const [confirmDelete, setConfirmDelete] = useState(false)
+
+  if (!unit) return null
+  const editable = canEdit(unit, user)
+  const admin = isAdmin(user)
+  const n = doneCount(unit)
+  const ready = readyToFinish(unit)
+  const notes = Array.isArray(unit.notes) ? [...unit.notes].sort((a, b) => b.ts - a.ts) : []
+  // Every shot at the old door taken, which is the moment the destination
+  // stops being a guess.
+  const fromDone = S15_STEPS.filter((s) => s.side === 'from').every((s) => stepDone(unit, s.key))
+  // Casey: "any user at any time can add notes in. or multiable times."
+  // Notes sit OUTSIDE the completion lock on purpose - the thing you need to
+  // say about an apartment is often the thing you realise afterwards.
+  const canNote = !!user && user.status === 'active'
+
+  async function saveDest() {
+    if ((unit.destination || '') === dest.trim()) return
+    setSavingDest(true)
+    try { await setDestination(unit, dest, user) } catch (e) { toast(e.message) } finally { setSavingDest(false) }
+  }
+
+  return (
+    <div style={{ maxWidth: 620, margin: '0 auto' }}>
+      <button className="btn btn-sm" onClick={goBack} style={{ marginBottom: 14 }}>← All units</button>
+
+      <div className="row" style={{ alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
+        <h1 style={{ margin: 0 }}>Unit {unit.number}</h1>
+        {unit.done && <span className="badge" style={{ background: '#16a34a', color: '#fff' }}>✓ Complete</span>}
+        {unit.packers > 0 && (
+          <span className="chip" style={{ background: '#fef3c7', color: '#92400e', fontWeight: 650 }}>
+            {unit.packers} packer{unit.packers === 1 ? '' : 's'} needed
+          </span>
+        )}
+        {unit.service === 'gorilla' && <span className="chip">Gorilla packs</span>}
+      </div>
+      {unit.note && <div className="muted" style={{ marginTop: 2 }}>{unit.note}</div>}
+
+      {unit.done && !admin && (
+        <div className="card" style={{ padding: 12, marginTop: 12, background: '#f0fdf4', border: '1px solid #bbf7d0' }}>
+          Finished by {unit.doneByName || 'someone'}. Ask Casey if something needs changing.
+        </div>
+      )}
+
+      <div className="row" style={{ alignItems: 'center', margin: '18px 0 10px' }}>
+        <div className="section-title grow" style={{ margin: 0 }}>PHOTOS · {n} of {S15_STEPS.length}</div>
+      </div>
+
+      {/* The three at the old door, then where they are going, then the two
+          at the new one.
+
+          Casey, 2026-10-22: the destination belongs "more twards the bottom
+          after the starting unit is complated". It used to sit at the top,
+          which asked for a number nobody has yet - the crew find out which
+          apartment the tenant is going to somewhere between emptying the old
+          one and walking to the new one. So it sits exactly there, between
+          step 3 and step 4, and the next thing after typing it is
+          photographing that door. */}
+      {S15_STEPS.filter((s) => s.side === 'from').map((s, i) => (
+        <StepCard key={s.key} step={s} index={i} unit={unit} user={user} editable={editable} onToast={toast} />
+      ))}
+
+      <div
+        className="card"
+        style={{
+          padding: 16, marginBottom: 12,
+          borderLeft: `4px solid ${unit.destination ? '#16a34a' : '#d8dae2'}`,
+          background: fromDone && !unit.destination ? '#fffbeb' : undefined,
+        }}
+      >
+        <div style={{ fontWeight: 650, marginBottom: 2 }}>Moving to unit</div>
+        <div className="muted" style={{ fontSize: 12.5, marginBottom: 8 }}>
+          {fromDone
+            ? 'The old unit is empty. Which one are they going to?'
+            : 'Fill this in when you know it.'}
+        </div>
+        <div className="row" style={{ gap: 8 }}>
+          <input
+            className="input grow"
+            inputMode="numeric"
+            placeholder="New unit number"
+            value={dest}
+            disabled={!editable}
+            onChange={(e) => setDest(e.target.value)}
+            onBlur={saveDest}
+            style={{ fontSize: 17, minHeight: 46 }}
+          />
+          {editable && (
+            <button className="btn" onClick={saveDest} disabled={savingDest} style={{ minHeight: 46 }}>
+              {savingDest ? '…' : 'Save'}
+            </button>
+          )}
+        </div>
+        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+          Not required. The photo of the new door is the record either way.
+        </div>
+      </div>
+
+      {S15_STEPS.filter((s) => s.side === 'to').map((s, i) => (
+        <StepCard
+          key={s.key}
+          step={s}
+          index={S15_STEPS.filter((x) => x.side === 'from').length + i}
+          unit={unit} user={user} editable={editable} onToast={toast}
+        />
+      ))}
+
+      {/* Notes: time, date and user stamped, same as everything else. */}
+      <div className="card" style={{ padding: 16, marginTop: 6 }}>
+        <div style={{ fontWeight: 650, marginBottom: 8 }}>Notes</div>
+        {canNote && (
+          <div className="row" style={{ gap: 8, marginBottom: notes.length ? 12 : 0 }}>
+            <input
+              className="input grow"
+              placeholder="Anything the office should know"
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              style={{ minHeight: 44 }}
+            />
+            <button
+              className="btn"
+              disabled={!note.trim()}
+              onClick={async () => { try { await addNote(unit, note, user); setNote('') } catch (e) { toast(e.message) } }}
+              style={{ minHeight: 44 }}
+            >Add</button>
+          </div>
+        )}
+        {notes.map((nt, i) => (
+          <div key={`${nt.ts}-${i}`} className="row" style={{ alignItems: 'flex-start', gap: 8, padding: '8px 0', borderTop: i ? '1px solid var(--line, #eceef3)' : 'none' }}>
+            <div className="grow">
+              <div style={{ fontSize: 14 }}>{nt.text}</div>
+              <div className="muted" style={{ fontSize: 11.5, marginTop: 2 }}>{nt.name} · {stamp(nt.ts)}</div>
+            </div>
+            {admin && (
+              <button className="btn-sm" onClick={() => removeNote(unit, nt, user).catch((e) => toast(e.message))}>Remove</button>
+            )}
+          </div>
+        ))}
+        {!notes.length && !canNote && <div className="muted" style={{ fontSize: 13 }}>No notes.</div>}
+      </div>
+
+      {/* Finish. Only offered once all five are in, so the button cannot be
+          the thing that produces a half-recorded unit. */}
+      {!unit.done && editable && (
+        <button
+          className="btn btn-primary btn-lg"
+          disabled={!ready}
+          onClick={async () => { try { await finishUnit(unit, user); toast(`Unit ${unit.number} complete.`); goBack() } catch (e) { toast(e.message) } }}
+          style={{ width: '100%', minHeight: 56, fontSize: 17, marginTop: 16 }}
+        >
+          {ready ? '✓ Mark this unit complete' : `${S15_STEPS.length - n} photo${S15_STEPS.length - n === 1 ? '' : 's'} to go`}
+        </button>
+      )}
+
+      {unit.done && admin && (
+        <div className="row" style={{ gap: 8, marginTop: 16 }}>
+          <button className="btn" onClick={() => reopenUnit(unit, user).catch((e) => toast(e.message))}>Reopen this unit</button>
+        </div>
+      )}
+
+      {admin && (
+        <div className="card" style={{ padding: 14, marginTop: 16 }}>
+          <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>ADMIN</div>
+          <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn btn-sm" onClick={() => setService(unit, unit.service === 'gorilla' ? 'tenant' : 'gorilla', user).catch((e) => toast(e.message))}>
+              {unit.service === 'gorilla' ? 'Switch to tenant-packed' : 'Switch to Gorilla-packed'}
+            </button>
+            {confirmDelete ? (
+              <>
+                <button
+                  className="btn btn-sm btn-danger"
+                  onClick={async () => {
+                    try { await deleteUnit(unit, user); toast(`Unit ${unit.number} deleted.`); goBack() }
+                    catch (e) { toast(e.message) }
+                  }}
+                >Yes, delete unit {unit.number} and its photos</button>
+                <button className="btn btn-sm" onClick={() => setConfirmDelete(false)}>Cancel</button>
+              </>
+            ) : (
+              <button className="btn btn-sm" onClick={() => setConfirmDelete(true)}>Delete this unit</button>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div style={{ height: 40 }} />
+    </div>
+  )
+}

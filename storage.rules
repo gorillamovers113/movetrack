@@ -76,5 +76,12 @@ service firebase.storage {
     match /units/{allPaths=**} {
       allow write: if isSignedIn() && withinSizeAndType() && pathHasOwnUid();
     }
+    // Studio 15. Without this prefix every photo on that job is denied and
+    // captureMedia() falls back to embedding base64 on the Firestore doc,
+    // which caps out at 1 MiB - four photos on unit 906 reached 866 KB, and
+    // a Studio 15 unit takes at least five.
+    match /studio15/{allPaths=**} {
+      allow write: if isSignedIn() && withinSizeAndType() && pathHasOwnUid();
+    }
   }
 }
