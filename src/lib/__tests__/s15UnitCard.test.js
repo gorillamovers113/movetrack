@@ -1,0 +1,199 @@
+/* The card is the progress bar.
+ *
+ * Casey, 2026-10-22, looking at the building graphic: "one unit has started
+ * ... but i cant see what unit that is ... it should fill in the card as far
+ * as the crew is on that unit, ie, if the users started unit xxxx and only
+ * did step 1 the card should be a small persentage in green."
+ */
+import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { lastTouch } from '../../s15/S15UnitCard.jsx'
+import { doneCount, stepTotal, stepsFor, weArePacking, materialsAnswered, readyToFinish } from '../../s15/s15.js'
+
+const CARD = readFileSync('src/s15/S15UnitCard.jsx', 'utf8')
+const BUILDING = readFileSync('src/s15/S15Building.jsx', 'utf8')
+const BVIEW = readFileSync('src/s15/S15BuildingView.jsx', 'utf8')
+const BOARD = readFileSync('src/s15/Studio15.jsx', 'utf8')
+
+const shot = (ts, name) => ({ url: 'x', uid: 'u', name, ts })
+
+describe('how far along a unit is', () => {
+  it('one of five photos is one fifth, on a tenant-packed unit', () => {
+    const u = { service: 'tenant', shots: { door: [shot(1, 'a')] } }
+    expect(stepTotal(u)).toBe(5)
+    expect(doneCount(u)).toBe(1)
+    expect(Math.round((1 / stepTotal(u)) * 100)).toBe(20)
+  })
+
+  it('and one of six on a unit we packed, because it has an extra shot', () => {
+    /* The denominator has to be the unit's own, not a constant. A card that
+       divided by a fixed five would show a Gorilla-packed unit as 120% done. */
+    const u = { service: 'gorilla', shots: { door: [shot(1, 'a')] } }
+    expect(stepTotal(u)).toBe(6)
+    expect(Math.round((1 / stepTotal(u)) * 100)).toBe(17)
+  })
+
+  it('the fill is proportional, not a fixed bar', () => {
+    expect(CARD).toContain('width: `${pct}%`')
+    expect(CARD).toContain('const pct = Math.round((n / total) * 100)')
+  })
+
+  it('and it sits behind the text rather than over it', () => {
+    /* A card three fifths done still has to read as words. */
+    expect(CARD).toContain('opacity: 0.16')
+    expect(CARD).toContain('pointerEvents: \'none\'')
+  })
+
+  it('the exact count is printed too, because a bar alone is a guess', () => {
+    expect(CARD).toContain('${n} of ${total} photos')
+  })
+
+  it('an untouched unit gets no fill at all', () => {
+    expect(CARD).toContain('{!unit.done && n > 0 && (')
+  })
+})
+
+describe('who is on it', () => {
+  it('the most recent photo wins, whichever step it belongs to', () => {
+    const u = { shots: { door: [shot(100, 'Liv')], empty: [shot(900, 'Victoria')], before: [shot(500, 'Rogelio')] } }
+    expect(lastTouch(u).name).toBe('Victoria')
+  })
+
+  it('a unit nobody has touched has no last touch', () => {
+    expect(lastTouch({ shots: {} })).toBe(null)
+    expect(lastTouch({})).toBe(null)
+  })
+
+  it('and the card names them, which is the answer to "is anyone in there"', () => {
+    expect(CARD).toContain('{touch.name}')
+  })
+})
+
+describe('finding the unit Casey could see but not identify', () => {
+  it('a window on the drawing opens its own unit', () => {
+    expect(BUILDING).toContain('onOpenUnit(u.id)')
+  })
+
+  it('and stops the floor band stealing the tap', () => {
+    /* The band sits under every slot. Without this the only thing a tap did
+       was select the floor, which is what made the orange slot a riddle. */
+    const at = BUILDING.indexOf('onOpenUnit(u.id)')
+    expect(BUILDING.slice(at - 320, at)).toContain('e.stopPropagation()')
+  })
+
+  it('the building view hands the drawing that handler', () => {
+    expect(BVIEW).toContain('onOpenUnit={setOpenId}')
+  })
+
+  it('and lists what is being worked without anybody tapping a floor', () => {
+    for (const src of [BVIEW, BOARD]) {
+      expect(src).toContain('BEING WORKED NOW')
+      expect(src).toContain('.filter((u) => !u.done && doneCount(u) > 0)')
+    }
+  })
+
+  it('most recently touched first, so the live one is the first card', () => {
+    for (const src of [BVIEW, BOARD]) {
+      expect(src).toContain('(lastTouch(b)?.ts || 0) - (lastTouch(a)?.ts || 0)')
+    }
+  })
+})
+
+/* ── The extra steps when Gorilla does the packing ──────────────────
+ *
+ * Casey, 2026-10-22: "if gorilla is packing, make sure to add extra steps.
+ * matterical count, small, med, large, paper."
+ *
+ * Three of the sixteen are ours to pack - the disability units. The other
+ * thirteen must never see any of this: the crew's complaint about the last
+ * app was the number of boxes to fill in, and these are exactly that.
+ */
+describe('a unit Gorilla packs', () => {
+  const tenant = { service: 'tenant', shots: {} }
+  const ours = { service: 'gorilla', shots: {} }
+
+  it('gains a packed-and-ready photo', () => {
+    expect(stepsFor(ours).map((s) => s.key)).toContain('packed')
+    expect(stepsFor(tenant).map((s) => s.key)).not.toContain('packed')
+  })
+
+  it('placed between the untouched shot and the empty one', () => {
+    const keys = stepsFor(ours).map((s) => s.key)
+    expect(keys.indexOf('packed')).toBeGreaterThan(keys.indexOf('before'))
+    expect(keys.indexOf('packed')).toBeLessThan(keys.indexOf('empty'))
+  })
+
+  it('a tenant-packed unit keeps exactly the five', () => {
+    expect(stepsFor(tenant)).toHaveLength(5)
+  })
+
+  it('weArePacking reads the service field, nothing else', () => {
+    expect(weArePacking({ service: 'gorilla' })).toBe(true)
+    expect(weArePacking({ service: 'tenant' })).toBe(false)
+    expect(weArePacking({ packers: 3 })).toBe(false)
+    expect(weArePacking(null)).toBe(false)
+  })
+})
+
+describe('materials must be answered before a packed unit is finished', () => {
+  it('a tenant-packed unit is never asked', () => {
+    expect(materialsAnswered({ service: 'tenant' })).toBe(true)
+  })
+
+  it('one of ours with nothing recorded is not answered', () => {
+    expect(materialsAnswered({ service: 'gorilla' })).toBe(false)
+    expect(materialsAnswered({ service: 'gorilla', materials: {} })).toBe(false)
+  })
+
+  it('any real count answers it', () => {
+    expect(materialsAnswered({ service: 'gorilla', materials: { small: 4 } })).toBe(true)
+  })
+
+  it('and "we used none" is a real answer, not a missing one', () => {
+    /* Forcing a false number is worse than an honest zero. */
+    expect(materialsAnswered({ service: 'gorilla', materialsNone: true })).toBe(true)
+  })
+
+  it('but a zero typed into every box is not', () => {
+    expect(materialsAnswered({ service: 'gorilla', materials: { small: 0, large: 0 } })).toBe(false)
+  })
+
+  it('the vocabulary is the one Trinity already bills from', () => {
+    /* Not a second list that drifts. Casey asked for small, med, large and
+       paper; all four are in it, plus what the crew actually stock. */
+    const CARD2 = readFileSync('src/s15/s15.js', 'utf8')
+    expect(CARD2).toContain("import { CARTON_TYPES, SUPPLY_TYPES } from '../lib/mutations.js'")
+  })
+})
+
+describe('what it takes to finish a unit', () => {
+  const allShots = (keys) => Object.fromEntries(keys.map((k) => [k, [shot(1, 'a')]]))
+  const tenantKeys = ['door', 'before', 'empty', 'newDoor', 'newFull']
+  const ourKeys = ['door', 'before', 'packed', 'empty', 'newDoor', 'newFull']
+
+  it('a tenant-packed unit needs its five photos and nothing else', () => {
+    expect(readyToFinish({ service: 'tenant', shots: allShots(tenantKeys) })).toBe(true)
+  })
+
+  it('and is not ready one short', () => {
+    expect(readyToFinish({ service: 'tenant', shots: allShots(tenantKeys.slice(0, 4)) })).toBe(false)
+  })
+
+  /* The one the first four mutations missed: stripping materialsAnswered()
+     out of readyToFinish left every other test passing. */
+  it('a unit we packed is NOT ready on photos alone', () => {
+    expect(readyToFinish({ service: 'gorilla', shots: allShots(ourKeys) })).toBe(false)
+  })
+
+  it('it is ready once the materials are recorded', () => {
+    expect(readyToFinish({ service: 'gorilla', shots: allShots(ourKeys), materials: { small: 6, paper: 2 } })).toBe(true)
+  })
+
+  it('or once somebody says we used none', () => {
+    expect(readyToFinish({ service: 'gorilla', shots: allShots(ourKeys), materialsNone: true })).toBe(true)
+  })
+
+  it('but materials alone do not finish it either', () => {
+    expect(readyToFinish({ service: 'gorilla', shots: allShots(ourKeys.slice(0, 3)), materials: { small: 6 } })).toBe(false)
+  })
+})

@@ -32,6 +32,12 @@ import {
 } from 'firebase/firestore'
 import { db } from '../firebase.js'
 import { captureMedia } from '../lib/upload.js'
+/* The same carton and supply vocabulary Trinity Manor bills and restocks
+ * from. Reused rather than redefined: a second list would drift, and the
+ * separation it encodes matters - a roll of tape is not a carton and must
+ * never inflate the box count. */
+import { CARTON_TYPES, SUPPLY_TYPES } from '../lib/mutations.js'
+export { CARTON_TYPES, SUPPLY_TYPES }
 
 export const S15_UNITS = 's15Units'
 export const S15_EVENTS = 's15Events'
@@ -45,12 +51,33 @@ export const S15_EVENTS = 's15Events'
 export const S15_STEPS = [
   { key: 'door', label: 'Front door, unit number showing', hint: 'The door you are starting at.', multi: false, side: 'from' },
   { key: 'before', label: 'The unit before we touch anything', hint: 'A few. Every room you can see.', multi: true, side: 'from' },
+  /* Only when Gorilla did the packing. Casey, 2026-10-22: "if gorilla is
+     packing, make sure to add extra steps."
+
+     It sits between the untouched shot and the empty one because that is
+     when it exists: boxed, labelled, still in the apartment. It is the only
+     evidence of how the pack was done, and on a disability unit - which is
+     every unit we pack here - it is the shot that answers a complaint. */
+  { key: 'packed', label: 'Packed and ready, before it moves', hint: 'A few. Boxes stacked, labels showing.', multi: true, side: 'from', packingOnly: true },
   { key: 'empty', label: 'The unit once everything is out', hint: 'Proves nothing was left behind.', multi: false, side: 'from' },
   { key: 'newDoor', label: 'New front door, unit number showing', hint: 'The door you are moving them to.', multi: false, side: 'to' },
   { key: 'newFull', label: 'Everything in the new unit', hint: 'A few. Show where it all landed.', multi: true, side: 'to' },
 ]
 
 export const S15_STEP_KEYS = S15_STEPS.map((s) => s.key)
+
+/** Whether Gorilla is packing this unit rather than the tenant.
+ *  97% of Studio 15 tenants pack themselves; the exceptions are the
+ *  disability units, and they are the ones that need the extra record. */
+export function weArePacking(unit) {
+  return !!unit && unit.service === 'gorilla'
+}
+
+/** The steps THIS unit actually asks for. A tenant-packed unit keeps the
+ *  five photographs and nothing else; ours gains the packed shot. */
+export function stepsFor(unit) {
+  return weArePacking(unit) ? S15_STEPS : S15_STEPS.filter((s) => !s.packingOnly)
+}
 
 /** Shots taken for one step, oldest first. Tolerates a doc written before a
  *  step existed, which is what makes adding a sixth step later safe. */
@@ -68,14 +95,31 @@ export function stepDone(unit, key) {
 }
 
 export function doneCount(unit) {
-  return S15_STEP_KEYS.filter((k) => stepDone(unit, k)).length
+  return stepsFor(unit).filter((s) => stepDone(unit, s.key)).length
+}
+
+export function stepTotal(unit) {
+  return stepsFor(unit).length
+}
+
+/* MATERIALS HAVE TO BE ANSWERED, NOT REMEMBERED.
+ *
+ * They are what the pack is billed and restocked from, and the one thing
+ * nobody can reconstruct afterwards from photographs. So finishing a unit we
+ * packed asks for them - but "we used nothing" is a real answer and gets its
+ * own tick, because forcing a false number is worse than an honest zero. */
+export function materialsAnswered(unit) {
+  if (!weArePacking(unit)) return true
+  if (unit && unit.materialsNone === true) return true
+  const m = (unit && unit.materials) || {}
+  return Object.values(m).some((v) => Number(v) > 0)
 }
 
 /** Every step shot. The destination number is deliberately NOT required:
  *  step 4 is a photograph of that door with its number on it, so the record
  *  is complete without anybody typing. Typing it only makes it searchable. */
 export function readyToFinish(unit) {
-  return doneCount(unit) === S15_STEPS.length
+  return doneCount(unit) === stepTotal(unit) && materialsAnswered(unit)
 }
 
 /** Who may still change this unit.
@@ -219,6 +263,36 @@ export async function removeNote(unit, note, user) {
     updatedAt: serverTimestamp(),
   })
   await logEvent(user, unit, 'Removed a note')
+}
+
+export async function setMaterials(unit, counts, none, user) {
+  const clean = {}
+  for (const t of [...CARTON_TYPES, ...SUPPLY_TYPES]) {
+    const v = Math.max(0, Math.floor(Number(counts && counts[t.key]) || 0))
+    if (v > 0) clean[t.key] = v
+  }
+  await updateDoc(doc(db, S15_UNITS, unit.id), {
+    materials: clean,
+    materialsNone: !!none && Object.keys(clean).length === 0,
+    materialsBy: user.name || user.email || 'someone',
+    materialsAt: Date.now(),
+    updatedAt: serverTimestamp(),
+  })
+  const summary = Object.keys(clean).length
+    ? [...CARTON_TYPES, ...SUPPLY_TYPES].filter((t) => clean[t.key]).map((t) => `${clean[t.key]} ${t.label.toLowerCase()}`).join(', ')
+    : 'nothing'
+  await logEvent(user, unit, `Materials: ${summary}`)
+}
+
+export async function setPackMinutes(unit, minutes, user) {
+  const m = Math.max(0, Math.floor(Number(minutes) || 0))
+  await updateDoc(doc(db, S15_UNITS, unit.id), {
+    packMinutes: m,
+    packTimeBy: user.name || user.email || 'someone',
+    packTimeAt: Date.now(),
+    updatedAt: serverTimestamp(),
+  })
+  await logEvent(user, unit, `Packing time: ${m} min`)
 }
 
 export async function finishUnit(unit, user) {

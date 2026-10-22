@@ -16,6 +16,7 @@ import {
 } from './s15.js'
 import S15Unit from './S15Unit.jsx'
 import ClockCard from '../components/ClockCard.jsx'
+import { S15UnitGrid, lastTouch } from './S15UnitCard.jsx'
 
 export default function Studio15({ toast }) {
   const { currentUser } = useStore()
@@ -44,6 +45,12 @@ export default function Studio15({ toast }) {
   }, [units, q])
 
   const finished = units.filter((u) => u.done).length
+  const working = useMemo(
+    () => units
+      .filter((u) => !u.done && doneCount(u) > 0)
+      .sort((a, b) => (lastTouch(b)?.ts || 0) - (lastTouch(a)?.ts || 0)),
+    [units],
+  )
 
   if (open) {
     return (
@@ -119,36 +126,21 @@ export default function Studio15({ toast }) {
         </div>
       )}
 
-      <div className="unit-tiles" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10, marginTop: 16 }}>
-        {shown.map((u) => {
-          const n = doneCount(u)
-          return (
-            <button
-              key={u.id}
-              className="tile"
-              onClick={() => setOpenId(u.id)}
-              style={{
-                padding: 14, textAlign: 'left', minHeight: 96, borderRadius: 12, cursor: 'pointer',
-                border: '1px solid var(--line, #e4e7ee)',
-                background: u.done ? '#16a34a' : '#fff',
-                color: u.done ? '#fff' : 'inherit',
-              }}
-            >
-              <div style={{ fontSize: 21, fontWeight: 700, lineHeight: 1.1 }}>{u.number}</div>
-              <div style={{ fontSize: 12, opacity: u.done ? 0.9 : 0.6, marginTop: 2 }}>
-                {u.destination ? `→ ${u.destination}` : 'destination tbd'}
-              </div>
-              <div style={{ marginTop: 8, fontSize: 12, fontWeight: 650 }}>
-                {u.done ? '✓ Complete' : `${n} of ${S15_STEPS.length} photos`}
-              </div>
-              {u.packers > 0 && !u.done && (
-                <div style={{ marginTop: 6, fontSize: 11, fontWeight: 700, color: '#92400e', background: '#fef3c7', display: 'inline-block', padding: '2px 7px', borderRadius: 999 }}>
-                  {u.packers} packer{u.packers === 1 ? '' : 's'}
-                </div>
-              )}
-            </button>
-          )
-        })}
+      {/* Started but not finished, first and biggest: on a 16-unit board
+          the question is never "which units exist", it is "where is everyone
+          right now". Most recently touched first. */}
+      {working.length > 0 && (
+        <>
+          <div className="section-title" style={{ marginTop: 18, marginBottom: 10 }}>
+            BEING WORKED NOW · {working.length}
+          </div>
+          <S15UnitGrid units={working} onOpen={setOpenId} />
+          <div className="section-title" style={{ marginTop: 20, marginBottom: 10 }}>ALL UNITS</div>
+        </>
+      )}
+
+      <div style={{ marginTop: working.length ? 0 : 16 }}>
+        <S15UnitGrid units={shown} onOpen={setOpenId} />
       </div>
 
       {mayAdd && units.length > 0 && (

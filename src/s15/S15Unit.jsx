@@ -13,9 +13,11 @@
  */
 import React, { useRef, useState } from 'react'
 import {
-  S15_STEPS, shotsFor, stepDone, doneCount, readyToFinish, canEdit, isAdmin,
+  shotsFor, stepDone, doneCount, readyToFinish, canEdit, isAdmin,
   addShot, removeShot, setDestination, addNote, removeNote, finishUnit,
   reopenUnit, setService, deleteUnit,
+  stepsFor, stepTotal, weArePacking, materialsAnswered, setMaterials, setPackMinutes,
+  CARTON_TYPES, SUPPLY_TYPES,
 } from './s15.js'
 
 function stamp(ts) {
@@ -116,6 +118,110 @@ function StepCard({ step, index, unit, user, editable, onToast }) {
   )
 }
 
+/* What Gorilla used, and how long it took.
+ *
+ * Shown only on a unit we pack. Thirteen of Casey's sixteen are tenant-packed
+ * and must never see any of this: the crew's complaint about the last app was
+ * the number of boxes to fill in, and these are exactly that kind of box.
+ *
+ * Cartons and supplies are kept apart because MoveTrack already bills and
+ * restocks from that split, and a roll of tape must not land in the carton
+ * count. Saved on blur rather than behind a Save button, so a packer who
+ * closes the app mid-count has not lost it.
+ */
+function PackingExtras({ unit, user, editable, toast }) {
+  const [counts, setCounts] = useState(() => ({ ...(unit.materials || {}) }))
+  const [mins, setMins] = useState(() => (unit.packMinutes ? String(unit.packMinutes) : ''))
+  const [busy, setBusy] = useState(false)
+  const answered = materialsAnswered(unit)
+  const anyCount = Object.values(counts).some((v) => Number(v) > 0)
+
+  async function save(none = false) {
+    setBusy(true)
+    try { await setMaterials(unit, counts, none, user) } catch (e) { toast(e.message) } finally { setBusy(false) }
+  }
+
+  const Field = ({ t }) => (
+    <label style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+      <span className="grow" style={{ fontSize: 13, minWidth: 0 }}>
+        {t.label}
+        {t.hint && <span className="muted" style={{ fontSize: 11, display: 'block' }}>{t.hint}</span>}
+      </span>
+      <input
+        className="input"
+        type="number" min="0" inputMode="numeric"
+        value={counts[t.key] ?? ''}
+        disabled={!editable}
+        placeholder="0"
+        onChange={(e) => setCounts({ ...counts, [t.key]: e.target.value })}
+        onBlur={() => save(false)}
+        style={{ width: 72, minHeight: 44, textAlign: 'center', fontSize: 16 }}
+      />
+    </label>
+  )
+
+  return (
+    <div
+      className="card"
+      style={{
+        padding: 16, marginBottom: 12,
+        borderLeft: `4px solid ${answered ? '#16a34a' : '#efa91f'}`,
+        background: answered ? undefined : '#fffbeb',
+      }}
+    >
+      <div style={{ fontWeight: 650 }}>We packed this one</div>
+      <div className="muted" style={{ fontSize: 12.5, marginTop: 2, marginBottom: 12 }}>
+        {answered
+          ? 'Materials recorded. Change them any time before the unit is finished.'
+          : 'What did you use? This is what the pack gets billed and restocked from.'}
+      </div>
+
+      <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))' }}>
+        {CARTON_TYPES.map((t) => <Field key={t.key} t={t} />)}
+      </div>
+
+      <div className="muted" style={{ fontSize: 11, fontWeight: 700, letterSpacing: '.08em', margin: '14px 0 8px' }}>SUPPLIES</div>
+      <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))' }}>
+        {SUPPLY_TYPES.map((t) => <Field key={t.key} t={t} />)}
+      </div>
+
+      {editable && !anyCount && (
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 14, cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={!!unit.materialsNone}
+            disabled={busy}
+            onChange={(e) => save(e.target.checked)}
+            style={{ width: 18, height: 18 }}
+          />
+          <span style={{ fontSize: 13 }}>We used none of our own materials</span>
+        </label>
+      )}
+
+      <div className="row" style={{ gap: 8, alignItems: 'center', marginTop: 16, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13, fontWeight: 650 }}>Packing time</span>
+        <input
+          className="input"
+          type="number" min="0" inputMode="numeric"
+          value={mins}
+          disabled={!editable}
+          placeholder="minutes"
+          onChange={(e) => setMins(e.target.value)}
+          onBlur={() => setPackMinutes(unit, mins, user).catch((e) => toast(e.message))}
+          style={{ width: 110, minHeight: 44, fontSize: 16 }}
+        />
+        <span className="muted" style={{ fontSize: 12 }}>minutes, all packers together</span>
+      </div>
+
+      {unit.materialsBy && (
+        <div className="muted" style={{ fontSize: 11, marginTop: 10 }}>
+          Last set by {unit.materialsBy}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function S15Unit({ unit, goBack, toast }) {
   const user = unit && unit.__user
   const [dest, setDest] = useState(unit ? unit.destination || '' : '')
@@ -128,12 +234,15 @@ export default function S15Unit({ unit, goBack, toast }) {
   if (!unit) return null
   const editable = canEdit(unit, user)
   const admin = isAdmin(user)
+  const steps = stepsFor(unit)
+  const total = stepTotal(unit)
+  const packing = weArePacking(unit)
   const n = doneCount(unit)
   const ready = readyToFinish(unit)
   const notes = Array.isArray(unit.notes) ? [...unit.notes].sort((a, b) => b.ts - a.ts) : []
   // Every shot at the old door taken, which is the moment the destination
   // stops being a guess.
-  const fromDone = S15_STEPS.filter((s) => s.side === 'from').every((s) => stepDone(unit, s.key))
+  const fromDone = steps.filter((s) => s.side === 'from').every((s) => stepDone(unit, s.key))
   // Casey: "any user at any time can add notes in. or multiable times."
   // Notes sit OUTSIDE the completion lock on purpose - the thing you need to
   // say about an apartment is often the thing you realise afterwards.
@@ -168,7 +277,7 @@ export default function S15Unit({ unit, goBack, toast }) {
       )}
 
       <div className="row" style={{ alignItems: 'center', margin: '18px 0 10px' }}>
-        <div className="section-title grow" style={{ margin: 0 }}>PHOTOS · {n} of {S15_STEPS.length}</div>
+        <div className="section-title grow" style={{ margin: 0 }}>PHOTOS · {n} of {total}</div>
       </div>
 
       {/* The three at the old door, then where they are going, then the two
@@ -181,9 +290,13 @@ export default function S15Unit({ unit, goBack, toast }) {
           one and walking to the new one. So it sits exactly there, between
           step 3 and step 4, and the next thing after typing it is
           photographing that door. */}
-      {S15_STEPS.filter((s) => s.side === 'from').map((s, i) => (
+      {steps.filter((s) => s.side === 'from').map((s, i) => (
         <StepCard key={s.key} step={s} index={i} unit={unit} user={user} editable={editable} onToast={toast} />
       ))}
+
+      {packing && (
+        <PackingExtras unit={unit} user={user} editable={editable} toast={toast} />
+      )}
 
       <div
         className="card"
@@ -221,11 +334,11 @@ export default function S15Unit({ unit, goBack, toast }) {
         </div>
       </div>
 
-      {S15_STEPS.filter((s) => s.side === 'to').map((s, i) => (
+      {steps.filter((s) => s.side === 'to').map((s, i) => (
         <StepCard
           key={s.key}
           step={s}
-          index={S15_STEPS.filter((x) => x.side === 'from').length + i}
+          index={steps.filter((x) => x.side === 'from').length + i}
           unit={unit} user={user} editable={editable} onToast={toast}
         />
       ))}
@@ -273,7 +386,11 @@ export default function S15Unit({ unit, goBack, toast }) {
           onClick={async () => { try { await finishUnit(unit, user); toast(`Unit ${unit.number} complete.`); goBack() } catch (e) { toast(e.message) } }}
           style={{ width: '100%', minHeight: 56, fontSize: 17, marginTop: 16 }}
         >
-          {ready ? '✓ Mark this unit complete' : `${S15_STEPS.length - n} photo${S15_STEPS.length - n === 1 ? '' : 's'} to go`}
+          {ready
+            ? '✓ Mark this unit complete'
+            : n < total
+              ? `${total - n} photo${total - n === 1 ? '' : 's'} to go`
+              : 'Add the materials you used first'}
         </button>
       )}
 

@@ -5,9 +5,10 @@
  */
 import React, { useEffect, useMemo, useState } from 'react'
 import { useStore } from '../store.jsx'
-import { subscribeUnits, doneCount, S15_STEPS } from './s15.js'
+import { subscribeUnits, doneCount } from './s15.js'
 import S15Building, { floorOf, UNITS_PER_FLOOR } from './S15Building.jsx'
 import S15Unit from './S15Unit.jsx'
+import { S15UnitGrid, lastTouch } from './S15UnitCard.jsx'
 
 export default function S15BuildingView({ toast }) {
   const { currentUser } = useStore()
@@ -26,6 +27,14 @@ export default function S15BuildingView({ toast }) {
     () => (floor ? units.filter((u) => floorOf(u.number) === floor) : []),
     [units, floor],
   )
+  /* Started but not finished: the ones somebody is standing in. Most recently
+     touched first, so the live one is the first card. */
+  const working = useMemo(
+    () => units
+      .filter((u) => !u.done && doneCount(u) > 0)
+      .sort((a, b) => (lastTouch(b)?.ts || 0) - (lastTouch(a)?.ts || 0)),
+    [units],
+  )
 
   if (open) {
     return <S15Unit unit={{ ...open, __user: currentUser }} goBack={() => setOpenId(null)} toast={toast} />
@@ -39,7 +48,7 @@ export default function S15BuildingView({ toast }) {
       {err && <div className="card" style={{ padding: 12, marginBottom: 12, background: '#fef2f2', border: '1px solid #fecaca' }}>{err}</div>}
 
       <div className="card" style={{ padding: 16 }}>
-        <S15Building units={units} selected={floor} onSelect={setFloor} />
+        <S15Building units={units} selected={floor} onSelect={setFloor} onOpenUnit={setOpenId} />
         <div className="legend row" style={{ gap: 14, justifyContent: 'center', marginTop: 10, flexWrap: 'wrap', fontSize: 12 }}>
           <span><i style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: '#1d2733', opacity: 0.42, marginRight: 5 }} />Not on the list</span>
           <span><i style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: '#fff', border: '1px solid #bbb', marginRight: 5 }} />Not started</span>
@@ -47,6 +56,17 @@ export default function S15BuildingView({ toast }) {
           <span><i style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 2, background: '#16a34a', marginRight: 5 }} />Complete</span>
         </div>
       </div>
+
+      {/* Casey, 2026-10-22: one slot was orange and there was no way to tell
+          which unit it was. This answers it before he taps anything. */}
+      {working.length > 0 && (
+        <>
+          <div className="section-title" style={{ marginTop: 18, marginBottom: 10 }}>
+            BEING WORKED NOW · {working.length}
+          </div>
+          <S15UnitGrid units={working} onOpen={setOpenId} />
+        </>
+      )}
 
       {floor && (
         <>
@@ -57,27 +77,8 @@ export default function S15BuildingView({ toast }) {
             <button className="btn btn-sm" onClick={() => setFloor(null)}>Clear</button>
           </div>
           {!onFloor.length && <div className="muted" style={{ marginTop: 10 }}>No units from this floor are on the board yet.</div>}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10, marginTop: 12 }}>
-            {onFloor.map((u) => (
-              <button
-                key={u.id}
-                className="tile"
-                onClick={() => setOpenId(u.id)}
-                style={{
-                  padding: 14, textAlign: 'left', minHeight: 86, borderRadius: 12, cursor: 'pointer',
-                  border: '1px solid var(--line, #e4e7ee)',
-                  background: u.done ? '#16a34a' : '#fff', color: u.done ? '#fff' : 'inherit',
-                }}
-              >
-                <div style={{ fontSize: 20, fontWeight: 700 }}>{u.number}</div>
-                <div style={{ fontSize: 12, opacity: u.done ? 0.9 : 0.6, marginTop: 2 }}>
-                  {u.destination ? `→ ${u.destination}` : 'destination tbd'}
-                </div>
-                <div style={{ marginTop: 6, fontSize: 12, fontWeight: 650 }}>
-                  {u.done ? '✓ Complete' : `${doneCount(u)} of ${S15_STEPS.length} photos`}
-                </div>
-              </button>
-            ))}
+          <div style={{ marginTop: 12 }}>
+            <S15UnitGrid units={onFloor} onOpen={setOpenId} />
           </div>
         </>
       )}

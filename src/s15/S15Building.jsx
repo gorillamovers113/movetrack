@@ -25,7 +25,7 @@
  * and the street level is glazed.
  */
 import React from 'react'
-import { doneCount, S15_STEPS } from './s15.js'
+import { doneCount, stepTotal } from './s15.js'
 
 export const UNITS_PER_FLOOR = 50
 export const FLOORS = [5, 4, 3, 2, 1]
@@ -62,7 +62,7 @@ function Slats({ x, y, w, h, step = 5, opacity = 0.16 }) {
   return <g>{rows}</g>
 }
 
-export default function S15Building({ units, selected, onSelect }) {
+export default function S15Building({ units, selected, onSelect, onOpenUnit }) {
   const bottom = TOP + FLOORS.length * FLOOR_H
 
   // Units on the board, per floor, in number order.
@@ -140,8 +140,16 @@ export default function S15Building({ units, selected, onSelect }) {
                   fill={fill || '#1d2733'}
                   opacity={fill ? 1 : 0.42}
                   stroke={u ? 'rgba(0,0,0,0.45)' : 'none'} strokeWidth={u ? 0.6 : 0}
+                  style={{ cursor: u && onOpenUnit ? 'pointer' : 'inherit' }}
+                  onClick={(e) => {
+                    if (!u || !onOpenUnit) return
+                    // Or the floor band underneath takes it and just selects
+                    // the floor, which is what made the orange slot a riddle.
+                    e.stopPropagation()
+                    onOpenUnit(u.id)
+                  }}
                 >
-                  {u && <title>{`Unit ${u.number} — ${u.done ? 'complete' : `${doneCount(u)} of ${S15_STEPS.length} photos`}`}</title>}
+                  {u && <title>{`Unit ${u.number} — ${u.done ? 'complete' : `${doneCount(u)} of ${stepTotal(u)} photos`}`}</title>}
                 </rect>
               )
             })}
